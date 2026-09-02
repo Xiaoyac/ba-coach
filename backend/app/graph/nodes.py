@@ -1,0 +1,1511 @@
+"""Graph nodes.
+
+Shape of the DAG:
+
+    START
+      -> extract_memory_node          (linear pre-processing)
+      -> analyze_intent_node          (reads back this turn's module)
+      -> recall_memory_node           (long-term + clinical context)
+      -> risk_gate_node               (screens *before* answering)
+      -> crisis_node | module_1..4    (conditional branch)
+      -> route_next_module_node       (post-hoc: decides the *next* module)
+      -> summarizer_node              (dispatches all after-the-turn work)
+      -> update_memory_and_format_node               (convergence)
+      -> END
+
+Every node returns a *partial* state update, which LangGraph merges into
+`AgentState`. Nodes emit progress through LangGraph's custom stream
+(`get_stream_writer`); the HTTP layer turns those events into SSE frames.
+Nodes never write SSE themselves — that keeps the graph transport-agnostic
+and directly unit-testable.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import logging
+import re
+from dataclasses import dataclass
+from time import perf_counter
+
+from langgraph.config import get_stream_writer
+from langgraph.runtime import Runtime
+
+from ..ai_telemetry import save_ai_event
+from ..clinical_extraction import assess_risk_detailed, extract_module_record_detailed
+from ..clinical_store import (
+    coerce,
+    load_clinical_context,
+    load_profile_context,
+    persist_module_record,
+    persist_risk,
+)
+from ..clinical_fields import MODULE_SPECS, RISK_SPECS
+from ..conversation_store import complete_background_routing
+from ..memos_integration import MemosIntegrationManager
+from ..prompt_store import effective_prompt_pair
+from ..prompts import (
+    CRISIS_PROMPT,
+    CRISIS_RESOURCES,
+    DEFAULT_MODULE,
+    MODULE_PROMPTS,
+    SystemPromptSegment,
+    build_system_segments,
+)
+from ..providers.base import LLMProvider, ProviderError, as_text
+from ..reasoning import ThinkingTagStreamGuard, normalize_reasoning_channels
+from ..router_agent import decide_target_module_with_reasoning, extract_pa_card
+from ..schemas import Message
+from ..workflow_state import (
+    apply_router_decision,
+    load_conversation_workflow,
+    record_interaction_transition,
+)
+from .state import AgentState, GraphContext
+
+logger = logging.getLogger(__name__)
+
+MEMORY_EXCERPT_CHARS = 200
+ROUTER_TRANSCRIPT_CHARS = 16_000
+
+_MODULE_NUMBER = {
+    "module_1": "一",
+    "module_2": "二",
+    "module_3": "三",
+    "module_4": "四",
+}
+_MODULE_STATUS_QUESTION = re.compile(
+    r"(?:现在|当前|目前)?(?:是|在|处于|进行到)?(?:第)?(?:几|哪个|什么)(?:个)?模块"
+    r"|(?:现在|当前|目前)?(?:是|在|处于|进行到)?模块(?:是)?(?:几|哪个|什么)"
+    r"|(?:现在|当前|目前)(?:进行到|处于|在)(?:第)?(?:几|哪个|什么)(?:个)?(?:模块|阶段)"
+    r"|(?:现在|当前|目前)(?:是|在|处于)(?:第)?(?:几|哪个|什么)(?:个)?阶段",
+    re.IGNORECASE,
+)
+
+
+def authoritative_module_status_reply(user_input: str, module: str) -> str | None:
+    """Answer direct workflow-state questions without asking an LLM to guess."""
+    compact = re.sub(r"\s+", "", user_input)
+    if len(compact) > 80 or not _MODULE_STATUS_QUESTION.search(compact):
+        return None
+    number = _MODULE_NUMBER.get(module)
+    if number is None:
+        return None
+    return (
+        f"当前是模块{number}（{module}），本条回复也由模块{number}处理。"
+        "本轮结束后是否进入下一模块，会由路由 Agent 根据完整对话另行判断。"
+    )
+
+
+def unwrap_chat_reply(text: str) -> str:
+    """Hide an internal ``{"chat_reply": ...}`` envelope from end users.
+
+    Some administrator-authored prompts ask the model for structured JSON.
+    That structure is useful internally, but the conversation transcript is a
+    text surface. Accept a complete JSON object and also recover the string
+    from a truncated object after an upstream streaming failure; never expose
+    the field name itself.
+    """
+
+    stripped = text.strip()
+    candidate = stripped
+    if candidate.startswith("```json") and candidate.endswith("```"):
+        candidate = candidate[7:-3].strip()
+    try:
+        parsed = json.loads(candidate)
+    except (json.JSONDecodeError, TypeError):
+        parsed = None
+    if isinstance(parsed, dict) and isinstance(parsed.get("chat_reply"), str):
+        return parsed["chat_reply"].strip()
+
+    partial = re.match(
+        r'^\s*(?:```json\s*)?\{\s*"chat_reply"\s*:\s*"(.*)',
+        stripped,
+        flags=re.DOTALL,
+    )
+    if partial:
+        value = partial.group(1)
+        value = re.sub(r'"\s*\}\s*(?:```)?\s*$', "", value)
+        try:
+            return json.loads(f'"{value}"').strip()
+        except (json.JSONDecodeError, TypeError):
+            return value.replace(r"\n", "\n").replace(r'\"', '"').strip()
+    return text
+
+
+@dataclass
+class VisibleReplyBuffer:
+    """Delay only possible JSON envelopes; ordinary prose still streams."""
+
+    raw_parts: list[str]
+    buffered_parts: list[str]
+    mode: str = "deciding"  # deciding | holding | passthrough
+
+    @classmethod
+    def create(cls) -> "VisibleReplyBuffer":
+        return cls(raw_parts=[], buffered_parts=[])
+
+    def push(self, delta: str) -> list[str]:
+        self.raw_parts.append(delta)
+        if self.mode == "passthrough":
+            return [delta]
+        self.buffered_parts.append(delta)
+        preview = "".join(self.buffered_parts).lstrip().lower()
+        if not preview:
+            return []
+        structured_prefixes = ("{", "```json")
+        if any(prefix.startswith(preview) for prefix in structured_prefixes):
+            return []
+        if preview.startswith(structured_prefixes):
+            self.mode = "holding"
+            return []
+        self.mode = "passthrough"
+        visible = "".join(self.buffered_parts)
+        self.buffered_parts.clear()
+        return [visible]
+
+    def finish(self) -> tuple[str, list[str]]:
+        raw = "".join(self.raw_parts)
+        visible = unwrap_chat_reply(raw)
+        if self.mode != "passthrough":
+            return visible, [visible] if visible else []
+        return visible, []
+
+
+def _finish_stream_channels(
+    content_guard: ThinkingTagStreamGuard,
+    reply_buffer: VisibleReplyBuffer,
+    reasoning_parts: list[str],
+) -> tuple[str, str, list[str]]:
+    """Finalize streamed provider channels without exposing protocol tags."""
+
+    blocked = content_guard.mode == "blocked"
+    pending_deltas: list[str] = []
+    for safe_delta in content_guard.finish_passthrough():
+        pending_deltas.extend(reply_buffer.push(safe_delta))
+    blocked = blocked or content_guard.mode == "blocked"
+
+    buffered_reply, final_deltas = reply_buffer.finish()
+    normalized = normalize_reasoning_channels(
+        content_guard.raw if blocked else buffered_reply,
+        "".join(reasoning_parts),
+    )
+    if blocked:
+        # A truncated tag that cannot be repaired is safer as an empty reply
+        # than as a leaked scratchpad.
+        safe_reply = normalized.reply if normalized.repaired else ""
+        return safe_reply, normalized.reasoning, [safe_reply] if safe_reply else []
+
+    # pending_deltas only occurs when a tiny ordinary prefix remained buffered
+    # until EOF.  JSON envelope deltas come from VisibleReplyBuffer.finish().
+    return normalized.reply, normalized.reasoning, pending_deltas + final_deltas
+
+
+def _emit(event: dict) -> None:
+    """Publish an event on the graph's custom stream.
+
+    A no-op when nothing is consuming the stream (e.g. `ainvoke`), so nodes
+    can emit unconditionally.
+    """
+    try:
+        get_stream_writer()(event)
+    except Exception:  # noqa: BLE001 — telemetry must never break a turn
+        logger.debug("stream writer unavailable", exc_info=True)
+
+
+# ---------------------------------------------------------------------------
+# Step 2 — pre-processing
+# ---------------------------------------------------------------------------
+
+
+async def extract_memory_node(
+    state: AgentState, runtime: Runtime[GraphContext]
+) -> dict:
+    """Load prior context for this session: chat history + durable memory.
+
+    Reads through the session store, so swapping the store for Redis gives the
+    graph cross-process memory with no change here.
+    """
+    context = runtime.context
+    session = await context.store.get_or_create(state.get("session_id"))
+
+    _emit(
+        {
+            "type": "trace",
+            "node": "extract_memory",
+            "detail": {
+                "session_id": session.session_id,
+                "history_messages": len(session.messages),
+                "memory_keys": sorted(session.memory),
+            },
+        }
+    )
+
+    module_steps: dict[str, list[str]] = {}
+    active_cycle_id: str | None = None
+    if context.sessionmaker is not None:
+        try:
+            module_steps, active_cycle_id = await load_conversation_workflow(
+                context.sessionmaker, session_id=session.session_id
+            )
+        except Exception:  # noqa: BLE001 — enrichment must not break chat
+            logger.exception("loading workflow progress failed for %s", session.session_id)
+
+    return {
+        "session_id": session.session_id,
+        "chat_history": list(session.messages),
+        "memory": dict(session.memory),
+        # Session metadata accumulates across turns; the request's own metadata
+        # was merged into it by the route before the graph ran.
+        "metadata": dict(session.metadata),
+        # What route_next_module_node decided at the end of the last turn —
+        # None for a session that has never completed a turn yet.
+        "current_module": session.module,
+        "module_steps": module_steps,
+        "active_cycle_id": active_cycle_id,
+    }
+
+
+async def analyze_intent_node(
+    state: AgentState, runtime: Runtime[GraphContext]
+) -> dict:
+    """Decide which module handles this turn.
+
+    Precedence: explicit pin > the module route_next_module_node decided at
+    the end of the *previous* turn (see router_agent.py) > default.
+
+    This is deliberately not a per-message guess any more — no keyword
+    heuristic, no generic "which module fits this text" classifier. The
+    program's actual state machine (BA education must finish before goal
+    setting, a PA card is required before modules 3/4, module 1 is never
+    re-entered, …) is enforced once, post-hoc, by the router agent; a
+    pre-turn classifier with no knowledge of those rules could — and
+    reliably would, on the right keywords — route somewhere the rules
+    forbid. Reading the persisted decision back is what keeps this node and
+    that one from disagreeing with each other.
+    """
+
+    def decided(module: str, routed_by: str) -> dict:
+        _emit(
+            {
+                "type": "meta",
+                "node": "analyze_intent",
+                "reply_module": module,
+                "routed_by": routed_by,
+            }
+        )
+        return {"extracted_intent": module, "routed_by": routed_by}
+
+    forced = state.get("forced_module")
+    if forced:
+        # Validated at the API boundary; assert here so a bad programmatic
+        # caller fails loudly instead of silently routing somewhere else.
+        if forced not in MODULE_PROMPTS:
+            raise ValueError(f"Unknown module {forced!r}")
+        return decided(forced, "explicit")
+
+    current = state.get("current_module")
+    if current in MODULE_PROMPTS:
+        return decided(current, "sticky")
+    return decided(DEFAULT_MODULE, "default")
+
+
+def route_after_intent(state: AgentState) -> str:
+    """Conditional edge: map the routing decision onto a module node."""
+    module = state.get("extracted_intent") or DEFAULT_MODULE
+    return module if module in MODULE_PROMPTS else DEFAULT_MODULE
+
+
+async def recall_memory_node(
+    state: AgentState, runtime: Runtime[GraphContext]
+) -> dict:
+    """Pull recent Memos entries into this turn's prompt — but not every turn.
+
+    Long-term memory only earns its place on two turns: the session's first
+    (nothing in `chat_history` yet, so there is no in-session context to lean
+    on) and the turn that first lands in module 4 (a fresh ABC review that
+    needs the module 2 goal card's context, not just this session's own
+    history). Every other turn already has what it needs in `chat_history` /
+    `memory`, and re-fetching Memos there would just add latency and stale
+    the currently-relevant module content with older material.
+
+    "First turn in module 4" is read off `memory["last_module"]`
+    (`_derive_memory` writes it every turn) rather than off `current_module`:
+    by the time this node runs, `current_module`/`extracted_intent` has
+    already been stickily set to module_4 for this turn, so it can't tell
+    "just arrived" from "already here". `last_module` still holds the module
+    from the turn *before* this one, which can.
+    """
+    subject_id = state.get("subject_id")
+    memos = runtime.context.memos
+    sessionmaker = runtime.context.sessionmaker
+    empty: dict = {"long_term_memory": [], "clinical_context": [], "profile_context": []}
+
+    if not subject_id:
+        return empty
+
+    # The registration profile is loaded on EVERY turn, ahead of the gate
+    # below. It is not "context" that earns its cost on some turns: a physical
+    # limitation bounds every activity the coach may propose, so a coach that
+    # honours it only on turn one is worse than one that never knew. One
+    # indexed lookup by uuid.
+    profile: list[str] = []
+    if sessionmaker is not None:
+        try:
+            profile = await load_profile_context(sessionmaker, user_id=subject_id)
+        except Exception:  # noqa: BLE001 — never fail a turn over context loading
+            logger.exception("loading profile failed for %s", subject_id[:8])
+
+    # A server-owned opening is now the first assistant message, so "first
+    # turn" means no prior *user* message rather than an empty transcript.
+    # Otherwise creating the opening would accidentally disable the very
+    # first long-term-memory/profile recall.
+    is_first_turn = not any(
+        message.role == "user" for message in (state.get("chat_history") or [])
+    )
+    entering_module_4 = state.get("extracted_intent") == "module_4" and (
+        state.get("memory") or {}
+    ).get("last_module") != "module_4"
+
+    if not (is_first_turn or entering_module_4):
+        return {**empty, "profile_context": profile}
+
+    memories = (
+        await memos.retrieve_recent_memos(
+            subject_id,
+            query=state.get("user_input", ""),
+        )
+        if memos
+        else []
+    )
+
+    # Clinical context is fetched on the same two turns as long-term memory,
+    # for the same reason — and it is what makes module 4 able to review a
+    # goal card module 2 created rather than asking for it again. Unlike the
+    # Memos call this reads the business tables directly, so a failure here is
+    # a database problem worth logging rather than a missing integration.
+    clinical: list[str] = []
+    if sessionmaker is not None:
+        try:
+            clinical = await load_clinical_context(
+                sessionmaker,
+                user_id=subject_id,
+                session_id=state.get("session_id"),
+            )
+        except Exception:  # noqa: BLE001 — never fail a turn over context loading
+            logger.exception("loading clinical context failed for %s", subject_id[:8])
+
+    _emit(
+        {
+            "type": "trace",
+            "node": "recall_memory",
+            "detail": {
+                "reason": "first_turn" if is_first_turn else "entering_module_4",
+                "count": len(memories),
+                "clinical": len(clinical),
+                "profile": len(profile),
+            },
+        }
+    )
+    return {
+        "long_term_memory": memories,
+        "clinical_context": clinical,
+        "profile_context": profile,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Step 3 — the four module branches
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ModuleConfig:
+    """Per-module knobs. Give each branch its own retrieval budget."""
+
+    top_k: int = 3
+    retrieve: bool = True
+
+
+MODULE_CONFIGS: dict[str, ModuleConfig] = {
+    "module_1": ModuleConfig(top_k=2),
+    # BA + PA + MI can all be relevant while selecting a goal. Four slots
+    # leave room for both a PA evidence chunk and a concrete Compendium row.
+    "module_2": ModuleConfig(top_k=4),
+    # BA + BCT/barrier knowledge + MI can all be relevant while preparing
+    # execution and responding to resistance around the recording contract.
+    "module_3": ModuleConfig(top_k=4),
+    "module_4": ModuleConfig(top_k=2),
+}
+
+
+def _knowledge_query(state: AgentState) -> str:
+    """Build retrieval context without sending the whole transcript to search."""
+    pieces = [state["user_input"]]
+    for message in reversed(state.get("chat_history") or []):
+        if message.role != "user" or message.content in pieces:
+            continue
+        pieces.append(message.content)
+        if len(pieces) == 3:
+            break
+    pa_card = (state.get("memory") or {}).get("pa_card")
+    if pa_card:
+        pieces.append(pa_card)
+    return "\n".join(pieces)[:6000]
+
+
+def make_module_node(module_name: str, config: ModuleConfig):
+    """Build one module node: retrieve knowledge, then run the module prompt.
+
+    The four branches share this sub-chain shape (retrieve -> compile prompt ->
+    call the model), so they are generated rather than copy-pasted. Each is
+    registered under its own node name and gets its own `ModuleConfig`. When a
+    branch outgrows the shared shape, write a bespoke async function and
+    register that instead — the graph wiring in builder.py does not care.
+    """
+
+    async def module_node(state: AgentState, runtime: Runtime[GraphContext]) -> dict:
+        context = runtime.context
+        user_input = state["user_input"]
+
+        # Module identity is server-owned state, not a coaching judgement.
+        # Answering this through a probabilistic model is exactly how the UI
+        # badge and the prose reply can disagree even when the graph is right.
+        status_reply = authoritative_module_status_reply(user_input, module_name)
+        if status_reply is not None:
+            if context.stream:
+                _emit({"type": "delta", "text": status_reply})
+            return {
+                "retrieved_knowledge": [],
+                "provider": "workflow_state",
+                "model": "BA Coach 状态机",
+                "final_response": status_reply,
+                "reasoning_content": "",
+                "usage": {},
+                "telemetry": {"main_generation_duration_ms": 0},
+                "error": None,
+            }
+
+        knowledge = []
+        if config.retrieve:
+            retrieval_started = perf_counter()
+            knowledge = await context.knowledge_base.search(
+                module=module_name,
+                query=_knowledge_query(state),
+                top_k=config.top_k,
+            )
+            _emit(
+                {
+                    "type": "trace",
+                    "node": module_name,
+                    "detail": {
+                        "retrieved": [chunk.id for chunk in knowledge],
+                        "top_score": knowledge[0].score if knowledge else 0.0,
+                        "duration_ms": round(
+                            (perf_counter() - retrieval_started) * 1000
+                        ),
+                    },
+                }
+            )
+
+        global_prompt = None
+        module_prompt = None
+        if context.sessionmaker is not None:
+            try:
+                async with context.sessionmaker() as prompt_db:
+                    global_prompt, module_prompt = await effective_prompt_pair(
+                        prompt_db, module_name
+                    )
+            except Exception:  # noqa: BLE001
+                # Prompt administration is an operational convenience, not a
+                # reason to make coaching unavailable. A database/table issue
+                # falls back to the source-controlled defaults and is logged.
+                logger.exception("failed to load prompt overrides for %s", module_name)
+
+        system = build_system_segments(
+            module_name,
+            metadata=state.get("metadata"),
+            knowledge=knowledge,
+            memory=state.get("memory"),
+            long_term_memory=state.get("long_term_memory"),
+            clinical_context=state.get("clinical_context"),
+            profile_context=state.get("profile_context"),
+            module_steps=state.get("module_steps"),
+            global_prompt=global_prompt,
+            module_prompt=module_prompt,
+        )
+        telemetry = dict(state.get("telemetry") or {})
+        telemetry["prompt_version"] = hashlib.sha256(
+            as_text(system).encode("utf-8")
+        ).hexdigest()[:16]
+        messages = [*(state.get("chat_history") or []), Message(role="user", content=user_input)]
+
+        update: dict = {
+            "retrieved_knowledge": knowledge,
+            "provider": context.provider.name,
+            "model": context.provider.model,
+            "error": None,
+        }
+
+        # Declared outside the try so a mid-stream failure can still recover
+        # whatever was already produced.
+        reply_buffer = VisibleReplyBuffer.create()
+        content_guard = ThinkingTagStreamGuard.create()
+        reasoning_parts: list[str] = []
+        generation_started = perf_counter()
+        first_reasoning_seen = False
+        first_content_seen = False
+        try:
+            if context.stream:
+                async for delta in context.provider.stream(
+                    system=system, messages=messages
+                ):
+                    elapsed_ms = int((perf_counter() - generation_started) * 1000)
+                    if delta.kind == "usage":
+                        if delta.usage:
+                            update["usage"] = delta.usage
+                            telemetry["usage"] = delta.usage
+                        if delta.finish_reason:
+                            telemetry["finish_reason"] = delta.finish_reason
+                        if delta.request_id:
+                            telemetry["provider_request_id"] = delta.request_id
+                        continue
+                    if delta.kind == "reasoning":
+                        if not first_reasoning_seen:
+                            telemetry["time_to_first_reasoning_token_ms"] = elapsed_ms
+                            first_reasoning_seen = True
+                        reasoning_parts.append(delta.text)
+                        # Hold provider thinking until both channels are
+                        # complete. Compatible endpoints sometimes place a
+                        # second response in reasoning_content; streaming it
+                        # immediately would mislabel that text in the UI.
+                        continue
+                    if not first_content_seen:
+                        telemetry["time_to_first_content_token_ms"] = elapsed_ms
+                        first_content_seen = True
+                    for guarded_delta in content_guard.push(delta.text):
+                        for visible_delta in reply_buffer.push(guarded_delta):
+                            _emit({"type": "delta", "text": visible_delta})
+                visible, disclosed_reasoning, final_deltas = _finish_stream_channels(
+                    content_guard, reply_buffer, reasoning_parts
+                )
+                for visible_delta in final_deltas:
+                    _emit({"type": "delta", "text": visible_delta})
+                if disclosed_reasoning:
+                    _emit({"type": "reasoning_delta", "text": disclosed_reasoning})
+                update["final_response"] = visible
+                update["reasoning_content"] = disclosed_reasoning
+                update.setdefault("usage", {})
+            else:
+                completion = await context.provider.complete(
+                    system=system, messages=messages
+                )
+                normalized = normalize_reasoning_channels(
+                    unwrap_chat_reply(completion.text), completion.reasoning_content
+                )
+                update["final_response"] = normalized.reply
+                update["reasoning_content"] = normalized.reasoning
+                update["model"] = completion.model
+                update["usage"] = completion.usage
+                telemetry["usage"] = completion.usage
+                telemetry["time_to_first_content_token_ms"] = int(
+                    (perf_counter() - generation_started) * 1000
+                )
+                if completion.reasoning_content:
+                    telemetry["time_to_first_reasoning_token_ms"] = telemetry[
+                        "time_to_first_content_token_ms"
+                    ]
+                if completion.finish_reason:
+                    telemetry["finish_reason"] = completion.finish_reason
+                if completion.request_id:
+                    telemetry["provider_request_id"] = completion.request_id
+        except ProviderError as exc:
+            # Do not re-raise: converge on the post-processing node so any
+            # partial answer is still persisted and the caller gets a
+            # structured error instead of a severed stream.
+            logger.warning(
+                "%s failed for session %s: %s",
+                module_name,
+                state.get("session_id"),
+                exc,
+            )
+            visible, disclosed_reasoning, final_deltas = _finish_stream_channels(
+                content_guard, reply_buffer, reasoning_parts
+            )
+            for visible_delta in final_deltas:
+                _emit({"type": "delta", "text": visible_delta})
+            if disclosed_reasoning:
+                _emit({"type": "reasoning_delta", "text": disclosed_reasoning})
+            update["final_response"] = visible
+            update["reasoning_content"] = disclosed_reasoning
+            update["error"] = str(exc)
+            update["usage"] = {}
+            telemetry["error_code"] = "provider_error"
+
+        telemetry["main_generation_duration_ms"] = int(
+            (perf_counter() - generation_started) * 1000
+        )
+        update["telemetry"] = telemetry
+
+        return update
+
+    module_node.__name__ = f"{module_name}_node"
+    module_node.__qualname__ = module_node.__name__
+    return module_node
+
+
+MODULE_NODES = {
+    name: make_module_node(name, MODULE_CONFIGS.get(name, ModuleConfig()))
+    for name in MODULE_PROMPTS
+}
+
+
+# ---------------------------------------------------------------------------
+# Step 3a — the risk gate, and the branch it opens
+# ---------------------------------------------------------------------------
+
+
+async def risk_gate_node(state: AgentState, runtime: Runtime[GraphContext]) -> dict:
+    """Screen this turn *before* answering, and divert if it is a crisis.
+
+    This is the one place in the graph that deliberately spends latency. Every
+    other check that could be deferred is deferred; this one cannot be, because
+    its whole purpose is to decide what the person is about to be told. Running
+    it after the fact — which is what the background version did — means the
+    normal coaching reply has already been delivered by the time anyone knows
+    the turn was a crisis.
+
+    Costs one extra router-model call per turn. `risk_gate_enabled` turns it
+    off for anyone who would rather have the latency back.
+
+    Fails **open** on error: if the check itself breaks, the turn proceeds as
+    normal coaching rather than being blocked. A crisis reply generated from a
+    failed screen would be both wrong and alarming, and the module prompts
+    still carry their own risk-handling instructions underneath.
+    """
+    telemetry = dict(state.get("telemetry") or {})
+    if not runtime.context.settings.risk_gate_enabled:
+        telemetry["risk_gate_duration_ms"] = 0
+        return {"risk": None, "telemetry": telemetry}
+
+    started = perf_counter()
+    try:
+        raw, completion = await assess_risk_detailed(
+            # Safety classification is a short deterministic extraction job,
+            # not part of the user's model preference. Keep it on DeepSeek's
+            # fast non-thinking router so choosing Doubao does not add a
+            # second Ark call before every visible reply.
+            runtime.context.router_provider,
+            user_message=state["user_input"],
+        )
+        risk = coerce(RISK_SPECS, raw)
+        if runtime.context.sessionmaker is not None:
+            # This write is local and tiny; keeping it in the already-blocking
+            # safety gate avoids racing the main transcript transaction on
+            # single-connection SQLite test/dev databases.
+            await save_ai_event(
+                    runtime.context.sessionmaker,
+                    stage="risk_gate",
+                    session_id=state.get("session_id"),
+                    subject_id=state.get("subject_id"),
+                    provider=runtime.context.router_provider.name,
+                    model_name=completion.model,
+                    duration_ms=int((perf_counter() - started) * 1000),
+                    usage=completion.usage,
+                    request_id=completion.request_id,
+                    finish_reason=completion.finish_reason,
+                    error_code=None if completion.text else "empty_completion",
+                    prompt_version=hashlib.sha256(b"risk_gate_v1").hexdigest()[:16],
+            )
+    except Exception:  # noqa: BLE001 — see docstring: fail open
+        logger.exception("risk gate failed; continuing as a normal turn")
+        telemetry["risk_gate_duration_ms"] = int((perf_counter() - started) * 1000)
+        return {"risk": None, "telemetry": telemetry}
+
+    telemetry["risk_gate_duration_ms"] = int((perf_counter() - started) * 1000)
+
+    flagged = bool(risk.get("risk_status"))
+    _emit({"type": "trace", "node": "risk_gate", "detail": {"flagged": flagged}})
+
+    if flagged:
+        logger.warning(
+            "risk gate DIVERTED session %s (type=%s)",
+            state.get("session_id"),
+            risk.get("risk_expression_type"),
+        )
+    return {"risk": risk if flagged else None, "telemetry": telemetry}
+
+
+def route_after_risk(state: AgentState) -> str:
+    """Crisis branch, or the module the intent analysis picked."""
+    if state.get("risk"):
+        return "crisis"
+    return route_after_intent(state)
+
+
+async def crisis_node(state: AgentState, runtime: Runtime[GraphContext]) -> dict:
+    """Answer a flagged turn. Replaces the module entirely for this turn.
+
+    The empathic half is generated — it has to respond to what this person
+    actually said — but `CRISIS_RESOURCES` is appended verbatim rather than
+    left to the model, because a hallucinated hotline number is worse than no
+    number at all. The prompt tells the model not to include one for exactly
+    that reason.
+
+    On a provider failure the resources still go out on their own. That is the
+    one part of this reply that genuinely must not be lost.
+    """
+    context = runtime.context
+    messages = [
+        *(state.get("chat_history") or []),
+        Message(role="user", content=state["user_input"]),
+    ]
+    system = [SystemPromptSegment(CRISIS_PROMPT, cacheable=True)]
+
+    reply_buffer = VisibleReplyBuffer.create()
+    content_guard = ThinkingTagStreamGuard.create()
+    reasoning_parts: list[str] = []
+    update: dict = {
+        "provider": context.provider.name,
+        "model": context.provider.model,
+        "retrieved_knowledge": [],
+        "error": None,
+        "usage": {},
+    }
+    telemetry = dict(state.get("telemetry") or {})
+    telemetry["prompt_version"] = hashlib.sha256(
+        as_text(system).encode("utf-8")
+    ).hexdigest()[:16]
+    generation_started = perf_counter()
+    first_reasoning_seen = False
+    first_content_seen = False
+
+    try:
+        if context.stream:
+            async for delta in context.provider.stream(system=system, messages=messages):
+                elapsed_ms = int((perf_counter() - generation_started) * 1000)
+                if delta.kind == "usage":
+                    if delta.usage:
+                        update["usage"] = delta.usage
+                        telemetry["usage"] = delta.usage
+                    if delta.finish_reason:
+                        telemetry["finish_reason"] = delta.finish_reason
+                    if delta.request_id:
+                        telemetry["provider_request_id"] = delta.request_id
+                    continue
+                if delta.kind == "reasoning":
+                    if not first_reasoning_seen:
+                        telemetry["time_to_first_reasoning_token_ms"] = elapsed_ms
+                        first_reasoning_seen = True
+                    reasoning_parts.append(delta.text)
+                    continue
+                if not first_content_seen:
+                    telemetry["time_to_first_content_token_ms"] = elapsed_ms
+                    first_content_seen = True
+                for guarded_delta in content_guard.push(delta.text):
+                    for visible_delta in reply_buffer.push(guarded_delta):
+                        _emit({"type": "delta", "text": visible_delta})
+        else:
+            completion = await context.provider.complete(system=system, messages=messages)
+            normalized = normalize_reasoning_channels(
+                unwrap_chat_reply(completion.text), completion.reasoning_content
+            )
+            reply_buffer.raw_parts.append(normalized.reply)
+            reasoning_parts.append(normalized.reasoning)
+            update["model"] = completion.model
+            update["usage"] = completion.usage
+            telemetry["usage"] = completion.usage
+            telemetry["time_to_first_content_token_ms"] = int(
+                (perf_counter() - generation_started) * 1000
+            )
+            if completion.reasoning_content:
+                telemetry["time_to_first_reasoning_token_ms"] = telemetry[
+                    "time_to_first_content_token_ms"
+                ]
+            if completion.finish_reason:
+                telemetry["finish_reason"] = completion.finish_reason
+            if completion.request_id:
+                telemetry["provider_request_id"] = completion.request_id
+    except ProviderError as exc:
+        logger.warning("crisis node failed for session %s: %s", state.get("session_id"), exc)
+        telemetry["error_code"] = "provider_error"
+
+    if context.stream:
+        visible, disclosed_reasoning, final_deltas = _finish_stream_channels(
+            content_guard, reply_buffer, reasoning_parts
+        )
+        for visible_delta in final_deltas:
+            _emit({"type": "delta", "text": visible_delta})
+        if disclosed_reasoning:
+            _emit({"type": "reasoning_delta", "text": disclosed_reasoning})
+        _emit({"type": "delta", "text": CRISIS_RESOURCES})
+    else:
+        visible = unwrap_chat_reply("".join(reply_buffer.raw_parts))
+        disclosed_reasoning = "".join(reasoning_parts)
+
+    update["final_response"] = visible + CRISIS_RESOURCES
+    update["reasoning_content"] = disclosed_reasoning
+    telemetry["main_generation_duration_ms"] = int(
+        (perf_counter() - generation_started) * 1000
+    )
+    update["telemetry"] = telemetry
+    return update
+
+
+# ---------------------------------------------------------------------------
+# Step 4 — post-hoc routing
+# ---------------------------------------------------------------------------
+
+
+async def route_next_module_node(
+    state: AgentState, runtime: Runtime[GraphContext]
+) -> dict:
+    """Resolve rule-only cases and mark ordinary routing for background work.
+
+    The Router Agent used to be awaited here, which kept the HTTP response and
+    input lock open after the visible answer had already finished. Ordinary
+    successful turns now hold their current module just long enough to persist
+    the reply; ``schedule_background_routing`` performs the model call and
+    atomically publishes the real next-module decision afterwards.
+    """
+    current = state.get("extracted_intent", DEFAULT_MODULE)
+
+    if state.get("error"):
+        # Nothing happened this turn worth reasoning about — hold position
+        # rather than spend a second model call on a turn that already failed.
+        return {
+            "next_module": current,
+            "routing_reasoning_content": "模块判断结果：维持当前模块。\n\n本轮回复生成失败，因此没有调用模块路由模型。",
+            "router_model_name": "",
+            "routing_pending": False,
+        }
+
+    if state.get("risk"):
+        # A crisis turn never advances the programme. The module's own exit
+        # conditions were not met — it did not even run — and asking the router
+        # to reason about "progress" from a crisis exchange would let a
+        # distressed turn push someone into goal-setting.
+        explanation = (
+            "模块判断结果：维持当前模块。\n\n"
+            "本轮触发危机应答，正常模块流程被中断；按照安全规则，危机轮次不会推进模块。"
+        )
+        _emit({"type": "routing_reasoning", "text": explanation, "model": "规则引擎"})
+        return {
+            "next_module": current,
+            "routing_reasoning_content": explanation,
+            "router_model_name": "规则引擎",
+            "routing_pending": False,
+        }
+    return {
+        "next_module": current,
+        "routing_reasoning_content": "",
+        "router_model_name": "",
+        "routing_pending": True,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Step 4b — background summarization
+# ---------------------------------------------------------------------------
+
+SUMMARIZER_PROMPT = """\
+你是 BA Coach 的记忆总结助手。任务：把用户在某一模块内的对话，压缩成一段供未来对话回忆使用的高信息密度摘要。
+
+# 要求
+- 只输出摘要正文本身，不要输出任何解释、前后缀、标题或 markdown 标记
+- 中文，300-450 字左右，信息密度优先于流畅度
+- 依据实际发生的模块，重点记录：
+  - 模块一：用户的核心困扰/主诉、具体触发事件、已确认的抑郁循环
+  - 模块二：确立的 PA 目标卡片——活动内容、时间、地点、时长、潜在障碍与应对方案
+  - 模块三：达成的记录契约与记录方式
+  - 模块四：本次执行结果、ABC 分析要点、识别出的行为模式、下一步策略
+- 只保留对未来对话仍然有用的事实性信息，省略寒暄、重复确认等过程性文字
+- 严禁编造对话中没有出现的信息
+"""
+
+# Strong references to in-flight background tasks — asyncio only holds a weak
+# reference internally, so a task with nothing else pointing at it can be
+# garbage-collected mid-flight (a well-known asyncio footgun). Every task this
+# module spawns lives here from creation until its own done-callback removes
+# it, which is what lets it actually outlive the request handler that started
+# it.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_background(coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+
+async def _summarize_and_save(
+    provider: LLMProvider,
+    memos: MemosIntegrationManager,
+    *,
+    subject_id: str,
+    settings_summarizer_max_tokens: int,
+    transcript: str,
+    from_module: str,
+    to_module: str,
+    sessionmaker=None,
+    session_id: str | None = None,
+) -> None:
+    """The actual summarize-then-save work, run detached from the request.
+
+    Never raises — this runs after the response has already gone out, so
+    there is no request left to fail; a broken summarizer should be a log
+    line, not a crashed background task.
+    """
+    try:
+        started = perf_counter()
+        completion = await provider.route_detailed(
+            system=SUMMARIZER_PROMPT,
+            user=f"（本轮从 {from_module} 切换到 {to_module}）\n\n{transcript}",
+            max_tokens=settings_summarizer_max_tokens,
+        )
+        summary = completion.text
+        if sessionmaker is not None:
+            await save_ai_event(
+                sessionmaker,
+                stage="module_summarizer",
+                session_id=session_id,
+                subject_id=subject_id,
+                provider=provider.name,
+                model_name=completion.model,
+                duration_ms=int((perf_counter() - started) * 1000),
+                usage=completion.usage,
+                request_id=completion.request_id,
+                finish_reason=completion.finish_reason,
+                error_code=None if completion.text else "empty_completion",
+                prompt_version=hashlib.sha256(
+                    SUMMARIZER_PROMPT.encode("utf-8")
+                ).hexdigest()[:16],
+            )
+        if not summary.strip():
+            logger.warning("summarizer produced nothing for subject %s", subject_id[:8])
+            return
+        await memos.save_memo(subject_id, summary.strip())
+    except Exception:  # noqa: BLE001 — background task, nothing to propagate to
+        logger.exception("background summarization failed for subject %s", subject_id[:8])
+
+
+async def _extract_and_persist_module(
+    provider: LLMProvider,
+    sessionmaker,
+    *,
+    subject_id: str,
+    module: str,
+    transcript: str,
+    max_tokens: int,
+    reuse_latest: bool,
+    cycle_id: str | None = None,
+    session_id: str | None = None,
+) -> None:
+    """Extract one module's fields and write them. Never raises.
+
+    Runs detached, after the reply has gone out, for the same reason the
+    summarizer does: this is a second LLM round trip, and making the person
+    wait for bookkeeping would be paying latency for something they never see.
+    """
+    try:
+        started = perf_counter()
+        raw, completion = await extract_module_record_detailed(
+            provider, module=module, transcript=transcript, max_tokens=max_tokens
+        )
+        data = coerce(MODULE_SPECS[module], raw)
+        await save_ai_event(
+            sessionmaker,
+            stage="clinical_extraction",
+            session_id=session_id,
+            subject_id=subject_id,
+            provider=provider.name,
+            model_name=completion.model,
+            duration_ms=int((perf_counter() - started) * 1000),
+            usage=completion.usage,
+            request_id=completion.request_id,
+            finish_reason=completion.finish_reason,
+            error_code=None if completion.text else "empty_completion",
+            prompt_version=hashlib.sha256(
+                ("clinical_" + module + "_v1").encode("utf-8")
+            ).hexdigest()[:16],
+            event_metadata={"module": module},
+        )
+        if not data:
+            logger.info("clinical: nothing extractable for %s (%s…)", module, subject_id[:8])
+            return
+        await persist_module_record(
+            sessionmaker,
+            module=module,
+            user_id=subject_id,
+            data=data,
+            reuse_latest=reuse_latest,
+            cycle_id=cycle_id,
+        )
+    except Exception:  # noqa: BLE001 — background task, nothing to propagate to
+        logger.exception("clinical extraction failed for %s (%s…)", module, subject_id[:8])
+
+
+async def _persist_risk_quietly(sessionmaker, *, subject_id: str, data: dict) -> None:
+    """Write the risk row the gate already decided on. Never raises.
+
+    Only the *write* is backgrounded. The judgement itself happened in
+    `risk_gate_node`, before the reply, because it changes what the person is
+    told; recording it does not, so it does not need to hold up the response.
+    """
+    try:
+        await persist_risk(sessionmaker, user_id=subject_id, data=data)
+    except Exception:  # noqa: BLE001 — background task, nothing to propagate to
+        logger.exception("persisting risk failed for %s…", subject_id[:8])
+
+
+def _format_transcript(history: list[Message], user_input: str, reply: str) -> str:
+    lines = [f"{m.role}：{m.content}" for m in history if m.content]
+    lines.append(f"user：{user_input}")
+    if reply:
+        lines.append(f"assistant：{reply}")
+    return "\n".join(lines)
+
+
+def _format_router_transcript(
+    history: list[Message], user_input: str, reply: str
+) -> str:
+    """Keep both the beginning and end of a long module conversation.
+
+    Module-one evidence is naturally distributed: the concrete situation is
+    often near the beginning, while understanding/consent appears near the
+    end. Keeping only the latest messages makes the router repeatedly forget
+    the first half of its own exit criteria; sending an unbounded transcript
+    would make a cheap routing call grow forever.
+    """
+    transcript = _format_transcript(history, user_input, reply)
+    if len(transcript) <= ROUTER_TRANSCRIPT_CHARS:
+        return transcript
+    head_chars = ROUTER_TRANSCRIPT_CHARS // 3
+    tail_chars = ROUTER_TRANSCRIPT_CHARS - head_chars
+    return (
+        transcript[:head_chars]
+        + "\n\n[中间较早的重复对话已省略]\n\n"
+        + transcript[-tail_chars:]
+    )
+
+
+def _dispatch_transition_jobs(
+    state: AgentState,
+    context: GraphContext,
+    *,
+    current: str,
+    target: str,
+    cycle_id: str | None = None,
+) -> None:
+    """Launch extraction/profile/Memos work after a confirmed transition."""
+    subject_id = state.get("subject_id")
+    if (
+        not subject_id
+        or current == target
+        or state.get("error")
+        or (state.get("memory") or {}).get("sandbox_mode") == "true"
+    ):
+        return
+
+    transcript = _format_transcript(
+        state.get("chat_history") or [],
+        state["user_input"],
+        state.get("final_response", ""),
+    )
+    if context.sessionmaker is not None:
+        async def _clinical_jobs() -> None:
+            # Keep these two writes sequential. Apart from avoiding needless
+            # pool pressure in production, test SQLite uses one shared
+            # connection and concurrent transactions can roll each other back.
+            await _extract_and_persist_module(
+                context.provider,
+                context.sessionmaker,
+                subject_id=subject_id,
+                module=current,
+                transcript=transcript,
+                max_tokens=context.settings.extraction_max_tokens,
+                reuse_latest=(state.get("memory") or {}).get("last_module") == current,
+                cycle_id=cycle_id,
+                session_id=state.get("session_id"),
+            )
+
+        _spawn_background(_clinical_jobs())
+    if context.memos is not None:
+        _spawn_background(
+            _summarize_and_save(
+                context.provider,
+                context.memos,
+                subject_id=subject_id,
+                settings_summarizer_max_tokens=context.settings.summarizer_max_tokens,
+                transcript=transcript,
+                from_module=current,
+                to_module=target,
+                sessionmaker=context.sessionmaker,
+                session_id=state.get("session_id"),
+            )
+        )
+
+
+# One pending route per session. The strong task reference prevents garbage
+# collection; the keyed map also lets a very fast next user turn wait for the
+# preceding decision instead of entering the old module by racing it.
+_routing_tasks: dict[str, asyncio.Task] = {}
+
+
+async def wait_for_pending_routing(session_id: str | None) -> None:
+    if not session_id:
+        return
+    task = _routing_tasks.get(session_id)
+    if task is not None:
+        await asyncio.shield(task)
+
+
+async def _run_background_routing(
+    state: AgentState,
+    context: GraphContext,
+    *,
+    assistant_message_id: int | None,
+) -> None:
+    session_id = state["session_id"]
+    current = state.get("extracted_intent", DEFAULT_MODULE)
+    started = perf_counter()
+    try:
+        reply = state.get("final_response", "")
+        has_pa_card = bool(
+            (state.get("memory") or {}).get("pa_card") or extract_pa_card(reply)
+        )
+        decision = await decide_target_module_with_reasoning(
+            context.router_provider,
+            current_module=current,
+            user_input=state["user_input"],
+            ai_output=reply,
+            has_pa_card=has_pa_card,
+            conversation_context=_format_router_transcript(
+                state.get("chat_history") or [], state["user_input"], reply
+            ),
+            system_prompt=context.router_prompt,
+            max_tokens=context.settings.router_reasoning_max_tokens,
+            completed_steps=(state.get("module_steps") or {}).get(current, []),
+        )
+        target = decision.target_module
+        result_line = (
+            f"模块判断结果：维持 {current}，本轮不跳转。"
+            if target == current
+            else f"模块判断结果：{current} → {target}。"
+        )
+        thought = decision.reasoning_content.strip() or (
+            "路由模型没有返回独立的 reasoning_content；最终模块判断仍已通过规则校验。"
+        )
+        routing_reasoning = f"{result_line}\n\n{thought}"
+        duration_ms = int((perf_counter() - started) * 1000)
+        source_cycle_id = state.get("active_cycle_id")
+        active_cycle_id = source_cycle_id
+
+        # Publish to the live session and durable transcript as one logical
+        # update. The short lock protects the module pointer only; the slow LLM
+        # call above never holds the user's turn lock.
+        turn_lock = await context.store.get_turn_lock(session_id)
+        async with turn_lock:
+            await context.store.set_module(session_id, target)
+            if (
+                state.get("subject_id")
+                and assistant_message_id is not None
+                and context.sessionmaker is not None
+            ):
+                async with context.sessionmaker() as route_db:
+                    active_cycle_id = await apply_router_decision(
+                        route_db,
+                        session_id=session_id,
+                        subject_id=state["subject_id"],
+                        current_module=current,
+                        target_module=target,
+                        completed_steps=decision.completed_steps,
+                    )
+                    await record_interaction_transition(
+                        route_db,
+                        subject_id=state["subject_id"],
+                        current_module=current,
+                        target_module=target,
+                    )
+                    await complete_background_routing(
+                        route_db,
+                        subject_id=state["subject_id"],
+                        session_id=session_id,
+                        assistant_message_id=assistant_message_id,
+                        module=target,
+                        memory=state.get("memory") or {},
+                        routing_reasoning_content=routing_reasoning,
+                        router_model_name=decision.model,
+                        router_duration_ms=duration_ms,
+                        router_provider=context.router_provider.name,
+                        usage=decision.usage,
+                        request_id=decision.request_id,
+                        finish_reason=decision.finish_reason,
+                        error_code=decision.error_code,
+                        prompt_version=hashlib.sha256(
+                            (context.router_prompt or "").encode("utf-8")
+                        ).hexdigest()[:16],
+                    )
+
+        _dispatch_transition_jobs(
+            state,
+            context,
+            current=current,
+            target=target,
+            cycle_id=source_cycle_id or active_cycle_id,
+        )
+        logger.info(
+            "background router session=%s from=%s to=%s duration_ms=%d",
+            session_id,
+            current,
+            target,
+            duration_ms,
+        )
+    except Exception:  # noqa: BLE001 — detached task, response already finished
+        logger.exception("background router failed for session %s", session_id)
+
+
+def schedule_background_routing(
+    state: AgentState,
+    context: GraphContext,
+    *,
+    assistant_message_id: int | None,
+) -> None:
+    """Start the delayed Router Agent after the visible reply is durable."""
+    if not state.get("routing_pending"):
+        return
+    session_id = state["session_id"]
+    previous = _routing_tasks.get(session_id)
+    if previous is not None and not previous.done():
+        # A next request normally awaits this task before reaching here. Keep
+        # this guard for direct graph/route callers and avoid replacing a live
+        # decision with a second one.
+        return
+    task = _spawn_background(
+        _run_background_routing(
+            dict(state), context, assistant_message_id=assistant_message_id
+        )
+    )
+    _routing_tasks[session_id] = task
+
+    def _remove(completed: asyncio.Task) -> None:
+        if _routing_tasks.get(session_id) is completed:
+            _routing_tasks.pop(session_id, None)
+
+    task.add_done_callback(_remove)
+
+
+async def summarizer_node(state: AgentState, runtime: Runtime[GraphContext]) -> dict:
+    """Dispatch every after-the-turn job — none of them awaited here.
+
+    Three separate pieces of bookkeeping, all detached via `_spawn_background`
+    so the graph (and the response already streamed to the client) never waits
+    on them:
+
+    * **Risk screening**, every turn. A risk signal does not wait for a module
+      boundary, which is why this one is not gated on a transition.
+    * **Clinical extraction**, on a module change. That is the point at which
+      the module's own record is as complete as it is going to get, and doing
+      it per-turn would mean re-extracting and rewriting the same row on every
+      exchange for the cost of an extra LLM call each time.
+    * **Memos summary**, on a module change — the long-term memory write.
+
+    A router agent could technically produce the summary too, but that
+    conflates two different judgement calls (which module comes next vs. what
+    is worth remembering) in one prompt; keeping them apart is why this is its
+    own node with its own prompt rather than an addition to `router_agent.py`.
+    """
+    current = state.get("extracted_intent", DEFAULT_MODULE)
+    target = state.get("next_module", current)
+    subject_id = state.get("subject_id")
+    sessionmaker = runtime.context.sessionmaker
+    memos = runtime.context.memos
+    provider = runtime.context.provider
+    changed = target != current
+
+    # Nothing below can be attributed without a subject, and a failed turn has
+    # no reliable content to extract from.
+    if not subject_id or state.get("error"):
+        return {}
+
+    # Administrator sandbox turns are deliberately isolated from the real BA
+    # programme record.  The model and router still run normally so prompts
+    # and transitions can be tested, but risk rows, module extraction, Memos,
+    # and `user_profile.current_module` must not be polluted by test dialogue.
+    if (state.get("memory") or {}).get("sandbox_mode") == "true":
+        _emit(
+            {
+                "type": "trace",
+                "node": "summarizer",
+                "detail": {"sandbox": True, "clinical_writes": False},
+            }
+        )
+        return {}
+
+    # The risk verdict is already decided — risk_gate_node ran before the
+    # reply. Persist that, rather than screening the same message a second
+    # time: two calls would double the cost and could disagree with each
+    # other, and the row must record what actually gated the turn.
+    risk = state.get("risk")
+    if sessionmaker is not None and risk:
+        _spawn_background(
+            _persist_risk_quietly(sessionmaker, subject_id=subject_id, data=risk)
+        )
+
+    if not changed:
+        _emit({"type": "trace", "node": "summarizer", "detail": {"risk_only": True}})
+        return {}
+
+    transcript = _format_transcript(
+        state.get("chat_history") or [], state["user_input"], state.get("final_response", "")
+    )
+
+    if sessionmaker is not None:
+        # `reuse_latest`: the module being left is the one whose row this turn
+        # has been filling in, so refine that row rather than opening another.
+        # A *new* row is only right when the subject comes back to this module
+        # on a later cycle, which is the branch `update_profile_module` below
+        # marks by moving `current_module` away from it.
+        _spawn_background(
+            _extract_and_persist_module(
+                provider,
+                sessionmaker,
+                subject_id=subject_id,
+                module=current,
+                transcript=transcript,
+                max_tokens=runtime.context.settings.extraction_max_tokens,
+                reuse_latest=(state.get("memory") or {}).get("last_module") == current,
+                cycle_id=state.get("active_cycle_id"),
+                session_id=state.get("session_id"),
+            )
+        )
+
+    if memos is not None:
+        _spawn_background(
+            _summarize_and_save(
+                provider,
+                memos,
+                subject_id=subject_id,
+                settings_summarizer_max_tokens=runtime.context.settings.summarizer_max_tokens,
+                transcript=transcript,
+                from_module=current,
+                to_module=target,
+                sessionmaker=sessionmaker,
+                session_id=state.get("session_id"),
+            )
+        )
+
+    _emit(
+        {
+            "type": "trace",
+            "node": "summarizer",
+            "detail": {"from": current, "to": target, "dispatched": True},
+        }
+    )
+    return {}
+
+
+# ---------------------------------------------------------------------------
+# Step 5 — post-processing / convergence
+# ---------------------------------------------------------------------------
+
+
+def _derive_memory(state: AgentState) -> dict[str, str]:
+    """Update durable memory from the finished turn.
+
+    Deliberately cheap and deterministic: turn counter, last module, and a
+    short excerpt of what the user said. An LLM-written running summary is the
+    obvious upgrade — see the TODO below — but it costs a second model call
+    per turn, so it is opt-in rather than default.
+    """
+    memory = dict(state.get("memory") or {})
+    memory["turn_count"] = str(int(memory.get("turn_count", "0")) + 1)
+    memory["last_module"] = state.get("extracted_intent", DEFAULT_MODULE)
+
+    # Keep the most recently generated card, not the first — a later cycle
+    # through module 2 replaces the goal, and route_next_module_node's
+    # PA-card gate needs to see the current one, not a stale earlier one.
+    card = extract_pa_card(state.get("final_response", ""))
+    if card:
+        memory["pa_card"] = card
+
+    excerpt = state["user_input"].strip().replace("\n", " ")
+    if len(excerpt) > MEMORY_EXCERPT_CHARS:
+        excerpt = excerpt[: MEMORY_EXCERPT_CHARS - 1] + "…"
+    memory["last_user_message"] = excerpt
+
+    # TODO: for a rolling narrative summary, call
+    # `context.provider.complete(...)` here with a summarisation prompt and
+    # store the result under "summary". Budget for the extra call per turn.
+    return memory
+
+
+async def update_memory_and_format_node(
+    state: AgentState, runtime: Runtime[GraphContext]
+) -> dict:
+    """Convergence node: persist the turn, update memory, publish the result.
+
+    All four branches feed into this one node, so persistence and memory
+    handling exist exactly once.
+
+    On "formats the final SSE stream": this emits a structured `done` (or
+    `error`) event onto the graph's custom stream. Serialising those events
+    into `text/event-stream` frames stays in routes/chat.py — the graph should
+    not know what transport is carrying it.
+    """
+    context = runtime.context
+    session_id = state["session_id"]
+    reply = state.get("final_response", "")
+    error = state.get("error")
+
+    await context.store.append(session_id, Message(role="user", content=state["user_input"]))
+    if reply:
+        await context.store.append(session_id, Message(role="assistant", content=reply))
+
+    memory = _derive_memory(state)
+    await context.store.set_memory(session_id, memory)
+    # next_module (route_next_module_node's decision), not extracted_intent
+    # (this turn's own module) — that is what analyze_intent_node reads back
+    # as current_module on the turn after this one.
+    await context.store.set_module(
+        session_id, state.get("next_module", state.get("extracted_intent", DEFAULT_MODULE))
+    )
+
+    if error:
+        _emit({"type": "error", "node": "update_memory_and_format", "detail": error})
+    else:
+        _emit(
+            {
+                "type": "done",
+                "node": "update_memory_and_format",
+                "session_id": session_id,
+                "reply_module": state.get("extracted_intent"),
+                "next_module": (
+                    None
+                    if state.get("routing_pending")
+                    else state.get("next_module")
+                ),
+                "routing_pending": bool(state.get("routing_pending")),
+                "routed_by": state.get("routed_by"),
+                "usage": state.get("usage", {}),
+            }
+        )
+
+    logger.info(
+        "session=%s module=%s via=%s chars=%d error=%s risk_ms=%s "
+        "ttfr_ms=%s ttfc_ms=%s main_ms=%s",
+        session_id,
+        state.get("extracted_intent"),
+        state.get("routed_by"),
+        len(reply),
+        bool(error),
+        (state.get("telemetry") or {}).get("risk_gate_duration_ms"),
+        (state.get("telemetry") or {}).get("time_to_first_reasoning_token_ms"),
+        (state.get("telemetry") or {}).get("time_to_first_content_token_ms"),
+        (state.get("telemetry") or {}).get("main_generation_duration_ms"),
+    )
+
+    return {"memory": memory, "final_response": reply}

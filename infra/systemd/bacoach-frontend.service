@@ -1,0 +1,24 @@
+[Unit]
+Description=BA Coach Next.js frontend
+After=network-online.target bacoach-backend.service
+Wants=network-online.target
+Requires=bacoach-backend.service
+
+[Service]
+Type=simple
+User=bacoach
+Group=bacoach
+WorkingDirectory=/opt/bacoach/current/frontend
+EnvironmentFile=/etc/bacoach/frontend.env
+ExecStart=/usr/local/bin/node /opt/bacoach/current/frontend/node_modules/next/dist/bin/next start -H 127.0.0.1 -p 3000
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

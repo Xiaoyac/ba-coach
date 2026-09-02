@@ -1,0 +1,20 @@
+bindAddr = "0.0.0.0"
+bindPort = 7000
+
+# Proxied application ports are private to this server. Nginx is the only
+# public entry point, so visitors cannot bypass HTTPS or its request limits.
+proxyBindAddr = "127.0.0.1"
+allowPorts = [{ start = 13000, end = 13001 }]
+maxPortsPerClient = 3
+detailedErrorsToClient = false
+
+auth.method = "token"
+auth.additionalScopes = ["HeartBeats", "NewWorkConns"]
+auth.tokenSource.type = "file"
+auth.tokenSource.file.path = "/etc/frp/server_token"
+
+transport.tls.force = true
+transport.maxPoolCount = 5
+
+log.to = "console"
+log.level = "info"

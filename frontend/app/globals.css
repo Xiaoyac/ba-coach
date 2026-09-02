@@ -1,0 +1,419 @@
+@import "tailwindcss";
+
+/*
+ * Two themes, one contract.
+ *
+ * Every token below is *semantic* — `canvas`, `raised`, `ink` — never a raw
+ * colour name. That is what makes the second theme possible: `bg-night-800`
+ * would be a lie in a light theme, but `bg-panel` is true in both, so the
+ * markup never has to know which theme is active.
+ *
+ * `@theme` carries the Dark Zen values, because that is the default. The warm
+ * theme re-declares the same variables under `.theme-warm` on <html>; Tailwind
+ * utilities compile to `var(--color-…)`, so swapping one class re-skins the
+ * whole app with no per-component conditionals.
+ *
+ * Alpha is baked into the tokens that need it (`--color-line`, the bubble
+ * fills) rather than applied with a `/opacity` modifier in the markup. A dark
+ * theme wants white at 6%; a light theme wants warm brown at 10% — the two
+ * differ in *both* channel and amount, and a hard-coded modifier can only
+ * carry the amount.
+ */
+@theme {
+  /* ---------------------------------------------------------------- *
+   * Dark Zen — the default.
+   *
+   * No pure black: the deepest surface is #151618, a warm charcoal, so it
+   * reads as a dim room rather than a switched-off screen. No pure white
+   * either: #fff on charcoal haloes and tires the eye over a long session.
+   *
+   * Accents are desaturated champagne. Low chroma is the whole point — the
+   * same hue at full saturation is what makes an interface read "luxury"
+   * or "esports", which is exactly what this must not be.
+   * ---------------------------------------------------------------- */
+
+  /* Surfaces. */
+  --color-canvas: #151618;
+  --color-panel: #1b1d20b3;
+  --color-raised: #242629;
+  --color-line: #ffffff0f;
+  --color-line-strong: #bba88840;
+
+  /* Text, brightest to faintest. */
+  --color-ink: #e8e5df;
+  --color-ink-muted: #b8b4ac;
+  --color-ink-faint: #8a867e;
+
+  /* Accent — icons, active states, focus. */
+  --color-accent: #bba888;
+  --color-accent-ink: #e2d7c3;
+  --color-accent-wash: #bba88814;
+  --color-accent-edge: #bba88833;
+
+  /* The user's own turns. */
+  --color-mine: #bba88817;
+  --color-mine-edge: #bba88826;
+  --color-mine-ink: #f2ece1;
+
+  /* Errors. Muted on purpose — a loud red is the wrong register here. */
+  --color-alert-ink: #fecdd3d9;
+  --color-alert-wash: #fb71850f;
+  --color-alert-edge: #fda4af26;
+
+  /* Ambient washes behind the glass. */
+  --color-wash-a: #bba8880e;
+  --color-wash-b: #7d6e550d;
+
+  --font-sans:
+    system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+}
+
+/*
+ * Depth — deliberately NOT `@theme --shadow-*`.
+ *
+ * Tailwind parses shadow values at build time and inlines them into the
+ * utility, so that `shadow-<color>` can splice a colour in:
+ *
+ *   .shadow-panel { --tw-shadow: 0 28px 80px -32px var(--tw-shadow-color, …) }
+ *
+ * The literal is baked into the rule, so redeclaring `--shadow-panel` for
+ * another theme has no effect — unlike colours, which compile to a plain
+ * `var()` reference and re-theme correctly. Declaring these as ordinary custom
+ * properties and pairing them with the `@utility` rules at the bottom of this
+ * file keeps them swappable.
+ *
+ * Dark surfaces need long, very soft shadows to separate at all.
+ */
+:root {
+  --shadow-panel: 0 28px 80px -32px rgb(0 0 0 / 0.95);
+  --shadow-bubble: 0 18px 40px -26px rgb(0 0 0 / 0.95);
+  --shadow-composer: 0 18px 44px -28px rgb(0 0 0 / 1);
+  --shadow-float: 0 12px 30px -14px rgb(0 0 0 / 0.9);
+}
+
+/* ------------------------------------------------------------------ *
+ * Warm Therapeutic.
+ *
+ * Not "the dark theme inverted" — light themes fail differently. The canvas
+ * is a warm off-white (#f7f5f0, never #fff, which glares), bot bubbles are
+ * clean white so they lift *off* the canvas instead of sinking into it, and
+ * shadows are short and warm-grey rather than long and black.
+ *
+ * Dusty rose carries the accent role that champagne holds in the dark theme:
+ * same job, same low chroma. Kept muted rather than bright/candy pink for the
+ * same reason gold is kept muted in the dark theme — full saturation reads as
+ * a consumer/lifestyle app, not a counselling one.
+ * ------------------------------------------------------------------ */
+.theme-warm {
+  --color-canvas: #f7f5f0;
+  --color-panel: #ffffffb8;
+  --color-raised: #ffffff;
+  --color-line: #40382c1a;
+  --color-line-strong: #b17e8d73;
+
+  /* Measured against the panel (white at 72% over the canvas), not the canvas:
+     that is the lighter of the two backgrounds text actually sits on, so it is
+     the worse case. All three clear AA at normal text size. */
+  --color-ink: #33302b;
+  --color-ink-muted: #655e54;
+  --color-ink-faint: #6f6759;
+
+  --color-accent: #a56a7a;
+  --color-accent-ink: #7a4a58;
+  --color-accent-wash: #b17e8d1f;
+  --color-accent-edge: #b17e8d47;
+
+  --color-mine: #d9a8b62e;
+  --color-mine-edge: #d9a8b647;
+  --color-mine-ink: #6b3c48;
+
+  --color-alert-ink: #9b4a4a;
+  --color-alert-wash: #c0656514;
+  --color-alert-edge: #c065653d;
+
+  --color-wash-a: #b17e8d14;
+  --color-wash-b: #c9a97714;
+
+  /* Short and warm-grey. A light theme cannot use the dark theme's long black
+     shadows — on a near-white canvas they read as dirt rather than depth. */
+  --shadow-panel: 0 24px 60px -34px rgb(64 56 44 / 0.4);
+  --shadow-bubble: 0 10px 26px -18px rgb(64 56 44 / 0.45);
+  --shadow-composer: 0 14px 34px -22px rgb(64 56 44 / 0.42);
+  --shadow-float: 0 10px 24px -14px rgb(64 56 44 / 0.35);
+}
+
+/*
+ * Paired with the custom properties above — a plain `var()` reference is what
+ * makes the shadows follow the active theme.
+ *
+ * Named `depth-*` rather than `shadow-*` to stay clear of the colour tokens:
+ * `shadow-panel` collides with `--color-panel`, and Tailwind merges its own
+ * `shadow-<color>` rule into the utility of the same name.
+ */
+@utility depth-panel {
+  box-shadow: var(--shadow-panel);
+}
+
+@utility depth-bubble {
+  box-shadow: var(--shadow-bubble);
+}
+
+@utility depth-composer {
+  box-shadow: var(--shadow-composer);
+}
+
+@utility depth-float {
+  box-shadow: var(--shadow-float);
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  /* Tells the browser to paint its own chrome — carets, native scrollbars,
+     autofill — to match. Without it the UA uses light defaults on the dark
+     theme and flashes white. */
+  html {
+    color-scheme: dark;
+  }
+
+  html.theme-warm {
+    color-scheme: light;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background-color: color-mix(in srgb, var(--color-accent) 28%, transparent);
+    color: var(--color-ink);
+  }
+
+  /* Cross-fade the theme switch. Every colour token in this file is a plain
+     `var()`, so toggling `.theme-warm` on <html> otherwise repaints every
+     surface in the same frame — instant on a large flat area like the chat
+     panel or the modal backdrop reads as a flash, not a switch.
+
+     This lives in `@layer base`, one layer below Tailwind's own `utilities`,
+     so anything with its own `transition-colors` class (the buttons, the
+     composer) keeps its hand-tuned timing; this only fills in the elements —
+     mostly plain surfaces — that don't declare a transition at all. */
+  @media (prefers-reduced-motion: no-preference) {
+    * {
+      transition-property: background-color, border-color, color, box-shadow,
+        fill, stroke;
+      transition-duration: 500ms;
+      transition-timing-function: ease-out;
+    }
+  }
+}
+
+@layer components {
+  /* A thin, low-contrast scrollbar. The default chrome is visually loud and
+     pulls attention to the edge of the transcript. */
+  .zen-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+
+  .zen-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .zen-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .zen-scroll::-webkit-scrollbar-thumb {
+    background-color: var(--color-line-strong);
+    border-radius: 999px;
+  }
+
+  .zen-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-accent);
+  }
+}
+
+@layer components {
+  /* Assessment sliders.
+     `appearance: none` throws away the native widget entirely, which means the
+     track and thumb have to be rebuilt per engine — WebKit and Firefox expose
+     different pseudo-elements and neither inherits from the other, so the
+     blocks below are duplicates by necessity, not by accident. */
+  .zen-range {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 100%;
+    height: 1.5rem;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .zen-range::-webkit-slider-runnable-track {
+    height: 0.375rem;
+    border-radius: 999px;
+    background: var(--color-accent-wash);
+    border: 1px solid var(--color-line);
+  }
+
+  .zen-range::-moz-range-track {
+    height: 0.375rem;
+    border-radius: 999px;
+    background: var(--color-accent-wash);
+    border: 1px solid var(--color-line);
+  }
+
+  .zen-range::-webkit-slider-thumb {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 1.125rem;
+    height: 1.125rem;
+    border-radius: 999px;
+    background: var(--color-accent);
+    border: 2px solid var(--color-raised);
+    box-shadow: var(--shadow-bubble);
+    /* Centre the thumb on the track: half the difference of their heights. */
+    margin-top: calc((0.375rem - 1.125rem) / 2);
+    transition: transform 200ms ease-out;
+  }
+
+  .zen-range::-moz-range-thumb {
+    width: 1.125rem;
+    height: 1.125rem;
+    border-radius: 999px;
+    background: var(--color-accent);
+    border: 2px solid var(--color-raised);
+    box-shadow: var(--shadow-bubble);
+    transition: transform 200ms ease-out;
+  }
+
+  .zen-range:active::-webkit-slider-thumb {
+    transform: scale(1.15);
+  }
+
+  .zen-range:active::-moz-range-thumb {
+    transform: scale(1.15);
+  }
+
+  .zen-range:focus-visible::-webkit-slider-thumb {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  .zen-range:focus-visible::-moz-range-thumb {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}
+
+/* Streaming placeholder: three dots breathing in sequence. Slow and shallow —
+   a fast pulse reads as "system is struggling", which is the wrong signal in a
+   counselling context. */
+@keyframes zen-breathe {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 0.9;
+    transform: translateY(-2px);
+  }
+}
+
+/* A single motion language for navigation and overlays. The distance and
+   scale are intentionally small: this should feel like the next surface
+   settling into place, not like a card flying across a dashboard. */
+@keyframes zen-page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(7px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes zen-overlay-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* New turns rise gently from the composer. The assistant follows a fraction
+   later so the exchange reads as a calm sequence instead of two simultaneous
+   notifications. */
+@keyframes zen-message-float {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .zen-page-enter {
+    animation: zen-page-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .zen-overlay-enter {
+    animation: zen-overlay-enter 280ms ease-out both;
+  }
+
+  .zen-message-user {
+    transform-origin: right bottom;
+    animation: zen-message-float 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .zen-message-agent {
+    transform-origin: left bottom;
+    animation: zen-message-float 480ms 70ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  [role="dialog"],
+  [role="alertdialog"] {
+    animation: zen-page-enter 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  button:not(:disabled) {
+    transition-property: color, background-color, border-color, box-shadow,
+      opacity, transform;
+    transition-duration: 220ms;
+    transition-timing-function: ease-out;
+  }
+
+  button:not(:disabled):active {
+    transform: scale(0.97);
+  }
+}
+
+.zen-breathe {
+  animation: zen-breathe 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zen-page-enter,
+  .zen-overlay-enter,
+  .zen-message-user,
+  .zen-message-agent,
+  [role="dialog"],
+  [role="alertdialog"] {
+    animation: none;
+  }
+
+  .zen-breathe {
+    animation: none;
+    opacity: 0.6;
+  }
+}

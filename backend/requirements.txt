@@ -1,0 +1,46 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.9.0
+email-validator>=2.2.0
+pydantic-settings>=2.6.0
+python-dotenv>=1.0.1
+
+# Workflow orchestration. LangGraph handles the DAG and state only — model
+# calls go through the official SDKs below, not LangChain chat-model wrappers,
+# so prompt-cache breakpoints stay under our control.
+langgraph>=1.2.0
+
+# Persistence for the daily assessment. SQLite by default so the app runs with
+# no external service; DATABASE_URL swaps in Postgres (asyncpg) unchanged.
+sqlalchemy[asyncio]>=2.0.36
+aiosqlite>=0.20.0
+# Async MySQL driver — needed when DATABASE_URL uses mysql+aiomysql://
+# (e.g. the 7 pre-existing business tables in app/models_business.py).
+# cryptography backs aiomysql's sha256_password/caching_sha2_password auth,
+# which most managed MySQL (RDS, PolarDB, ...) enables by default.
+aiomysql>=0.2.0
+cryptography>=42.0.0
+# "Today" is resolved in the user's own timezone. Windows has no system tz
+# database, so zoneinfo needs this package there or every IANA lookup fails.
+tzdata>=2024.2; sys_platform == "win32"
+
+# Password hashing for the account system (app/security.py). Argon2id is the
+# current OWASP default: unlike bcrypt it is memory-hard, so a GPU or ASIC
+# gains far less against it. argon2-cffi ships sane parameters and encodes the
+# salt and cost inside the hash string, so no separate salt column is needed.
+argon2-cffi>=23.1.0
+
+# LLM providers
+anthropic>=0.69.0        # Claude (official Anthropic SDK)
+openai>=1.60.0           # DeepSeek (official OpenAI SDK, base_url=api.deepseek.com)
+
+# Long-term memory (app/memos_integration.py) — talks to a self-hosted Memos
+# instance's REST API. Already an indirect dependency of anthropic/openai;
+# listed explicitly since this module imports it directly.
+httpx>=0.27.0
+
+# Read the curated Adult Compendium .xlsx during idempotent knowledge imports.
+openpyxl>=3.1.5
+
+# Optional: swap the in-memory session store for Redis in production
+redis>=5.2.0

@@ -1,0 +1,34 @@
+serverAddr = "8.134.178.40"
+serverPort = 7000
+loginFailExit = false
+
+auth.method = "token"
+auth.additionalScopes = ["HeartBeats", "NewWorkConns"]
+auth.tokenSource.type = "file"
+auth.tokenSource.file.path = "C:/Users/20640/AppData/Local/BA Coach/frp/server_token"
+
+transport.protocol = "tcp"
+transport.tls.enable = true
+
+log.to = "C:/Users/20640/AppData/Local/BA Coach/frp/frpc.log"
+log.level = "info"
+log.maxDays = 3
+
+[[proxies]]
+name = "bacoach-next"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 3000
+remotePort = 13000
+transport.useCompression = true
+
+# Private egress for server-side certificate issuance. Because frps binds
+# proxy ports to 127.0.0.1, this SOCKS endpoint is reachable only by processes
+# already running on the Guangzhou server, never by the public internet.
+[[proxies]]
+name = "bacoach-acme-egress"
+type = "tcp"
+remotePort = 13001
+
+[proxies.plugin]
+type = "socks5"

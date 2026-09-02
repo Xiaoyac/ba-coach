@@ -1,0 +1,4036 @@
+{
+ "tables": [
+  {
+   "TABLE_NAME": "account_email_tokens",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "account_emails",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "account_handles",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "account_settings",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "activity_logs",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "auth_sessions",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "clinical_record_cycle_links",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "conversation_module_progress",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "conversation_runtime_states",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "conversations",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "TABLE_COMMENT": "互动情况表",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "knowledge_chunks",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "knowledge_sources",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "TABLE_COMMENT": "模块四记录表",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "TABLE_COMMENT": "模块一记录表",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "module_three_record",
+   "TABLE_COMMENT": "模块三记录表",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "TABLE_COMMENT": "模块二记录表",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "pa_cycles",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "profile_extensions",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "prompt_overrides",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "risk_monitoring",
+   "TABLE_COMMENT": "风险监控表",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "user_accounts",
+   "TABLE_COMMENT": "",
+   "ENGINE": "InnoDB"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "TABLE_COMMENT": "用户档案表",
+   "ENGINE": "InnoDB"
+  }
+ ],
+ "columns": [
+  {
+   "TABLE_NAME": "account_email_tokens",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "auto_increment",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_email_tokens",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "account_id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_email_tokens",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "purpose",
+   "COLUMN_TYPE": "varchar(24)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_email_tokens",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "token_hash",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "UNI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_email_tokens",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_email_tokens",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "expires_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_email_tokens",
+   "ORDINAL_POSITION": 7,
+   "COLUMN_NAME": "consumed_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_emails",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "account_id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_emails",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "email",
+   "COLUMN_TYPE": "varchar(320)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_emails",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "normalized_email",
+   "COLUMN_TYPE": "varchar(320)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "UNI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_emails",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "verified_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_emails",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_emails",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "updated_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_handles",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "account_id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_handles",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "base_username",
+   "COLUMN_TYPE": "varchar(58)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_handles",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "normalized_base",
+   "COLUMN_TYPE": "varchar(58)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_handles",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "tag",
+   "COLUMN_TYPE": "varchar(5)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_handles",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_settings",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "account_id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_settings",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "preferred_provider",
+   "COLUMN_TYPE": "varchar(16)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "deepseek",
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_settings",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "role",
+   "COLUMN_TYPE": "varchar(16)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "user",
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "account_settings",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "updated_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "activity_logs",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "auto_increment",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "activity_logs",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "entry_id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "activity_logs",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "position",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "activity_logs",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "time_slot",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "activity_logs",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "activity",
+   "COLUMN_TYPE": "varchar(500)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "activity_logs",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "emotion",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "activity_logs",
+   "ORDINAL_POSITION": 7,
+   "COLUMN_NAME": "achievement",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "activity_logs",
+   "ORDINAL_POSITION": 8,
+   "COLUMN_NAME": "connection",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "activity_logs",
+   "ORDINAL_POSITION": 9,
+   "COLUMN_NAME": "enjoyment",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "activity_logs",
+   "ORDINAL_POSITION": 10,
+   "COLUMN_NAME": "importance",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "activity_logs",
+   "ORDINAL_POSITION": 11,
+   "COLUMN_NAME": "note",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "auto_increment",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "conversation_id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "assistant_message_id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "subject_id",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "session_id",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "stage",
+   "COLUMN_TYPE": "varchar(32)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 7,
+   "COLUMN_NAME": "provider",
+   "COLUMN_TYPE": "varchar(32)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 8,
+   "COLUMN_NAME": "model_name",
+   "COLUMN_TYPE": "varchar(128)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 9,
+   "COLUMN_NAME": "duration_ms",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 10,
+   "COLUMN_NAME": "input_tokens",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 11,
+   "COLUMN_NAME": "output_tokens",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 12,
+   "COLUMN_NAME": "reasoning_tokens",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 13,
+   "COLUMN_NAME": "provider_request_id",
+   "COLUMN_TYPE": "varchar(128)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 14,
+   "COLUMN_NAME": "finish_reason",
+   "COLUMN_TYPE": "varchar(32)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 15,
+   "COLUMN_NAME": "error_code",
+   "COLUMN_TYPE": "varchar(128)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 16,
+   "COLUMN_NAME": "prompt_version",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 17,
+   "COLUMN_NAME": "estimated_cost_usd",
+   "COLUMN_TYPE": "decimal(14,8)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 18,
+   "COLUMN_NAME": "pricing_version",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 19,
+   "COLUMN_NAME": "event_metadata",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "ORDINAL_POSITION": 20,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "auto_increment",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "subject_id",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "recorded_on",
+   "COLUMN_TYPE": "date",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "timezone",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "status",
+   "COLUMN_TYPE": "varchar(16)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "completion_rate",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "ORDINAL_POSITION": 7,
+   "COLUMN_NAME": "activity_level",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "ORDINAL_POSITION": 8,
+   "COLUMN_NAME": "social_connection",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "ORDINAL_POSITION": 9,
+   "COLUMN_NAME": "approach_vs_avoidance",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "ORDINAL_POSITION": 10,
+   "COLUMN_NAME": "overall_mood",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "ORDINAL_POSITION": 11,
+   "COLUMN_NAME": "reflection_note",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "ORDINAL_POSITION": 12,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "ORDINAL_POSITION": 13,
+   "COLUMN_NAME": "updated_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "auth_sessions",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "auto_increment",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "auth_sessions",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "account_id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "auth_sessions",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "token_hash",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "UNI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "auth_sessions",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "auth_sessions",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "expires_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "clinical_record_cycle_links",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "auto_increment",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "clinical_record_cycle_links",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "cycle_id",
+   "COLUMN_TYPE": "varchar(36)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "clinical_record_cycle_links",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "module",
+   "COLUMN_TYPE": "varchar(16)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "clinical_record_cycle_links",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "record_id",
+   "COLUMN_TYPE": "varchar(36)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "clinical_record_cycle_links",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "auto_increment",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "conversation_id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "position",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "role",
+   "COLUMN_TYPE": "varchar(16)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "content",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "reasoning_content",
+   "COLUMN_TYPE": "longtext",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 7,
+   "COLUMN_NAME": "model_name",
+   "COLUMN_TYPE": "varchar(128)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 8,
+   "COLUMN_NAME": "routing_reasoning_content",
+   "COLUMN_TYPE": "longtext",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 9,
+   "COLUMN_NAME": "router_model_name",
+   "COLUMN_TYPE": "varchar(128)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 10,
+   "COLUMN_NAME": "risk_gate_duration_ms",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 11,
+   "COLUMN_NAME": "time_to_first_reasoning_token_ms",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 12,
+   "COLUMN_NAME": "time_to_first_content_token_ms",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 13,
+   "COLUMN_NAME": "main_generation_duration_ms",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 14,
+   "COLUMN_NAME": "router_duration_ms",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 15,
+   "COLUMN_NAME": "input_tokens",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 16,
+   "COLUMN_NAME": "output_tokens",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 17,
+   "COLUMN_NAME": "reasoning_tokens",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 18,
+   "COLUMN_NAME": "provider_request_id",
+   "COLUMN_TYPE": "varchar(128)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 19,
+   "COLUMN_NAME": "finish_reason",
+   "COLUMN_TYPE": "varchar(32)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 20,
+   "COLUMN_NAME": "error_code",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 21,
+   "COLUMN_NAME": "prompt_version",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "ORDINAL_POSITION": 22,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_module_progress",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "conversation_id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_module_progress",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "module_1_steps",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_module_progress",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "module_2_steps",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_module_progress",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "module_3_steps",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_module_progress",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "module_4_steps",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_module_progress",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "active_cycle_id",
+   "COLUMN_TYPE": "varchar(36)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_module_progress",
+   "ORDINAL_POSITION": 7,
+   "COLUMN_NAME": "updated_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_runtime_states",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "conversation_id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_runtime_states",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "module",
+   "COLUMN_TYPE": "varchar(16)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_runtime_states",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "memory",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversation_runtime_states",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "updated_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversations",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "auto_increment",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversations",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "subject_id",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversations",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "session_id",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "UNI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversations",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "title",
+   "COLUMN_TYPE": "varchar(80)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversations",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversations",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "updated_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversations",
+   "ORDINAL_POSITION": 7,
+   "COLUMN_NAME": "pinned",
+   "COLUMN_TYPE": "tinyint(1)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "0",
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "conversations",
+   "ORDINAL_POSITION": 8,
+   "COLUMN_NAME": "revision",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "0",
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "char(36)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "ID（主键），应用生成uuid4/7"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "CURRENT_TIMESTAMP",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": "创建时间"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "updated_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "CURRENT_TIMESTAMP",
+   "EXTRA": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP",
+   "COLUMN_COMMENT": "更新时间"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "user_id",
+   "COLUMN_TYPE": "char(36)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "UNI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户ID/UUID"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "last_active_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户最近一次活跃时间"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "consecutive_inactive_days",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": "0",
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户连续无记录/无交互累计天数"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 7,
+   "COLUMN_NAME": "total_interaction_count",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "0",
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户历史总交互次数"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 8,
+   "COLUMN_NAME": "avg_weekly_interaction_frequency",
+   "COLUMN_TYPE": "decimal(8,2)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户平均每周交互频率"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 9,
+   "COLUMN_NAME": "good_response_behaviors",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "响应良好行为：微小调整、略带挑战等"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 10,
+   "COLUMN_NAME": "easy_stuck_modules",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "容易停滞的模块"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 11,
+   "COLUMN_NAME": "decline_behavior_signals",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "状态下滑的行为信号：开始不洗头、推迟回微信、赖床到下午、一天只吃一顿饭等"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 12,
+   "COLUMN_NAME": "decline_somatic_signals",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "状态下滑的躯体信号：脑雾、偏头疼、手无力等"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 13,
+   "COLUMN_NAME": "decline_cognitive_signals",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "状态下滑的认知信号：开始觉得自己没用、没价值等"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 14,
+   "COLUMN_NAME": "full_m2_m3_m4_cycle_count",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "0",
+   "EXTRA": "",
+   "COLUMN_COMMENT": "完整“模块二—三—四”循环次数"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 15,
+   "COLUMN_NAME": "longest_stay_module",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "停留时间最长的模块"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 16,
+   "COLUMN_NAME": "goal_history",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "完整的目标历史：目标及对应结果"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 17,
+   "COLUMN_NAME": "behavior_activation_level_change",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "行为激活水平变化：活动量、时间、频率、类型的变化"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 18,
+   "COLUMN_NAME": "overall_emotion_trend",
+   "COLUMN_TYPE": "varchar(255)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "总体情绪状态趋势：改善、平稳、下降、波动等"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 19,
+   "COLUMN_NAME": "has_entered_closure_or_transition",
+   "COLUMN_TYPE": "tinyint",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": "0",
+   "EXTRA": "",
+   "COLUMN_COMMENT": "是否已经进入结案/过渡阶段：0否，1是"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 20,
+   "COLUMN_NAME": "self_coaching_confidence_level",
+   "COLUMN_TYPE": "tinyint",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户对成为自己的教练的信心程度：0没信心，1部分有信心，2有信心"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "ORDINAL_POSITION": 21,
+   "COLUMN_NAME": "reaction_to_ai_coach_ending",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户对结束或减少AI教练引导的情绪反应"
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "auto_increment",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "account_id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "subject_id",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "description",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "status",
+   "COLUMN_TYPE": "varchar(16)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": "open",
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "screenshot",
+   "COLUMN_TYPE": "mediumblob",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "ORDINAL_POSITION": 7,
+   "COLUMN_NAME": "screenshot_mime",
+   "COLUMN_TYPE": "varchar(32)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "ORDINAL_POSITION": 8,
+   "COLUMN_NAME": "page_url",
+   "COLUMN_TYPE": "varchar(2048)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "ORDINAL_POSITION": 9,
+   "COLUMN_NAME": "session_id",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "ORDINAL_POSITION": 10,
+   "COLUMN_NAME": "last_error",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "ORDINAL_POSITION": 11,
+   "COLUMN_NAME": "user_agent",
+   "COLUMN_TYPE": "varchar(512)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "ORDINAL_POSITION": 12,
+   "COLUMN_NAME": "viewport_width",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "ORDINAL_POSITION": 13,
+   "COLUMN_NAME": "viewport_height",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "ORDINAL_POSITION": 14,
+   "COLUMN_NAME": "client_online",
+   "COLUMN_TYPE": "tinyint(1)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "ORDINAL_POSITION": 15,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "ORDINAL_POSITION": 16,
+   "COLUMN_NAME": "resolved_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "knowledge_chunks",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "auto_increment",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "knowledge_chunks",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "source_id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "knowledge_chunks",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "ordinal",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "knowledge_chunks",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "heading",
+   "COLUMN_TYPE": "varchar(512)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "knowledge_chunks",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "content",
+   "COLUMN_TYPE": "longtext",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "knowledge_sources",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "auto_increment",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "knowledge_sources",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "name",
+   "COLUMN_TYPE": "varchar(255)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "UNI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "knowledge_sources",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "category",
+   "COLUMN_TYPE": "varchar(8)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "knowledge_sources",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "content_hash",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "knowledge_sources",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "updated_by",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "knowledge_sources",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "knowledge_sources",
+   "ORDINAL_POSITION": 7,
+   "COLUMN_NAME": "updated_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "char(36)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "ID（主键），应用生成uuid4/7"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "CURRENT_TIMESTAMP",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": "创建时间"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "updated_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": "CURRENT_TIMESTAMP",
+   "EXTRA": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP",
+   "COLUMN_COMMENT": "更新时间"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "user_id",
+   "COLUMN_TYPE": "char(36)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户ID/UUID"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "execution_result",
+   "COLUMN_TYPE": "tinyint",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "执行结果：1成功，2未执行，3执行受阻，4部分完成"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "phase_a",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "A：执行前情境、情绪、自动想法"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "ORDINAL_POSITION": 7,
+   "COLUMN_NAME": "phase_b",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "B：实际行为、行为持续时间、行为是否完整执行、是否有回避/反刍行为"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "ORDINAL_POSITION": 8,
+   "COLUMN_NAME": "phase_c",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "C：行为中和行为后的情绪状态、身体感受、想法变化、短期影响、长期影响"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "ORDINAL_POSITION": 9,
+   "COLUMN_NAME": "ai_abc_chain_summary",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "AI总结的ABC链条"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "ORDINAL_POSITION": 10,
+   "COLUMN_NAME": "user_chain_approval_level",
+   "COLUMN_TYPE": "tinyint",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户对该链条的认同程度：0不认同，1部分认同，2认同"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "ORDINAL_POSITION": 11,
+   "COLUMN_NAME": "core_difficulty_type",
+   "COLUMN_TYPE": "varchar(128)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "核心困难类型"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "ORDINAL_POSITION": 12,
+   "COLUMN_NAME": "difficulty_description",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "困难描述"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "ORDINAL_POSITION": 13,
+   "COLUMN_NAME": "ba_reeducation_content",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "BA再教育内容"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "ORDINAL_POSITION": 14,
+   "COLUMN_NAME": "next_coping_strategy",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "协商的下一次应对策略"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "ORDINAL_POSITION": 15,
+   "COLUMN_NAME": "review_decision",
+   "COLUMN_TYPE": "tinyint",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "复盘后决策：1继续原目标，2更换目标，3调整目标"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "ORDINAL_POSITION": 16,
+   "COLUMN_NAME": "review_summary",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "总结：本次PA执行情况、ABC分析结果、用户行为规律、行为执行带来的收获、遇到的困难、可继续沿用的有效策略等"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "char(36)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "ID（主键），应用生成uuid4/7"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "CURRENT_TIMESTAMP",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": "创建时间"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "updated_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": "CURRENT_TIMESTAMP",
+   "EXTRA": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP",
+   "COLUMN_COMMENT": "更新时间"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "user_id",
+   "COLUMN_TYPE": "char(36)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户ID/UUID"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "chief_complaint",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "主诉"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "distress_duration",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "困扰持续时间，例如：最近两周、三个月、半年以上"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "ORDINAL_POSITION": 7,
+   "COLUMN_NAME": "distress_frequency",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "困扰频率，例如：每天、每周几次、偶尔、间歇性"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "ORDINAL_POSITION": 8,
+   "COLUMN_NAME": "trigger_situation",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "事件触发情境"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "ORDINAL_POSITION": 9,
+   "COLUMN_NAME": "abc_event",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户完整单一困扰事件（ABC）：A触发事件，B想法/信念，C情绪和行为后果"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "ORDINAL_POSITION": 10,
+   "COLUMN_NAME": "coping_behavior",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户应对行为"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "ORDINAL_POSITION": 11,
+   "COLUMN_NAME": "coping_consequence",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "后果：用户应对行为带来的影响或结果"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "ORDINAL_POSITION": 12,
+   "COLUMN_NAME": "ai_depression_cycle_summary",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "AI总结的抑郁循环"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "ORDINAL_POSITION": 13,
+   "COLUMN_NAME": "user_approval_level",
+   "COLUMN_TYPE": "tinyint",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户对该循环的认可程度：0不认可，1部分认可，2认可"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "ORDINAL_POSITION": 14,
+   "COLUMN_NAME": "attempted_relief_methods",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户尝试过的缓解方式"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "ORDINAL_POSITION": 15,
+   "COLUMN_NAME": "exception_positive_scene",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "例外的心情变好的场景"
+  },
+  {
+   "TABLE_NAME": "module_three_record",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "char(36)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "ID（主键），应用生成uuid4/7"
+  },
+  {
+   "TABLE_NAME": "module_three_record",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "CURRENT_TIMESTAMP",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": "创建时间"
+  },
+  {
+   "TABLE_NAME": "module_three_record",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "updated_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": "CURRENT_TIMESTAMP",
+   "EXTRA": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP",
+   "COLUMN_COMMENT": "更新时间"
+  },
+  {
+   "TABLE_NAME": "module_three_record",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "user_id",
+   "COLUMN_TYPE": "char(36)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户ID/UUID"
+  },
+  {
+   "TABLE_NAME": "module_three_record",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "ai_record_requirement",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "AI介绍的记录要求"
+  },
+  {
+   "TABLE_NAME": "module_three_record",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "user_acceptance_level",
+   "COLUMN_TYPE": "tinyint",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户对记录的接受程度：0不接受，1部分接受，2接受"
+  },
+  {
+   "TABLE_NAME": "module_three_record",
+   "ORDINAL_POSITION": 7,
+   "COLUMN_NAME": "user_acceptance_feeling",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户对记录的感受/补充说明"
+  },
+  {
+   "TABLE_NAME": "module_three_record",
+   "ORDINAL_POSITION": 8,
+   "COLUMN_NAME": "negotiated_record_plan",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "协商之后的记录方案"
+  },
+  {
+   "TABLE_NAME": "module_three_record",
+   "ORDINAL_POSITION": 9,
+   "COLUMN_NAME": "has_contract_reached",
+   "COLUMN_TYPE": "tinyint",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "0",
+   "EXTRA": "",
+   "COLUMN_COMMENT": "是否达成记录与执行契约：0否，1是"
+  },
+  {
+   "TABLE_NAME": "module_three_record",
+   "ORDINAL_POSITION": 10,
+   "COLUMN_NAME": "difficulty_feedback_mechanism",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "困难反馈机制说明"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "char(36)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "ID（主键），应用生成uuid4/7"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "CURRENT_TIMESTAMP",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": "创建时间"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "updated_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": "CURRENT_TIMESTAMP",
+   "EXTRA": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP",
+   "COLUMN_COMMENT": "更新时间"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "user_id",
+   "COLUMN_TYPE": "char(36)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户ID/UUID"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "pa_understanding_level",
+   "COLUMN_TYPE": "tinyint",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户对PA的理解程度：0不理解，1部分理解，2理解"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "pa_approval_level",
+   "COLUMN_TYPE": "tinyint",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户对PA的认可程度：0不认可，1部分认可，2认可"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "ORDINAL_POSITION": 7,
+   "COLUMN_NAME": "core_values",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户的核心价值观"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "ORDINAL_POSITION": 8,
+   "COLUMN_NAME": "core_values_impact",
+   "COLUMN_TYPE": "text",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "核心价值观的影响/感受"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "ORDINAL_POSITION": 9,
+   "COLUMN_NAME": "target_activity_content",
+   "COLUMN_TYPE": "varchar(255)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "目标身体活动内容"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "ORDINAL_POSITION": 10,
+   "COLUMN_NAME": "target_activity_time",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "目标身体活动执行时间"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "ORDINAL_POSITION": 11,
+   "COLUMN_NAME": "target_activity_location",
+   "COLUMN_TYPE": "varchar(255)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "目标身体活动执行地点"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "ORDINAL_POSITION": 12,
+   "COLUMN_NAME": "target_activity_duration_minutes",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "目标身体活动执行的单次时长，单位：分钟"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "ORDINAL_POSITION": 13,
+   "COLUMN_NAME": "target_activity_companion",
+   "COLUMN_TYPE": "varchar(32)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "目标身体活动执行人/陪伴人：独自、家人、朋友"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "ORDINAL_POSITION": 14,
+   "COLUMN_NAME": "potential_barriers",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "潜在障碍"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "ORDINAL_POSITION": 15,
+   "COLUMN_NAME": "barrier_coping_plan",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "障碍应对方案"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "ORDINAL_POSITION": 16,
+   "COLUMN_NAME": "has_target_card_generated",
+   "COLUMN_TYPE": "tinyint",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "0",
+   "EXTRA": "",
+   "COLUMN_COMMENT": "目标卡片是否生成：0否，1是"
+  },
+  {
+   "TABLE_NAME": "pa_cycles",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "varchar(36)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "pa_cycles",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "conversation_id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "pa_cycles",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "subject_id",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "pa_cycles",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "ordinal",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "pa_cycles",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "status",
+   "COLUMN_TYPE": "varchar(16)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "active",
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "pa_cycles",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "started_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "pa_cycles",
+   "ORDINAL_POSITION": 7,
+   "COLUMN_NAME": "closed_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "profile_extensions",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "auto_increment",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "profile_extensions",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "profile_uuid",
+   "COLUMN_TYPE": "varchar(36)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "UNI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "profile_extensions",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "reminder_start_minute",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "profile_extensions",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "reminder_end_minute",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "profile_extensions",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "supporters",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "profile_extensions",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "profile_extensions",
+   "ORDINAL_POSITION": 7,
+   "COLUMN_NAME": "updated_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "prompt_overrides",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "auto_increment",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "prompt_overrides",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "prompt_key",
+   "COLUMN_TYPE": "varchar(32)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "UNI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "prompt_overrides",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "content",
+   "COLUMN_TYPE": "longtext",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "prompt_overrides",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "updated_by",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "prompt_overrides",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "updated_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "risk_monitoring",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "char(36)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "ID（主键），应用生成uuid4/7"
+  },
+  {
+   "TABLE_NAME": "risk_monitoring",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "CURRENT_TIMESTAMP",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": "创建时间"
+  },
+  {
+   "TABLE_NAME": "risk_monitoring",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "updated_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "CURRENT_TIMESTAMP",
+   "EXTRA": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP",
+   "COLUMN_COMMENT": "更新时间"
+  },
+  {
+   "TABLE_NAME": "risk_monitoring",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "user_id",
+   "COLUMN_TYPE": "char(36)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户ID/UUID"
+  },
+  {
+   "TABLE_NAME": "risk_monitoring",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "risk_status",
+   "COLUMN_TYPE": "tinyint",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": "0",
+   "EXTRA": "",
+   "COLUMN_COMMENT": "风险监控：0无，1有"
+  },
+  {
+   "TABLE_NAME": "risk_monitoring",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "risk_expression_type",
+   "COLUMN_TYPE": "tinyint",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "风险表达具体内容：1自伤，2自杀，3未遂"
+  },
+  {
+   "TABLE_NAME": "risk_monitoring",
+   "ORDINAL_POSITION": 7,
+   "COLUMN_NAME": "risk_expression_time",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "MUL",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "风险表达时间"
+  },
+  {
+   "TABLE_NAME": "risk_monitoring",
+   "ORDINAL_POSITION": 8,
+   "COLUMN_NAME": "risk_context",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "风险表达时的上下文：用户在说什么/处在哪个模块等"
+  },
+  {
+   "TABLE_NAME": "risk_monitoring",
+   "ORDINAL_POSITION": 9,
+   "COLUMN_NAME": "user_reaction_to_risk",
+   "COLUMN_TYPE": "varchar(255)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户面对风险表达的反应：是否要求暂停干预/换话题等"
+  },
+  {
+   "TABLE_NAME": "risk_monitoring",
+   "ORDINAL_POSITION": 10,
+   "COLUMN_NAME": "ai_intervention_record",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "AI风险干预记录"
+  },
+  {
+   "TABLE_NAME": "user_accounts",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "int",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "auto_increment",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "user_accounts",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "username",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "UNI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "user_accounts",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "password_hash",
+   "COLUMN_TYPE": "varchar(255)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "user_accounts",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "profile_uuid",
+   "COLUMN_TYPE": "varchar(36)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "UNI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "user_accounts",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "now()",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "user_accounts",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "last_login_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": ""
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 1,
+   "COLUMN_NAME": "id",
+   "COLUMN_TYPE": "bigint unsigned",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "PRI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "auto_increment",
+   "COLUMN_COMMENT": "用户ID（主键，自增）"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 2,
+   "COLUMN_NAME": "uuid",
+   "COLUMN_TYPE": "char(36)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "UNI",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户唯一标识，应用生成uuid4/7"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 3,
+   "COLUMN_NAME": "nickname",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "用户昵称"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 4,
+   "COLUMN_NAME": "age",
+   "COLUMN_TYPE": "tinyint unsigned",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "年龄"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 5,
+   "COLUMN_NAME": "living_status",
+   "COLUMN_TYPE": "enum('独居','和家人','和朋友','和恋人')",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "居住状态"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 6,
+   "COLUMN_NAME": "has_supporter",
+   "COLUMN_TYPE": "tinyint(1)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "0",
+   "EXTRA": "",
+   "COLUMN_COMMENT": "是否有支持者 0否 1是"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 7,
+   "COLUMN_NAME": "supporter1_relation",
+   "COLUMN_TYPE": "enum('父母','恋人','子女','朋友','兄弟姐妹','同事')",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "支持者1关系"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 8,
+   "COLUMN_NAME": "supporter1_nickname",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "支持者1昵称"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 9,
+   "COLUMN_NAME": "supporter1_influence",
+   "COLUMN_TYPE": "enum('弱','中','强')",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "支持者1影响力"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 10,
+   "COLUMN_NAME": "supporter2_relation",
+   "COLUMN_TYPE": "enum('父母','恋人','子女','朋友','兄弟姐妹','同事')",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "支持者2关系"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 11,
+   "COLUMN_NAME": "supporter2_nickname",
+   "COLUMN_TYPE": "varchar(64)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "支持者2昵称"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 12,
+   "COLUMN_NAME": "supporter2_influence",
+   "COLUMN_TYPE": "enum('弱','中','强')",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "支持者2影响力"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 13,
+   "COLUMN_NAME": "risk_level",
+   "COLUMN_TYPE": "enum('低','中','高')",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "风险等级"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 14,
+   "COLUMN_NAME": "current_module",
+   "COLUMN_TYPE": "enum('开场','模块一','模块二','模块三','模块四')",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "当前模块"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 15,
+   "COLUMN_NAME": "module_completion_flag",
+   "COLUMN_TYPE": "binary(4)",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "模块完成标记，按位存储"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 16,
+   "COLUMN_NAME": "module_task_completion",
+   "COLUMN_TYPE": "json",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "模块任务完成标记"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 17,
+   "COLUMN_NAME": "module1_done_flag",
+   "COLUMN_TYPE": "tinyint(1)",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "0",
+   "EXTRA": "",
+   "COLUMN_COMMENT": "全局不可逆标记：是否已完成模块一 0否 1是，置1后不可回退"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 18,
+   "COLUMN_NAME": "communication_preference",
+   "COLUMN_TYPE": "enum('直接明了','温柔引导','理性分析','轻松幽默')",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "沟通偏好"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 19,
+   "COLUMN_NAME": "reminder_frequency",
+   "COLUMN_TYPE": "enum('每天一次','隔天一次','每三天一次','每周一次','仅在我主动找你时提醒','暂时不需要提醒')",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "行动提醒频率"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 20,
+   "COLUMN_NAME": "reminder_time_slot",
+   "COLUMN_TYPE": "enum('早晨7-9','上午9-12','中午12-14','下午14-18','傍晚18-21','晚上21-23')",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "行动提醒时间段"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 21,
+   "COLUMN_NAME": "physical_condition",
+   "COLUMN_TYPE": "set('膝关节损伤','腰背酸痛','慢性疼痛','易疲劳','睡眠障碍','偏头痛','哮喘','眩晕','鼻炎','术后恢复期')",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "身体状况，可多选"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 22,
+   "COLUMN_NAME": "behavior_taboo",
+   "COLUMN_TYPE": "set('不能剧烈运动','不能久站','不能晒太阳','怕吵闹','怕人多','怕拥挤闭塞的地方','不坐公共交通')",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "行为禁忌，可多选"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 23,
+   "COLUMN_NAME": "content_taboo",
+   "COLUMN_TYPE": "set('不谈工作','不谈学习','不谈家庭','不谈身材外貌','不谈感情','不谈未来计划','不喜欢被比较','反感正能量说教','不喜欢被经常催促')",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "内容禁忌，可多选"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 24,
+   "COLUMN_NAME": "expression_style",
+   "COLUMN_TYPE": "enum('理性','情绪化','回避','混合')",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "表达风格偏好"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 25,
+   "COLUMN_NAME": "activity_environment",
+   "COLUMN_TYPE": "enum('室内','户外','都可以')",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "活动偏好-环境"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 26,
+   "COLUMN_NAME": "activity_social",
+   "COLUMN_TYPE": "enum('独自','一对一','群体','都可以')",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "活动偏好-社交"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 27,
+   "COLUMN_NAME": "activity_intensity",
+   "COLUMN_TYPE": "enum('安静','热闹','都可以')",
+   "IS_NULLABLE": "YES",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": null,
+   "EXTRA": "",
+   "COLUMN_COMMENT": "活动偏好-强度"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 28,
+   "COLUMN_NAME": "created_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "CURRENT_TIMESTAMP",
+   "EXTRA": "DEFAULT_GENERATED",
+   "COLUMN_COMMENT": "创建时间"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "ORDINAL_POSITION": 29,
+   "COLUMN_NAME": "updated_at",
+   "COLUMN_TYPE": "datetime",
+   "IS_NULLABLE": "NO",
+   "COLUMN_KEY": "",
+   "COLUMN_DEFAULT": "CURRENT_TIMESTAMP",
+   "EXTRA": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP",
+   "COLUMN_COMMENT": "更新时间"
+  }
+ ],
+ "indexes": [
+  {
+   "TABLE_NAME": "account_email_tokens",
+   "INDEX_NAME": "ix_email_token_account_purpose",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "account_id"
+  },
+  {
+   "TABLE_NAME": "account_email_tokens",
+   "INDEX_NAME": "ix_email_token_account_purpose",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 2,
+   "COLUMN_NAME": "purpose"
+  },
+  {
+   "TABLE_NAME": "account_email_tokens",
+   "INDEX_NAME": "ix_email_token_hash",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "token_hash"
+  },
+  {
+   "TABLE_NAME": "account_email_tokens",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "account_email_tokens",
+   "INDEX_NAME": "token_hash",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "token_hash"
+  },
+  {
+   "TABLE_NAME": "account_emails",
+   "INDEX_NAME": "ix_account_email_normalized",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "normalized_email"
+  },
+  {
+   "TABLE_NAME": "account_emails",
+   "INDEX_NAME": "normalized_email",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "normalized_email"
+  },
+  {
+   "TABLE_NAME": "account_emails",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "account_id"
+  },
+  {
+   "TABLE_NAME": "account_handles",
+   "INDEX_NAME": "ix_account_handle_base",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "normalized_base"
+  },
+  {
+   "TABLE_NAME": "account_handles",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "account_id"
+  },
+  {
+   "TABLE_NAME": "account_handles",
+   "INDEX_NAME": "uq_account_handle_base_tag",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "normalized_base"
+  },
+  {
+   "TABLE_NAME": "account_handles",
+   "INDEX_NAME": "uq_account_handle_base_tag",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 2,
+   "COLUMN_NAME": "tag"
+  },
+  {
+   "TABLE_NAME": "account_settings",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "account_id"
+  },
+  {
+   "TABLE_NAME": "activity_logs",
+   "INDEX_NAME": "ix_activity_entry",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "entry_id"
+  },
+  {
+   "TABLE_NAME": "activity_logs",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "INDEX_NAME": "assistant_message_id",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "assistant_message_id"
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "INDEX_NAME": "conversation_id",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "conversation_id"
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "INDEX_NAME": "ix_ai_event_session_stage",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "session_id"
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "INDEX_NAME": "ix_ai_event_session_stage",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 2,
+   "COLUMN_NAME": "stage"
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "INDEX_NAME": "ix_ai_event_session_stage",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 3,
+   "COLUMN_NAME": "created_at"
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "INDEX_NAME": "ix_ai_event_subject_created",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "subject_id"
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "INDEX_NAME": "ix_ai_event_subject_created",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 2,
+   "COLUMN_NAME": "created_at"
+  },
+  {
+   "TABLE_NAME": "ai_execution_events",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "INDEX_NAME": "ix_entry_subject_date",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "subject_id"
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "INDEX_NAME": "ix_entry_subject_date",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 2,
+   "COLUMN_NAME": "recorded_on"
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "INDEX_NAME": "uq_entry_subject_date",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "subject_id"
+  },
+  {
+   "TABLE_NAME": "assessment_entries",
+   "INDEX_NAME": "uq_entry_subject_date",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 2,
+   "COLUMN_NAME": "recorded_on"
+  },
+  {
+   "TABLE_NAME": "auth_sessions",
+   "INDEX_NAME": "account_id",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "account_id"
+  },
+  {
+   "TABLE_NAME": "auth_sessions",
+   "INDEX_NAME": "ix_auth_session_token",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "token_hash"
+  },
+  {
+   "TABLE_NAME": "auth_sessions",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "auth_sessions",
+   "INDEX_NAME": "token_hash",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "token_hash"
+  },
+  {
+   "TABLE_NAME": "clinical_record_cycle_links",
+   "INDEX_NAME": "ix_clinical_cycle_module",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "cycle_id"
+  },
+  {
+   "TABLE_NAME": "clinical_record_cycle_links",
+   "INDEX_NAME": "ix_clinical_cycle_module",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 2,
+   "COLUMN_NAME": "module"
+  },
+  {
+   "TABLE_NAME": "clinical_record_cycle_links",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "clinical_record_cycle_links",
+   "INDEX_NAME": "uq_clinical_record_cycle",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "module"
+  },
+  {
+   "TABLE_NAME": "clinical_record_cycle_links",
+   "INDEX_NAME": "uq_clinical_record_cycle",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 2,
+   "COLUMN_NAME": "record_id"
+  },
+  {
+   "TABLE_NAME": "clinical_record_cycle_links",
+   "INDEX_NAME": "uq_cycle_module_record",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "cycle_id"
+  },
+  {
+   "TABLE_NAME": "clinical_record_cycle_links",
+   "INDEX_NAME": "uq_cycle_module_record",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 2,
+   "COLUMN_NAME": "module"
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "INDEX_NAME": "ix_conversation_message_conv",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "conversation_id"
+  },
+  {
+   "TABLE_NAME": "conversation_messages",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "conversation_module_progress",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "conversation_id"
+  },
+  {
+   "TABLE_NAME": "conversation_runtime_states",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "conversation_id"
+  },
+  {
+   "TABLE_NAME": "conversations",
+   "INDEX_NAME": "ix_conversation_subject_pinned_updated",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "subject_id"
+  },
+  {
+   "TABLE_NAME": "conversations",
+   "INDEX_NAME": "ix_conversation_subject_pinned_updated",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 2,
+   "COLUMN_NAME": "pinned"
+  },
+  {
+   "TABLE_NAME": "conversations",
+   "INDEX_NAME": "ix_conversation_subject_pinned_updated",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 3,
+   "COLUMN_NAME": "updated_at"
+  },
+  {
+   "TABLE_NAME": "conversations",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "conversations",
+   "INDEX_NAME": "session_id",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "session_id"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "INDEX_NAME": "idx_closure_or_transition",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "has_entered_closure_or_transition"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "INDEX_NAME": "idx_consecutive_inactive_days",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "consecutive_inactive_days"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "INDEX_NAME": "idx_last_active_at",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "last_active_at"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "interaction_status",
+   "INDEX_NAME": "uk_user_id",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "user_id"
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "INDEX_NAME": "ix_issue_report_account_created",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "account_id"
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "INDEX_NAME": "ix_issue_report_account_created",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 2,
+   "COLUMN_NAME": "created_at"
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "INDEX_NAME": "ix_issue_report_status_created",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "status"
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "INDEX_NAME": "ix_issue_report_status_created",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 2,
+   "COLUMN_NAME": "created_at"
+  },
+  {
+   "TABLE_NAME": "issue_reports",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "knowledge_chunks",
+   "INDEX_NAME": "ix_knowledge_chunk_source",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "source_id"
+  },
+  {
+   "TABLE_NAME": "knowledge_chunks",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "knowledge_chunks",
+   "INDEX_NAME": "uq_knowledge_chunk_order",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "source_id"
+  },
+  {
+   "TABLE_NAME": "knowledge_chunks",
+   "INDEX_NAME": "uq_knowledge_chunk_order",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 2,
+   "COLUMN_NAME": "ordinal"
+  },
+  {
+   "TABLE_NAME": "knowledge_sources",
+   "INDEX_NAME": "ix_knowledge_sources_category",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "category"
+  },
+  {
+   "TABLE_NAME": "knowledge_sources",
+   "INDEX_NAME": "name",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "name"
+  },
+  {
+   "TABLE_NAME": "knowledge_sources",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "INDEX_NAME": "idx_module_four_execution_result",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "execution_result"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "INDEX_NAME": "idx_module_four_review_decision",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "review_decision"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "INDEX_NAME": "idx_module_four_updated_at",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "updated_at"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "INDEX_NAME": "idx_module_four_user_id",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "user_id"
+  },
+  {
+   "TABLE_NAME": "module_four_record",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "INDEX_NAME": "idx_module_one_updated_at",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "updated_at"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "INDEX_NAME": "idx_module_one_user_id",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "user_id"
+  },
+  {
+   "TABLE_NAME": "module_one_record",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "module_three_record",
+   "INDEX_NAME": "idx_module_three_updated_at",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "updated_at"
+  },
+  {
+   "TABLE_NAME": "module_three_record",
+   "INDEX_NAME": "idx_module_three_user_id",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "user_id"
+  },
+  {
+   "TABLE_NAME": "module_three_record",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "INDEX_NAME": "idx_module_two_target_activity_time",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "target_activity_time"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "INDEX_NAME": "idx_module_two_updated_at",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "updated_at"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "INDEX_NAME": "idx_module_two_user_id",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "user_id"
+  },
+  {
+   "TABLE_NAME": "module_two_record",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "pa_cycles",
+   "INDEX_NAME": "ix_pa_cycle_subject_status",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "subject_id"
+  },
+  {
+   "TABLE_NAME": "pa_cycles",
+   "INDEX_NAME": "ix_pa_cycle_subject_status",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 2,
+   "COLUMN_NAME": "status"
+  },
+  {
+   "TABLE_NAME": "pa_cycles",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "pa_cycles",
+   "INDEX_NAME": "uq_pa_cycle_ordinal",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "conversation_id"
+  },
+  {
+   "TABLE_NAME": "pa_cycles",
+   "INDEX_NAME": "uq_pa_cycle_ordinal",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 2,
+   "COLUMN_NAME": "ordinal"
+  },
+  {
+   "TABLE_NAME": "profile_extensions",
+   "INDEX_NAME": "ix_profile_extension_uuid",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "profile_uuid"
+  },
+  {
+   "TABLE_NAME": "profile_extensions",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "profile_extensions",
+   "INDEX_NAME": "profile_uuid",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "profile_uuid"
+  },
+  {
+   "TABLE_NAME": "prompt_overrides",
+   "INDEX_NAME": "ix_prompt_overrides_prompt_key",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "prompt_key"
+  },
+  {
+   "TABLE_NAME": "prompt_overrides",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "risk_monitoring",
+   "INDEX_NAME": "idx_risk_expression_time",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "risk_expression_time"
+  },
+  {
+   "TABLE_NAME": "risk_monitoring",
+   "INDEX_NAME": "idx_risk_status_time",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "risk_status"
+  },
+  {
+   "TABLE_NAME": "risk_monitoring",
+   "INDEX_NAME": "idx_risk_status_time",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 2,
+   "COLUMN_NAME": "risk_expression_time"
+  },
+  {
+   "TABLE_NAME": "risk_monitoring",
+   "INDEX_NAME": "idx_user_id",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "user_id"
+  },
+  {
+   "TABLE_NAME": "risk_monitoring",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "user_accounts",
+   "INDEX_NAME": "ix_account_username",
+   "NON_UNIQUE": 1,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "username"
+  },
+  {
+   "TABLE_NAME": "user_accounts",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "user_accounts",
+   "INDEX_NAME": "profile_uuid",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "profile_uuid"
+  },
+  {
+   "TABLE_NAME": "user_accounts",
+   "INDEX_NAME": "username",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "username"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "INDEX_NAME": "PRIMARY",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "id"
+  },
+  {
+   "TABLE_NAME": "user_profile",
+   "INDEX_NAME": "uk_uuid",
+   "NON_UNIQUE": 0,
+   "SEQ_IN_INDEX": 1,
+   "COLUMN_NAME": "uuid"
+  }
+ ],
+ "counts": {
+  "account_email_tokens": 0,
+  "account_emails": 7,
+  "account_handles": 12,
+  "account_settings": 12,
+  "activity_logs": 1,
+  "ai_execution_events": 0,
+  "assessment_entries": 1,
+  "auth_sessions": 23,
+  "clinical_record_cycle_links": 0,
+  "conversation_messages": 561,
+  "conversation_module_progress": 0,
+  "conversation_runtime_states": 27,
+  "conversations": 29,
+  "interaction_status": 0,
+  "issue_reports": 3,
+  "knowledge_chunks": 1331,
+  "knowledge_sources": 10,
+  "module_four_record": 0,
+  "module_one_record": 2,
+  "module_three_record": 0,
+  "module_two_record": 1,
+  "pa_cycles": 0,
+  "profile_extensions": 0,
+  "prompt_overrides": 6,
+  "risk_monitoring": 2,
+  "user_accounts": 12,
+  "user_profile": 19
+ }
+}
