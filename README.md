@@ -2,6 +2,8 @@
 
 当前交付进度见 [项目进度（2026-09-11）](PROJECT_PROGRESS_20260911.md)，最新验收见 [端到端验收报告](E2E_ACCEPTANCE_FIXED_20260911.md)。仓库版本与生产部署版本请分别查看，勿视为自动同步。
 
+最新生产发布记录见 [生产部署记录（2026-09-11）](PRODUCTION_DEPLOYMENT_20260911.md)。
+
 Standalone web app for a psychology AI workflow migrated off Coze.
 FastAPI backend + Next.js/React frontend.
 
