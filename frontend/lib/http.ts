@@ -6,6 +6,13 @@
 
 import { getToken } from "@/lib/auth";
 
+export function checkAuthentication(res: Response): void {
+  if (res.status === 401) {
+    window.dispatchEvent(new Event("bacoach-auth-expired"));
+    throw new Error("登录已失效，请重新登录；已保存的记录不会丢失。");
+  }
+}
+
 export function apiHeaders(opts: { json?: boolean } = {}): HeadersInit {
   const token = getToken();
   return {

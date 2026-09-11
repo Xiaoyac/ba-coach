@@ -1,0 +1,46 @@
+{
+  "description": "One person the subject can realistically do something with.\n\n`relation` is free text, not the six-value ENUM `user_profile` uses: the\npoint of the extension table is that \"室友\" and \"教练\" are real answers.\nThe legacy columns mirror the first two positions; an unsupported custom\nrelation projects to NULL but remains intact in the canonical list.",
+  "properties": {
+    "relation": {
+      "maxLength": 32,
+      "minLength": 1,
+      "title": "Relation",
+      "type": "string"
+    },
+    "nickname": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Nickname"
+    },
+    "influence": {
+      "anyOf": [
+        {
+          "enum": [
+            "弱",
+            "中",
+            "强"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Influence"
+    }
+  },
+  "required": [
+    "relation"
+  ],
+  "title": "Supporter",
+  "type": "object"
+}

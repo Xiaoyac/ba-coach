@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { ChatMessage, RoutingMeta } from "@/lib/api";
+import MessageMarkdown from "@/components/MessageMarkdown";
 import {
   ArrowUpMark,
   CheckMark,
@@ -209,6 +210,7 @@ export default function Chat({
           <button
             type="button"
             onClick={onOpenAssessment}
+            aria-label="记录今日"
             className="flex shrink-0 items-center gap-1.5 rounded-full border border-line px-2.5 py-1.5 text-[0.75rem] text-ink-muted transition-colors duration-300 hover:border-accent-edge hover:text-accent-ink sm:px-3"
           >
             <NotebookMark className="h-3.5 w-3.5" />
@@ -566,7 +568,7 @@ function MessageRow({
               : "rounded-[22px] rounded-tl-[8px] border border-line bg-raised text-ink depth-bubble"
           }`}
         >
-          {message.content || (pending ? <TypingDots hasReasoning={Boolean(reasoning)} /> : null)}
+          {message.content ? (message.role === "assistant" ? <MessageMarkdown text={message.content} /> : message.content) : (pending ? <TypingDots hasReasoning={Boolean(reasoning)} /> : null)}
           {!isUser && showReasoning && (
             <div className={`${message.content ? "mt-3 border-t border-line pt-2.5" : "mt-1"}`}>
               <button
@@ -672,6 +674,12 @@ function Avatar({ isUser }: { isUser: boolean }) {
 }
 
 function TypingDots({ hasReasoning = false }: { hasReasoning?: boolean }) {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const started = Date.now();
+    const timer = window.setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
   return (
     <span className="flex items-center gap-2 py-1.5" aria-label="Thinking">
       <span className="flex items-center gap-1.5">
@@ -683,7 +691,7 @@ function TypingDots({ hasReasoning = false }: { hasReasoning?: boolean }) {
           />
         ))}
       </span>
-      {hasReasoning && <span className="text-xs text-ink-faint">正在深度思考</span>}
+      <span className="text-xs text-ink-faint">{seconds >= 20 ? `仍在生成，已等待 ${seconds} 秒；请勿重复发送` : hasReasoning ? "正在深度思考" : "正在准备回复"}</span>
     </span>
   );
 }

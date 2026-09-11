@@ -129,6 +129,17 @@ class StubProvider(LLMProvider):
         )
 
 
+@pytest.fixture
+def approved_mediator(provider, monkeypatch):
+    """Explicit successful mediator for retrieval-to-prompt integration tests."""
+    import json
+    async def approve(**kwargs):
+        payload = json.loads(kwargs["user"])
+        return Completion(text=json.dumps({"selected_ids": [x["id"] for x in payload["knowledge"]],
+            "guidance": "Use the selected evidence only as background."}), model="approved-test-mediator")
+    monkeypatch.setattr(provider, "route_detailed", approve)
+
+
 class StubMemos:
     """Records save_memo/retrieve_recent_memos calls; no network."""
 

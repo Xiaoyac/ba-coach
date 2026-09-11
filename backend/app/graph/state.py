@@ -140,3 +140,5 @@ class GraphContext:
     # graph's custom stream. False for the JSON endpoint, which uses the
     # one-shot completion call so it gets a usage report back.
     stream: bool = False
+    # An isolated evaluation can freeze effective prompts without enabling DB side effects.
+    prompt_snapshot: dict[str, str] | None = None

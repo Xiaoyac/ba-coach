@@ -9,7 +9,7 @@
  * If the column ever changes, both sides change together.
  */
 
-import { apiHeaders } from "@/lib/http";
+import { apiHeaders, checkAuthentication } from "@/lib/http";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
@@ -128,6 +128,8 @@ export type ProfilePatch = Partial<
 >;
 
 async function parse<T>(res: Response, what: string): Promise<T> {
+  checkAuthentication(res);
+  if (res.status >= 500) throw new Error("档案服务暂时不可用，请稍后重新加载。");
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     const detail = typeof body?.detail === "string" ? body.detail : null;

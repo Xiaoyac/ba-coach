@@ -26,32 +26,7 @@ from .models import (
 from .models_business import InteractionStatus, UserProfile
 
 
-MODULE_STEP_KEYS: dict[str, tuple[str, ...]] = {
-    "module_1": (
-        "core_problem_example",
-        "depression_cycle_formulated",
-        "ba_education_completed",
-        "goal_setting_consent",
-    ),
-    "module_2": (
-        "pa_concept_understood",
-        "values_or_intention_explored",
-        "activity_selected",
-        "pa_card_completed",
-    ),
-    "module_3": (
-        "recording_explained",
-        "recording_plan_agreed",
-        "execution_contract_reached",
-    ),
-    "module_4": (
-        "execution_reviewed",
-        "abc_chain_completed",
-        "barriers_identified",
-        "coping_strategy_selected",
-        "review_decision_made",
-    ),
-}
+from .workflow_contract import MODULE_STEP_KEYS
 
 
 def normalise_completed_steps(module: str, raw: object) -> list[str]:
@@ -62,7 +37,7 @@ def normalise_completed_steps(module: str, raw: object) -> list[str]:
 
 
 def required_steps_complete(module: str, completed: list[str]) -> bool:
-    return set(MODULE_STEP_KEYS.get(module, ())).issubset(completed)
+    return module in MODULE_STEP_KEYS and set(MODULE_STEP_KEYS[module]).issubset(completed)
 
 
 async def _conversation(db: AsyncSession, session_id: str) -> Conversation | None:
@@ -86,6 +61,10 @@ async def load_conversation_workflow(
     sessionmaker: async_sessionmaker[AsyncSession], *, session_id: str
 ) -> tuple[dict[str, list[str]], str | None]:
     """Return explicit completed steps and the active PA cycle."""
+    from .v2_profile import enabled
+    if enabled():
+        from .v2_workflow import load_workflow
+        return await load_workflow(sessionmaker, session_id)
     async with sessionmaker() as db:
         conversation = await _conversation(db, session_id)
         if conversation is None:
@@ -139,12 +118,18 @@ async def apply_router_decision(
     conversation = await _conversation(db, session_id)
     if conversation is None or conversation.subject_id != subject_id:
         return None
+    allowed_moves = {"module_1": {"module_1","module_2"}, "module_2": {"module_2","module_3"},
+                     "module_3": {"module_3","module_4"}, "module_4": {"module_4","module_2"}}
+    if target_module not in allowed_moves.get(current_module, set()):
+        raise ValueError("Invalid workflow transition")
     progress = await _progress(db, conversation.id, create=True)
     assert progress is not None
 
     column = f"{current_module}_steps"
     previous = normalise_completed_steps(current_module, getattr(progress, column))
     merged = normalise_completed_steps(current_module, previous + completed_steps)
+    if current_module != target_module and not required_steps_complete(current_module, merged):
+        raise ValueError("Cannot advance with incomplete required steps")
     setattr(progress, column, merged)
 
     starts_first_cycle = current_module == "module_1" and target_module == "module_2"
@@ -168,7 +153,7 @@ async def apply_router_decision(
     profile = (
         await db.execute(select(UserProfile).where(UserProfile.uuid == subject_id))
     ).scalar_one_or_none()
-    if profile is not None and target_module != "module_1":
+    if profile is not None and current_module == "module_1" and target_module == "module_2":
         # The only user-level workflow fact: module one has ever been passed.
         # The current module is conversation-level and is never projected here.
         profile.module1_done_flag = True
@@ -211,6 +196,10 @@ async def linked_record_id(
 async def current_cycle_for_session(
     db: AsyncSession, *, session_id: str
 ) -> str | None:
+    from .v2_profile import enabled
+    if enabled():
+        from .v2_workflow import current_cycle
+        return await current_cycle(db, session_id)
     conversation = await _conversation(db, session_id)
     if conversation is None:
         return None
@@ -296,6 +285,9 @@ async def derived_current_module(db: AsyncSession, *, subject_id: str) -> str | 
         )
     ).scalar_one_or_none()
     if module is None:
+        from .v2_profile import enabled
+        if enabled():
+            return None
         return (
             await db.execute(
                 select(UserProfile.current_module).where(UserProfile.uuid == subject_id)

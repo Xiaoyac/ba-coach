@@ -7,7 +7,7 @@
 
 import { API_BASE } from "@/lib/api";
 import { localTimezone } from "@/lib/identity";
-import { apiHeaders } from "@/lib/http";
+import { apiHeaders, checkAuthentication } from "@/lib/http";
 
 export type Score = number;
 
@@ -56,9 +56,9 @@ export interface AssessmentHistoryPage {
 }
 
 async function parse<T>(res: Response, what: string): Promise<T> {
+  checkAuthentication(res);
   if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`${what} failed (${res.status}): ${detail}`);
+    throw new Error(`每日记录暂时无法加载或保存，请稍后重试（${res.status}）。`);
   }
   return res.json() as Promise<T>;
 }

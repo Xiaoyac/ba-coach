@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .models import PromptOverride
 from .prompts import GLOBAL_PROMPT, MODULE_PROMPTS
 from .router_agent import ROUTER_AGENT_PROMPT, ROUTER_RUNTIME_CONTRACT
+from .knowledge_mediator import MEDIATOR_PROMPT
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,8 @@ class PromptDefinition:
             return GLOBAL_PROMPT
         if self.key == "router_agent":
             return ROUTER_AGENT_PROMPT
+        if self.key == "knowledge_mediator":
+            return MEDIATOR_PROMPT
         return MODULE_PROMPTS[self.key]
 
 
@@ -38,6 +41,7 @@ PROMPT_DEFINITIONS: tuple[PromptDefinition, ...] = (
         "模块跳转 Agent",
         "判断下一模块；服务器会另行追加不可覆盖的跨轮判定与防循环规则",
     ),
+    PromptDefinition("knowledge_mediator", "知识使用中介 LLM", "检索后指导各模块使用知识；保存后新回合生效，接口与安全约束由服务器追加"),
 )
 PROMPT_DEFINITION_BY_KEY = {item.key: item for item in PROMPT_DEFINITIONS}
 
@@ -82,3 +86,8 @@ async def effective_router_prompt(db: AsyncSession) -> str:
     ).scalar_one_or_none()
     editable = row.content if row else ROUTER_AGENT_PROMPT
     return editable + "\n\n" + ROUTER_RUNTIME_CONTRACT
+
+
+async def effective_mediator_prompt(db: AsyncSession) -> str:
+    row = (await db.execute(select(PromptOverride).where(PromptOverride.prompt_key == "knowledge_mediator"))).scalar_one_or_none()
+    return row.content if row else MEDIATOR_PROMPT

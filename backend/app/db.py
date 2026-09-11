@@ -90,6 +90,8 @@ def get_engine() -> AsyncEngine:
             # server already dropped.
             kwargs["pool_pre_ping"] = True
             kwargs["pool_recycle"] = 1800
+            if settings.database_schema_version == "v2":
+                kwargs["connect_args"] = {"init_command": "SET time_zone = '+00:00'"}
         _engine = create_async_engine(url, **kwargs)
 
         if _engine.url.get_backend_name() == "sqlite":

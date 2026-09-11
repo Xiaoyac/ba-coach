@@ -267,7 +267,8 @@ def test_stream_emits_meta_deltas_and_done(client: TestClient) -> None:
     assert kinds[0] == "meta"  # session id before anything else
     assert events[0][1]["model"] == "stub-1"
     assert kinds.count("delta") == 3
-    assert kinds[-1] == "done"
+    assert "done" in kinds
+    assert events[-1] == ("persisted", {"saved": False})  # anonymous, no durable account
     assert "".join(d["text"] for n, d in events if n == "delta") == "hello"
 
 
@@ -444,7 +445,7 @@ def test_stream_falls_back_to_final_state_and_persists_reply(
     assert [
         data.get("text") for name, data in events if name == "reasoning_delta"
     ] == ["fallback reasoning"]
-    assert events[-1][0] == "done"
+    assert events[-1] == ("persisted", {"saved": True})
     session_id = events[0][1]["session_id"]
     detail = client.get(
         f"/api/conversations/{session_id}", headers=auth_headers
@@ -454,6 +455,7 @@ def test_stream_falls_back_to_final_state_and_persists_reply(
         ("assistant", "fallback reply"),
     ]
     assert detail["messages"][-1]["reasoning_content"] == "fallback reasoning"
+    assert detail["revision"] >= 2
 
 
 def test_stream_reports_provider_failure_in_band(client: TestClient, provider) -> None:

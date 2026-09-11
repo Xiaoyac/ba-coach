@@ -1,4 +1,4 @@
-import { apiHeaders } from "@/lib/http";
+import { apiHeaders, checkAuthentication } from "@/lib/http";
 
 /**
  * Where the backend lives, from the browser's point of view.
@@ -119,6 +119,7 @@ export async function streamChat(
     body: JSON.stringify(body),
     signal,
   });
+  checkAuthentication(res);
 
   if (!res.ok || !res.body) {
     handlers.onError?.(`Chat request failed (${res.status})`);
@@ -129,10 +130,11 @@ export async function streamChat(
   const decoder = new TextDecoder();
   let buffer = "";
 
-  while (true) {
+  try { while (true) {
     const { done, value } = await reader.read();
-    if (done) break;
+    if (done) throw new Error("连接已中断，正在同步已保存的回复；请勿重复发送。");
     buffer += decoder.decode(value, { stream: true });
+    buffer = buffer.replace(/\r\n/g, "\n");
 
     // SSE frames are separated by a blank line.
     const frames = buffer.split("\n\n");
@@ -164,10 +166,11 @@ export async function streamChat(
         case "error":
           handlers.onError?.(payload.detail);
           break;
-        case "done":
+        case "persisted":
           handlers.onDone?.();
-          break;
+          if (payload.saved === false) handlers.onError?.("回复已生成，但保存失败，请先复制回复后再刷新。");
+          return;
       }
     }
-  }
+  } } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
 }

@@ -1,0 +1,481 @@
+{
+  "$defs": {
+    "ReminderWindow": {
+      "description": "A precise \"from X to Y\" the six-bucket ENUM cannot express.",
+      "properties": {
+        "start_minute": {
+          "maximum": 1439,
+          "minimum": 0,
+          "title": "Start Minute",
+          "type": "integer"
+        },
+        "end_minute": {
+          "maximum": 1439,
+          "minimum": 0,
+          "title": "End Minute",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start_minute",
+        "end_minute"
+      ],
+      "title": "ReminderWindow",
+      "type": "object"
+    },
+    "Supporter": {
+      "description": "One person the subject can realistically do something with.\n\n`relation` is free text, not the six-value ENUM `user_profile` uses: the\npoint of the extension table is that \"室友\" and \"教练\" are real answers.\nThe legacy columns mirror the first two positions; an unsupported custom\nrelation projects to NULL but remains intact in the canonical list.",
+      "properties": {
+        "relation": {
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Relation",
+          "type": "string"
+        },
+        "nickname": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nickname"
+        },
+        "influence": {
+          "anyOf": [
+            {
+              "enum": [
+                "弱",
+                "中",
+                "强"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Influence"
+        }
+      },
+      "required": [
+        "relation"
+      ],
+      "title": "Supporter",
+      "type": "object"
+    }
+  },
+  "description": "PATCH /api/profile. Omitted fields are left alone; null clears one.\n\nThe distinction matters: a form that only edits one section must not wipe\nthe others. The handler applies `model_dump(exclude_unset=True)`, so\n\"absent\" and \"explicitly set to null\" are genuinely different requests —\nthe first is a no-op for that column, the second empties it.\n\nDeliberately *not* here: `current_module`, `module1_done_flag`,\n`risk_level`, `expression_style`. The first two are programme state the\nrouter owns, and letting a subject POST their own `current_module` would\nlet them skip the gating that module 1 exists to enforce. The last two are\nassessments *about* someone, not statements *by* them.",
+  "properties": {
+    "nickname": {
+      "anyOf": [
+        {
+          "maxLength": 58,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Nickname"
+    },
+    "tag": {
+      "anyOf": [
+        {
+          "maxLength": 5,
+          "minLength": 5,
+          "pattern": "^[0-9]{5}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tag"
+    },
+    "age": {
+      "anyOf": [
+        {
+          "maximum": 120,
+          "minimum": 10,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Age"
+    },
+    "living_status": {
+      "anyOf": [
+        {
+          "enum": [
+            "独居",
+            "和家人",
+            "和朋友",
+            "和恋人"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Living Status"
+    },
+    "has_supporter": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Has Supporter"
+    },
+    "supporter1_relation": {
+      "anyOf": [
+        {
+          "enum": [
+            "父母",
+            "恋人",
+            "子女",
+            "朋友",
+            "兄弟姐妹",
+            "同事"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Supporter1 Relation"
+    },
+    "supporter1_nickname": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Supporter1 Nickname"
+    },
+    "supporter1_influence": {
+      "anyOf": [
+        {
+          "enum": [
+            "弱",
+            "中",
+            "强"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Supporter1 Influence"
+    },
+    "supporter2_relation": {
+      "anyOf": [
+        {
+          "enum": [
+            "父母",
+            "恋人",
+            "子女",
+            "朋友",
+            "兄弟姐妹",
+            "同事"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Supporter2 Relation"
+    },
+    "supporter2_nickname": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Supporter2 Nickname"
+    },
+    "supporter2_influence": {
+      "anyOf": [
+        {
+          "enum": [
+            "弱",
+            "中",
+            "强"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Supporter2 Influence"
+    },
+    "communication_preference": {
+      "anyOf": [
+        {
+          "enum": [
+            "直接明了",
+            "温柔引导",
+            "理性分析",
+            "轻松幽默"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Communication Preference"
+    },
+    "reminder_frequency": {
+      "anyOf": [
+        {
+          "enum": [
+            "每天一次",
+            "隔天一次",
+            "每三天一次",
+            "每周一次",
+            "仅在我主动找你时提醒",
+            "暂时不需要提醒"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reminder Frequency"
+    },
+    "reminder_time_slot": {
+      "anyOf": [
+        {
+          "enum": [
+            "早晨7-9",
+            "上午9-12",
+            "中午12-14",
+            "下午14-18",
+            "傍晚18-21",
+            "晚上21-23"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reminder Time Slot"
+    },
+    "physical_condition": {
+      "anyOf": [
+        {
+          "items": {
+            "enum": [
+              "膝关节损伤",
+              "腰背酸痛",
+              "慢性疼痛",
+              "易疲劳",
+              "睡眠障碍",
+              "偏头痛",
+              "哮喘",
+              "眩晕",
+              "鼻炎",
+              "术后恢复期"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Physical Condition"
+    },
+    "behavior_taboo": {
+      "anyOf": [
+        {
+          "items": {
+            "enum": [
+              "不能剧烈运动",
+              "不能久站",
+              "不能晒太阳",
+              "怕吵闹",
+              "怕人多",
+              "怕拥挤闭塞的地方",
+              "不坐公共交通"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Behavior Taboo"
+    },
+    "content_taboo": {
+      "anyOf": [
+        {
+          "items": {
+            "enum": [
+              "不谈工作",
+              "不谈学习",
+              "不谈家庭",
+              "不谈身材外貌",
+              "不谈感情",
+              "不谈未来计划",
+              "不喜欢被比较",
+              "反感正能量说教",
+              "不喜欢被经常催促"
+            ],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Content Taboo"
+    },
+    "activity_environment": {
+      "anyOf": [
+        {
+          "enum": [
+            "室内",
+            "户外",
+            "都可以"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Activity Environment"
+    },
+    "activity_social": {
+      "anyOf": [
+        {
+          "enum": [
+            "独自",
+            "一对一",
+            "群体",
+            "都可以"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Activity Social"
+    },
+    "activity_intensity": {
+      "anyOf": [
+        {
+          "enum": [
+            "安静",
+            "热闹",
+            "都可以"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Activity Intensity"
+    },
+    "supporters": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/Supporter"
+          },
+          "maxItems": 10,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Supporters"
+    },
+    "reminder_window": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReminderWindow"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "preferred_provider": {
+      "anyOf": [
+        {
+          "enum": [
+            "deepseek",
+            "doubao"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Preferred Provider"
+    }
+  },
+  "title": "ProfileUpdate",
+  "type": "object"
+}

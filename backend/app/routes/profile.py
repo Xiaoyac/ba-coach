@@ -42,6 +42,7 @@ from ..models_business import UserProfile
 from ..providers import configured_providers
 from ..schemas import ProfileOut, ProfileUpdate, ReminderWindow, Supporter
 from ..workflow_state import derived_current_module
+from ..supporters import effective_supporters, LEGACY_SUPPORTER_FIELDS
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +124,7 @@ def _to_out(
     account_settings: AccountSettings | None,
     handle: AccountHandle | None,
 ) -> ProfileOut:
-    supporters = [Supporter(**s) for s in (extension.supporters or [])] if extension else []
+    supporters = effective_supporters(profile, extension)
     window = None
     if (
         extension is not None
@@ -141,7 +142,7 @@ def _to_out(
         display_id=handle.full_username if handle else None,
         age=profile.age,
         living_status=profile.living_status,
-        has_supporter=bool(profile.has_supporter),
+        has_supporter=bool(supporters),
         supporter1_relation=profile.supporter1_relation,
         supporter1_nickname=profile.supporter1_nickname,
         supporter1_influence=profile.supporter1_influence,
@@ -237,6 +238,9 @@ async def read_profile(
     # process environment. A cached response can keep a newly configured
     # provider disabled in the UI even after the backend has restarted.
     response.headers["Cache-Control"] = "no-store"
+    from .. import v2_profile
+    if v2_profile.enabled():
+        return await v2_profile.read(db, subject_id)
     profile = await _own_profile(db, subject_id)
     result = _to_out(
         profile,
@@ -254,6 +258,13 @@ async def update_profile(
     subject_id: str = Depends(require_subject_id),
     db: AsyncSession = Depends(get_db),
 ) -> ProfileOut:
+    from .. import v2_profile
+    if v2_profile.enabled():
+        try:
+            return await v2_profile.patch(db, subject_id, payload)
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(409, "昵称标签已被使用，请刷新后重试") from None
     profile = await _own_profile(db, subject_id)
 
     # `exclude_unset` is what makes a partial edit partial: a form that only
@@ -261,6 +272,11 @@ async def update_profile(
     # column keeps its value. Sending an explicit null still clears a field —
     # that is how "actually, I have no restrictions any more" is expressed.
     changes = payload.model_dump(exclude_unset=True)
+    legacy_edits = LEGACY_SUPPORTER_FIELDS.intersection(changes)
+    if "supporters" in changes and legacy_edits:
+        raise HTTPException(status_code=422, detail="请只提交 supporters 列表，不要同时修改旧支持者槽位")
+    if "supporters" in changes and "has_supporter" in changes and bool(changes["has_supporter"]) != bool(changes["supporters"]):
+        raise HTTPException(status_code=422, detail="has_supporter 必须与 supporters 列表一致")
     if not changes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="没有要修改的内容"
@@ -340,6 +356,40 @@ async def update_profile(
         elif key == "nickname" and isinstance(value, str):
             value = value.strip() or None
         setattr(profile, key, value)
+
+    # Older clients may edit slots, but must never erase the third and later
+    # entries. Synchronize their first-two edit back into the canonical list.
+    if legacy_edits:
+        had_list = extension is not None and extension.supporters is not None
+        existing = effective_supporters(profile, extension)
+        for i in ((1,2) if had_list else ()):
+            fields = {f"supporter{i}_{part}" for part in ("relation","nickname","influence")}
+            if not fields.intersection(legacy_edits):
+                continue
+            relation = getattr(profile, f"supporter{i}_relation")
+            if f"supporter{i}_relation" not in legacy_edits and i <= len(existing):
+                relation = existing[i-1].relation
+            nickname = getattr(profile, f"supporter{i}_nickname")
+            if relation or nickname:
+                person = Supporter(relation=relation or "未说明（旧档案）",nickname=nickname,
+                    influence=getattr(profile,f"supporter{i}_influence"))
+                if i <= len(existing): existing[i-1] = person
+                else: existing.append(person)
+            elif i <= len(existing):
+                # Use full-list writes for removal to avoid shifting another slot.
+                raise HTTPException(status_code=422, detail="删除支持者请提交完整 supporters 列表")
+        if extension is None:
+            extension = ProfileExtension(profile_uuid=subject_id)
+            db.add(extension)
+        extension.supporters = [s.model_dump() for s in existing]
+        if "has_supporter" in changes and bool(changes["has_supporter"]) != bool(existing):
+            raise HTTPException(status_code=422, detail="has_supporter 必须与支持者列表一致")
+        _project_onto_legacy_columns(profile,supporters=existing,window=None)
+    elif "supporters" in changes:
+        _project_onto_legacy_columns(profile,supporters=payload.supporters or [],window=None)
+    elif "has_supporter" in changes:
+        if bool(changes["has_supporter"]) != bool(effective_supporters(profile, extension)):
+            raise HTTPException(status_code=422, detail="支持者标记由列表决定，请编辑 supporters 列表")
 
     try:
         await db.commit()

@@ -1,7 +1,7 @@
 /** Client for the sidebar's conversation list, backed by `/api/conversations`. */
 
 import { API_BASE, type ChatMessage } from "@/lib/api";
-import { apiHeaders } from "@/lib/http";
+import { apiHeaders, checkAuthentication } from "@/lib/http";
 
 export interface ConversationSummary {
   session_id: string;
@@ -11,6 +11,7 @@ export interface ConversationSummary {
 }
 
 export interface ConversationDetail extends ConversationSummary {
+  revision?: number;
   messages: ChatMessage[];
   next_module: string | null;
 }
@@ -37,6 +38,7 @@ export function isMissing(error: unknown): boolean {
 }
 
 async function parse<T>(res: Response, what: string): Promise<T> {
+  checkAuthentication(res);
   if (!res.ok) {
     const detail = await res.text();
     throw new ConversationRequestError(
@@ -75,7 +77,7 @@ export async function fetchConversation(
 ): Promise<ConversationDetail> {
   const res = await fetch(
     `${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}`,
-    { headers: apiHeaders(), signal },
+    { headers: apiHeaders(), signal, cache: "no-store" },
   );
   return parse(res, "Loading the conversation");
 }
@@ -86,7 +88,7 @@ export async function fetchConversationRevision(
 ): Promise<{ revision: number }> {
   const res = await fetch(
     `${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}/revision`,
-    { headers: apiHeaders(), signal },
+    { headers: apiHeaders(), signal, cache: "no-store" },
   );
   return parse(res, "Checking the conversation revision");
 }

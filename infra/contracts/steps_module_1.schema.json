@@ -1,0 +1,14 @@
+{
+  "type": "array",
+  "items": {
+    "type": "string",
+    "enum": [
+      "core_problem_example",
+      "depression_cycle_formulated",
+      "ba_education_completed",
+      "goal_setting_consent"
+    ]
+  },
+  "uniqueItems": true,
+  "maxItems": 4
+}

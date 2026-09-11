@@ -7,7 +7,8 @@ export type PromptKey =
   | "module_2"
   | "module_3"
   | "module_4"
-  | "router_agent";
+  | "router_agent"
+  | "knowledge_mediator";
 
 export interface AdminPromptItem {
   key: PromptKey;

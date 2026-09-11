@@ -216,7 +216,7 @@ ActivitySocial = Literal["独自", "一对一", "群体", "都可以"]
 ActivityIntensity = Literal["安静", "热闹", "都可以"]
 ModelProvider = Literal["deepseek", "doubao"]
 PromptKey = Literal[
-    "global", "module_1", "module_2", "module_3", "module_4", "router_agent"
+    "global", "module_1", "module_2", "module_3", "module_4", "router_agent", "knowledge_mediator"
 ]
 
 
@@ -332,8 +332,8 @@ class Supporter(BaseModel):
 
     `relation` is free text, not the six-value ENUM `user_profile` uses: the
     point of the extension table is that "室友" and "教练" are real answers.
-    The legacy columns still get the first two whose relation happens to be one
-    of the six — see `routes/profile.py`.
+    The legacy columns mirror the first two positions; an unsupported custom
+    relation projects to NULL but remains intact in the canonical list.
     """
 
     relation: str = Field(..., min_length=1, max_length=32)
@@ -619,6 +619,7 @@ class ConversationSummary(BaseModel):
 class ConversationDetail(ConversationSummary):
     """A conversation's full transcript, for switching into it."""
 
+    revision: int = 0
     messages: list[Message] = Field(default_factory=list)
     # Durable pointer for the next turn. This is deliberately not called
     # `module`: the latest assistant reply may belong to the previous module.

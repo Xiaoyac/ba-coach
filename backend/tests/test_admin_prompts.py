@@ -64,6 +64,7 @@ def test_admin_reads_all_source_defaults(
         "module_3",
         "module_4",
         "router_agent",
+        "knowledge_mediator",
     ]
     assert all(item["content"] for item in prompts)
     assert all(item["is_overridden"] is False for item in prompts)

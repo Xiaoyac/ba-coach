@@ -187,11 +187,14 @@ async def _issue_session(db: AsyncSession, account: UserAccount) -> tuple[str, A
 
 
 async def _account_info(db: AsyncSession, account: UserAccount) -> AccountInfo:
-    profile = (
-        await db.execute(
-            select(UserProfile).where(UserProfile.uuid == account.profile_uuid)
-        )
-    ).scalar_one_or_none()
+    from .. import v2_profile
+    if v2_profile.enabled():
+        from ..database_v2_schema import user_profile
+        from types import SimpleNamespace
+        row = (await db.execute(select(user_profile.c.nickname).where(user_profile.c.uuid == account.profile_uuid))).first()
+        profile = SimpleNamespace(nickname=row[0]) if row else None
+    else:
+        profile = (await db.execute(select(UserProfile).where(UserProfile.uuid == account.profile_uuid))).scalar_one_or_none()
     account_settings = (
         await db.execute(
             select(AccountSettings).where(AccountSettings.account_id == account.id)
@@ -265,6 +268,7 @@ async def register(
             detail="这个邮箱已绑定其他账号",
         )
 
+    from .. import v2_profile
     profile = UserProfile(
         nickname=nickname,
         age=payload.age,
@@ -274,7 +278,13 @@ async def register(
         behavior_taboo=_set_value(payload.behavior_taboo),
         current_module="开场",
     )
-    db.add(profile)
+    if v2_profile.enabled():
+        import uuid
+        from types import SimpleNamespace
+        profile = SimpleNamespace(uuid=str(uuid.uuid4()))
+        await v2_profile.create(db, profile.uuid, payload)
+    else:
+        db.add(profile)
     try:
         await db.flush()
         account = UserAccount(

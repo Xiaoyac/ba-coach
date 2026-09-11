@@ -23,6 +23,7 @@ from .routes import (
     admin_knowledge_router,
     admin_prompts_router,
     admin_sandbox_router,
+    admin_evaluations_router,
     assessment_router,
     auth_router,
     chat_router,
@@ -43,15 +44,29 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # `create_all` only adds missing tables — it never alters existing ones.
     # Reach for Alembic before changing a column that already exists anywhere
     # you care about.
-    await init_db()
+    maintenance_enabled = get_settings().startup_db_maintenance
+    if get_settings().database_schema_version == "v2":
+        maintenance_enabled = False
+        from sqlalchemy import select
+        from .database_v2_schema import metadata as v2_schema
+        async with get_sessionmaker()() as db:
+            # Fail closed on a half-migrated deployment, instead of serving a
+            # healthy homepage over incompatible business tables.
+            for table in v2_schema.tables.values():
+                await db.execute(select(table).limit(0))
+    if maintenance_enabled:
+        await init_db()
     # Conversations created before the opening turn moved server-side are
     # repaired once and then remain ordinary durable transcripts.
-    async with get_sessionmaker()() as db:
-        repaired = await backfill_opening_messages(db)
-        if repaired:
-            logging.getLogger(__name__).info(
-                "backfilled opening message into %d conversation(s)", repaired
-            )
+    if maintenance_enabled:
+        async with get_sessionmaker()() as db:
+            repaired = await backfill_opening_messages(db)
+            if repaired:
+                logging.getLogger(__name__).info(
+                    "backfilled opening message into %d conversation(s)", repaired
+                )
+    else:
+        logging.getLogger(__name__).info("startup database maintenance disabled")
     try:
         chunks = await warm_knowledge_base()
         logging.getLogger(__name__).info(
@@ -96,11 +111,14 @@ def create_app() -> FastAPI:
     app.include_router(admin_knowledge_router, prefix=settings.api_prefix)
     app.include_router(admin_prompts_router, prefix=settings.api_prefix)
     app.include_router(admin_sandbox_router, prefix=settings.api_prefix)
+    app.include_router(admin_evaluations_router, prefix=settings.api_prefix)
     app.include_router(chat_router, prefix=settings.api_prefix)
     app.include_router(assessment_router, prefix=settings.api_prefix)
     app.include_router(conversation_router, prefix=settings.api_prefix)
     app.include_router(issue_reports_router, prefix=settings.api_prefix)
     app.include_router(profile_router, prefix=settings.api_prefix)
+    from .routes.program import router as program_router
+    app.include_router(program_router, prefix=settings.api_prefix)
 
     @app.get("/health", response_model=HealthResponse, tags=["meta"])
     async def health() -> HealthResponse:

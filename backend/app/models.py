@@ -6,13 +6,8 @@
     conversations             one row per chat session, for the sidebar
       └── conversation_messages   its full transcript, append-only
 
-On identity: this app has no auth and no user table, so `subject_id` is
-whatever opaque id the client presents (today: a UUID the browser generates
-once and keeps in localStorage). It is deliberately named `subject_id` rather
-than `user_id` because it is NOT authenticated — anyone who learns an id can
-read and write that subject's rows. When real accounts arrive, backfill this
-column from the user table and add the foreign key; nothing else in the schema
-has to move. See `app.identity`.
+Identity is resolved from authenticated bearer sessions by `app.identity`.
+`subject_id` is the account's profile UUID, not a client-asserted identity.
 
 On dates: `recorded_on` is the subject's *local* date, not UTC. "Have I done
 today's assessment?" is a question about the wall clock the person is looking
@@ -54,6 +49,7 @@ from sqlalchemy.dialects.mysql import LONGTEXT, MEDIUMBLOB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base, UTCDateTime
+from .config import get_settings
 
 # Status values for AssessmentEntry.status.
 STATUS_COMPLETED = "completed"
@@ -742,7 +738,10 @@ class ConversationRuntimeState(Base):
     conversation_id: Mapped[int] = mapped_column(
         ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True
     )
-    module: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    module: Mapped[str | None] = mapped_column(
+        "current_module" if get_settings().database_schema_version == "v2" else "module",
+        String(16), nullable=True,
+    )
     memory: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(),

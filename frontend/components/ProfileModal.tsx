@@ -48,6 +48,7 @@ export default function ProfileModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -57,6 +58,9 @@ export default function ProfileModal({
     // "读不到档案" branch painted for a moment before the second attempt
     // resolved — which reads as a failure, not as loading.
     let cancelled = false;
+    setLoading(true);
+    setError(null);
+    const timeout = window.setTimeout(() => controller.abort(), 15000);
 
     fetchProfile(controller.signal)
       .then((loaded) => {
@@ -65,16 +69,17 @@ export default function ProfileModal({
         setLoading(false);
       })
       .catch((err) => {
-        if (cancelled || err?.name === "AbortError") return;
-        setError(String(err?.message ?? err));
+        if (cancelled) return;
+        setError(err?.name === "AbortError" ? "档案加载超时，请检查网络后重新加载。" : String(err?.message ?? err));
         setLoading(false);
-      });
+      }).finally(() => window.clearTimeout(timeout));
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timeout);
       controller.abort();
     };
-  }, []);
+  }, [loadAttempt]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -199,9 +204,10 @@ export default function ProfileModal({
             ))}
           </div>
         ) : !profile ? (
-          <p role="alert" className="rounded-xl bg-alert-wash px-3 py-2.5 text-[0.78rem] text-alert-ink">
-            {error ?? "读不到档案"}
-          </p>
+          <div role="alert" className="rounded-xl bg-alert-wash px-3 py-2.5 text-[0.78rem] text-alert-ink">
+            <p>{error ?? "暂时无法读取档案"}</p>
+            <button className="mt-3 rounded-lg border border-line px-3 py-2" onClick={() => setLoadAttempt(n => n + 1)}>重新加载档案</button>
+          </div>
         ) : (
           <>
             <Section title="基本信息">

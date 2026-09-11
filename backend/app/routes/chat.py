@@ -213,7 +213,8 @@ async def _resume_or_create(
     """
     if request.session_id:
         live = await store.get(request.session_id)
-        if live is not None:
+        from ..v2_profile import enabled as v2_enabled
+        if live is not None and not (v2_enabled() and subject_id):
             return live
 
         if subject_id:
@@ -628,6 +629,10 @@ async def chat_stream(
                     context,
                     assistant_message_id=assistant_message_id,
                 )
+
+            # Unlike graph "done", this acknowledges the durable transcript.
+            # Clients may stop reading here even if a mobile proxy holds EOF.
+            yield _sse("persisted", {"saved": assistant_message_id is not None})
 
     return StreamingResponse(
         event_source(),

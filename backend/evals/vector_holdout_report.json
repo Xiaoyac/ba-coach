@@ -1,0 +1,3556 @@
+{
+  "summary": {
+    "p0": {
+      "cases": 44,
+      "returned": 1.7955,
+      "hit_at_k": 0.9286,
+      "recall_at_k": 0.8214,
+      "precision_returned": 0.469,
+      "mrr": 0.878,
+      "ndcg_at_k": 0.8294,
+      "correct_empty": 0.5625,
+      "elapsed_ms": 18.3341
+    },
+    "vector": {
+      "cases": 44,
+      "returned": 1.75,
+      "hit_at_k": 0.6071,
+      "recall_at_k": 0.5357,
+      "precision_returned": 0.2742,
+      "mrr": 0.5714,
+      "ndcg_at_k": 0.5377,
+      "correct_empty": 0.6875,
+      "elapsed_ms": 58.4287
+    },
+    "hybrid": {
+      "cases": 44,
+      "returned": 2.2727,
+      "hit_at_k": 0.9643,
+      "recall_at_k": 0.8571,
+      "precision_returned": 0.331,
+      "mrr": 0.8304,
+      "ndcg_at_k": 0.797,
+      "correct_empty": 0.5,
+      "elapsed_ms": 80.1032
+    }
+  },
+  "by_kind": {
+    "bilingual": {
+      "p0": {
+        "cases": 5,
+        "returned": 3.8,
+        "hit_at_k": 1.0,
+        "recall_at_k": 0.6667,
+        "precision_returned": 0.3167,
+        "mrr": 0.85,
+        "ndcg_at_k": 0.7028,
+        "correct_empty": null,
+        "elapsed_ms": 33.148
+      },
+      "vector": {
+        "cases": 5,
+        "returned": 2.8,
+        "hit_at_k": 0.4,
+        "recall_at_k": 0.2667,
+        "precision_returned": 0.25,
+        "mrr": 0.4,
+        "ndcg_at_k": 0.3273,
+        "correct_empty": null,
+        "elapsed_ms": 56.4374
+      },
+      "hybrid": {
+        "cases": 5,
+        "returned": 4.0,
+        "hit_at_k": 1.0,
+        "recall_at_k": 0.6667,
+        "precision_returned": 0.3,
+        "mrr": 0.85,
+        "ndcg_at_k": 0.7028,
+        "correct_empty": null,
+        "elapsed_ms": 91.3994
+      }
+    },
+    "chitchat": {
+      "p0": {
+        "cases": 6,
+        "returned": 1.1667,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0.5,
+        "elapsed_ms": 18.1182
+      },
+      "vector": {
+        "cases": 6,
+        "returned": 1.5,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0.3333,
+        "elapsed_ms": 54.9267
+      },
+      "hybrid": {
+        "cases": 6,
+        "returned": 2.0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0.3333,
+        "elapsed_ms": 71.9335
+      }
+    },
+    "colloquial": {
+      "p0": {
+        "cases": 1,
+        "returned": 2.0,
+        "hit_at_k": 1.0,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 6.765
+      },
+      "vector": {
+        "cases": 1,
+        "returned": 2.0,
+        "hit_at_k": 0.0,
+        "recall_at_k": 0.0,
+        "precision_returned": 0.0,
+        "mrr": 0.0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 58.883
+      },
+      "hybrid": {
+        "cases": 1,
+        "returned": 2.0,
+        "hit_at_k": 1.0,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 65.739
+      }
+    },
+    "english": {
+      "p0": {
+        "cases": 1,
+        "returned": 4.0,
+        "hit_at_k": 1.0,
+        "recall_at_k": 0.5,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 0.6367,
+        "correct_empty": null,
+        "elapsed_ms": 29.656
+      },
+      "vector": {
+        "cases": 1,
+        "returned": 4.0,
+        "hit_at_k": 1.0,
+        "recall_at_k": 0.5,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 0.6367,
+        "correct_empty": null,
+        "elapsed_ms": 53.382
+      },
+      "hybrid": {
+        "cases": 1,
+        "returned": 4.0,
+        "hit_at_k": 1.0,
+        "recall_at_k": 0.5,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 0.6367,
+        "correct_empty": null,
+        "elapsed_ms": 88.285
+      }
+    },
+    "goal_card": {
+      "p0": {
+        "cases": 1,
+        "returned": 3.0,
+        "hit_at_k": 1.0,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.3333,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 27.314
+      },
+      "vector": {
+        "cases": 1,
+        "returned": 1.0,
+        "hit_at_k": 0.0,
+        "recall_at_k": 0.0,
+        "precision_returned": 0.0,
+        "mrr": 0.0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 67.483
+      },
+      "hybrid": {
+        "cases": 1,
+        "returned": 3.0,
+        "hit_at_k": 1.0,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.3333,
+        "mrr": 0.5,
+        "ndcg_at_k": 0.6309,
+        "correct_empty": null,
+        "elapsed_ms": 93.044
+      }
+    },
+    "irrelevant": {
+      "p0": {
+        "cases": 8,
+        "returned": 0.75,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0.625,
+        "elapsed_ms": 16.8715
+      },
+      "vector": {
+        "cases": 8,
+        "returned": 0.125,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0.875,
+        "elapsed_ms": 58.0346
+      },
+      "hybrid": {
+        "cases": 8,
+        "returned": 0.75,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0.625,
+        "elapsed_ms": 74.474
+      }
+    },
+    "module_boundary": {
+      "p0": {
+        "cases": 2,
+        "returned": 0.5,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0.5,
+        "elapsed_ms": 5.571
+      },
+      "vector": {
+        "cases": 2,
+        "returned": 0.0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1.0,
+        "elapsed_ms": 55.307
+      },
+      "hybrid": {
+        "cases": 2,
+        "returned": 0.5,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0.5,
+        "elapsed_ms": 61.0565
+      }
+    },
+    "multi_turn": {
+      "p0": {
+        "cases": 2,
+        "returned": 2.5,
+        "hit_at_k": 1.0,
+        "recall_at_k": 0.75,
+        "precision_returned": 0.625,
+        "mrr": 0.6667,
+        "ndcg_at_k": 0.6533,
+        "correct_empty": null,
+        "elapsed_ms": 20.7465
+      },
+      "vector": {
+        "cases": 2,
+        "returned": 2.0,
+        "hit_at_k": 1.0,
+        "recall_at_k": 0.75,
+        "precision_returned": 0.5,
+        "mrr": 0.75,
+        "ndcg_at_k": 0.6934,
+        "correct_empty": null,
+        "elapsed_ms": 68.4435
+      },
+      "hybrid": {
+        "cases": 2,
+        "returned": 3.0,
+        "hit_at_k": 1.0,
+        "recall_at_k": 0.75,
+        "precision_returned": 0.375,
+        "mrr": 1.0,
+        "ndcg_at_k": 0.8066,
+        "correct_empty": null,
+        "elapsed_ms": 88.1855
+      }
+    },
+    "negation": {
+      "p0": {
+        "cases": 1,
+        "returned": 4.0,
+        "hit_at_k": 0.0,
+        "recall_at_k": 0.0,
+        "precision_returned": 0.0,
+        "mrr": 0.0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 32.496
+      },
+      "vector": {
+        "cases": 1,
+        "returned": 0.0,
+        "hit_at_k": 0.0,
+        "recall_at_k": 0.0,
+        "precision_returned": null,
+        "mrr": 0.0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 57.288
+      },
+      "hybrid": {
+        "cases": 1,
+        "returned": 4.0,
+        "hit_at_k": 0.0,
+        "recall_at_k": 0.0,
+        "precision_returned": 0.0,
+        "mrr": 0.0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 97.623
+      }
+    },
+    "term": {
+      "p0": {
+        "cases": 17,
+        "returned": 1.6471,
+        "hit_at_k": 0.9412,
+        "recall_at_k": 0.9216,
+        "precision_returned": 0.7206,
+        "mrr": 0.9412,
+        "ndcg_at_k": 0.9274,
+        "correct_empty": null,
+        "elapsed_ms": 14.6126
+      },
+      "vector": {
+        "cases": 17,
+        "returned": 2.4706,
+        "hit_at_k": 0.7059,
+        "recall_at_k": 0.6863,
+        "precision_returned": 0.3529,
+        "mrr": 0.6765,
+        "ndcg_at_k": 0.6704,
+        "correct_empty": null,
+        "elapsed_ms": 59.4296
+      },
+      "hybrid": {
+        "cases": 17,
+        "returned": 2.4706,
+        "hit_at_k": 1.0,
+        "recall_at_k": 0.9804,
+        "precision_returned": 0.4902,
+        "mrr": 0.8529,
+        "ndcg_at_k": 0.8776,
+        "correct_empty": null,
+        "elapsed_ms": 82.1751
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "holdout-context-01",
+      "kind": "multi_turn",
+      "module": "module_2",
+      "query": "那这个活动怎么分类？\n我打算尝试打篮球。",
+      "p0": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 0.5,
+        "precision_returned": 0.25,
+        "mrr": 0.3333333333333333,
+        "ndcg_at_k": 0.3065735963827292,
+        "correct_empty": null,
+        "elapsed_ms": 34.747,
+        "hits": [
+          {
+            "id": "kb:124",
+            "source": "7~9章(2).md · 肯尼斯-失业与反刍",
+            "score": 7.6035
+          },
+          {
+            "id": "kb:516",
+            "source": "动机访谈法.md · 选择中立性",
+            "score": 6.4234
+          },
+          {
+            "id": "kb:210",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Sports",
+            "score": 6.2964
+          },
+          {
+            "id": "kb:578",
+            "source": "动机访谈法.md · 实现意图",
+            "score": 5.7662
+          }
+        ]
+      },
+      "vector": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 0.5,
+        "precision_returned": 0.5,
+        "mrr": 0.5,
+        "ndcg_at_k": 0.38685280723454163,
+        "correct_empty": null,
+        "elapsed_ms": 68.244,
+        "hits": [
+          {
+            "id": "kb:217",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Sports",
+            "score": 0.5410705355324955
+          },
+          {
+            "id": "kb:211",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Sports",
+            "score": 0.5063668315159624
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 0.5,
+        "precision_returned": 0.25,
+        "mrr": 1.0,
+        "ndcg_at_k": 0.6131471927654584,
+        "correct_empty": null,
+        "elapsed_ms": 98.199,
+        "hits": [
+          {
+            "id": "kb:211",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Sports",
+            "score": 0.0315136476426799
+          },
+          {
+            "id": "kb:124",
+            "source": "7~9章(2).md · 肯尼斯-失业与反刍",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:217",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Sports",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:516",
+            "source": "动机访谈法.md · 选择中立性",
+            "score": 0.016129032258064516
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-context-02",
+      "kind": "negation",
+      "module": "module_2",
+      "query": "我不想打篮球，想做瑜伽。",
+      "p0": {
+        "returned": 4,
+        "hit_at_k": 0,
+        "recall_at_k": 0.0,
+        "precision_returned": 0.0,
+        "mrr": 0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 32.496,
+        "hits": [
+          {
+            "id": "kb:301",
+            "source": "动机访谈法.md · 组织反映",
+            "score": 6.5382
+          },
+          {
+            "id": "kb:124",
+            "source": "7~9章(2).md · 肯尼斯-失业与反刍",
+            "score": 6.3229
+          },
+          {
+            "id": "kb:509",
+            "source": "动机访谈法.md · 临床例子",
+            "score": 6.1118
+          },
+          {
+            "id": "kb:210",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Sports",
+            "score": 2.711
+          }
+        ]
+      },
+      "vector": {
+        "returned": 0,
+        "hit_at_k": 0,
+        "recall_at_k": 0.0,
+        "precision_returned": null,
+        "mrr": 0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 57.288,
+        "hits": []
+      },
+      "hybrid": {
+        "returned": 4,
+        "hit_at_k": 0,
+        "recall_at_k": 0.0,
+        "precision_returned": 0.0,
+        "mrr": 0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 97.623,
+        "hits": [
+          {
+            "id": "kb:301",
+            "source": "动机访谈法.md · 组织反映",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:124",
+            "source": "7~9章(2).md · 肯尼斯-失业与反刍",
+            "score": 0.016129032258064516
+          },
+          {
+            "id": "kb:509",
+            "source": "动机访谈法.md · 临床例子",
+            "score": 0.015873015873015872
+          },
+          {
+            "id": "kb:210",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Sports",
+            "score": 0.015625
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-context-03",
+      "kind": "multi_turn",
+      "module": "module_4",
+      "query": "能再讲详细一点吗？\n制作个人治疗手册怎么促进泛化？",
+      "p0": {
+        "returned": 1,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 6.746,
+        "hits": [
+          {
+            "id": "kb:152",
+            "source": "7~9章(2).md · 促进泛化与制作个人治疗手册",
+            "score": 71.7883
+          }
+        ]
+      },
+      "vector": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 68.643,
+        "hits": [
+          {
+            "id": "kb:152",
+            "source": "7~9章(2).md · 促进泛化与制作个人治疗手册",
+            "score": 0.658917752904816
+          },
+          {
+            "id": "kb:14",
+            "source": "1~6章(2).md · 行为激活的效果",
+            "score": 0.6023721097422334
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 78.172,
+        "hits": [
+          {
+            "id": "kb:152",
+            "source": "7~9章(2).md · 促进泛化与制作个人治疗手册",
+            "score": 0.03278688524590164
+          },
+          {
+            "id": "kb:14",
+            "source": "1~6章(2).md · 行为激活的效果",
+            "score": 0.016129032258064516
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-context-04",
+      "kind": "goal_card",
+      "module": "module_3",
+      "query": "怎么制定这份安排？\n需要制定清晰的计划与目标，每周打篮球。",
+      "p0": {
+        "returned": 3,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.3333333333333333,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 27.314,
+        "hits": [
+          {
+            "id": "kb:595",
+            "source": "行为改变技术分类法第一版(1).md · 计划与目标",
+            "score": 24.3411
+          },
+          {
+            "id": "kb:557",
+            "source": "动机访谈法.md · 方案一：当有一个清晰的计划时",
+            "score": 15.8482
+          },
+          {
+            "id": "kb:555",
+            "source": "动机访谈法.md · 计划的动态性",
+            "score": 11.0413
+          }
+        ]
+      },
+      "vector": {
+        "returned": 1,
+        "hit_at_k": 0,
+        "recall_at_k": 0.0,
+        "precision_returned": 0.0,
+        "mrr": 0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 67.483,
+        "hits": [
+          {
+            "id": "kb:556",
+            "source": "动机访谈法.md · 三个计划方案",
+            "score": 0.5522768263781508
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 3,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.3333333333333333,
+        "mrr": 0.5,
+        "ndcg_at_k": 0.6309297535714575,
+        "correct_empty": null,
+        "elapsed_ms": 93.044,
+        "hits": [
+          {
+            "id": "kb:556",
+            "source": "动机访谈法.md · 三个计划方案",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:595",
+            "source": "行为改变技术分类法第一版(1).md · 计划与目标",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:557",
+            "source": "动机访谈法.md · 方案一：当有一个清晰的计划时",
+            "score": 0.016129032258064516
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-01",
+      "kind": "term",
+      "module": "module_1",
+      "query": "行为激活为什么要高度个人化？",
+      "p0": {
+        "returned": 1,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 6.442,
+        "hits": [
+          {
+            "id": "kb:7",
+            "source": "1~6章(2).md · 行为激活疗法的高度个人化",
+            "score": 34.5575
+          }
+        ]
+      },
+      "vector": {
+        "returned": 2,
+        "hit_at_k": 0,
+        "recall_at_k": 0.0,
+        "precision_returned": 0.0,
+        "mrr": 0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 59.937,
+        "hits": [
+          {
+            "id": "kb:121",
+            "source": "7~9章(2).md · 思考作为私人行为",
+            "score": 0.6831330889470829
+          },
+          {
+            "id": "kb:151",
+            "source": "7~9章(2).md · 行为激活的整体治疗逻辑与泛化",
+            "score": 0.6706756629528116
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 64.859,
+        "hits": [
+          {
+            "id": "kb:7",
+            "source": "1~6章(2).md · 行为激活疗法的高度个人化",
+            "score": 0.03177805800756621
+          },
+          {
+            "id": "kb:121",
+            "source": "7~9章(2).md · 思考作为私人行为",
+            "score": 0.01639344262295082
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-02",
+      "kind": "term",
+      "module": "module_1",
+      "query": "如何保持行为激活？",
+      "p0": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 7.481,
+        "hits": [
+          {
+            "id": "kb:16",
+            "source": "1~6章(2).md · 保持行为激活",
+            "score": 23.1037
+          },
+          {
+            "id": "kb:154",
+            "source": "7~9章(2).md · 将行为激活扩展到新的生活情形和目标",
+            "score": 13.7452
+          }
+        ]
+      },
+      "vector": {
+        "returned": 2,
+        "hit_at_k": 0,
+        "recall_at_k": 0.0,
+        "precision_returned": 0.0,
+        "mrr": 0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 58.719,
+        "hits": [
+          {
+            "id": "kb:13",
+            "source": "1~6章(2).md · 行为激活是否太简单",
+            "score": 0.6494135684107015
+          },
+          {
+            "id": "kb:145",
+            "source": "7~9章(2).md · 常见问题1：理解任务与技能不足",
+            "score": 0.6292203492347314
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 0.5,
+        "ndcg_at_k": 0.6309297535714575,
+        "correct_empty": null,
+        "elapsed_ms": 187.397,
+        "hits": [
+          {
+            "id": "kb:13",
+            "source": "1~6章(2).md · 行为激活是否太简单",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:16",
+            "source": "1~6章(2).md · 保持行为激活",
+            "score": 0.01639344262295082
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-03",
+      "kind": "term",
+      "module": "module_1",
+      "query": "治疗师怎样表现温暖和真诚？",
+      "p0": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 6.786,
+        "hits": [
+          {
+            "id": "kb:26",
+            "source": "1~6章(2).md · 温暖和真诚(Warmth and Genuineness)",
+            "score": 29.4435
+          },
+          {
+            "id": "kb:30",
+            "source": "1~6章(2).md · 真正关心的好处",
+            "score": 16.8782
+          }
+        ]
+      },
+      "vector": {
+        "returned": 2,
+        "hit_at_k": 0,
+        "recall_at_k": 0.0,
+        "precision_returned": 0.0,
+        "mrr": 0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 61.906,
+        "hits": [
+          {
+            "id": "kb:30",
+            "source": "1~6章(2).md · 真正关心的好处",
+            "score": 0.7221308721640773
+          },
+          {
+            "id": "kb:20",
+            "source": "1~6章(2).md · 治疗师的个人风格",
+            "score": 0.6923706872353305
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 0.5,
+        "ndcg_at_k": 0.6309297535714575,
+        "correct_empty": null,
+        "elapsed_ms": 72.703,
+        "hits": [
+          {
+            "id": "kb:30",
+            "source": "1~6章(2).md · 真正关心的好处",
+            "score": 0.03252247488101534
+          },
+          {
+            "id": "kb:26",
+            "source": "1~6章(2).md · 温暖和真诚(Warmth and Genuineness)",
+            "score": 0.032018442622950824
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-04",
+      "kind": "term",
+      "module": "module_1",
+      "query": "合作在行为激活治疗中是什么意思？",
+      "p0": {
+        "returned": 2,
+        "hit_at_k": 0,
+        "recall_at_k": 0.0,
+        "precision_returned": 0.0,
+        "mrr": 0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 6.978,
+        "hits": [
+          {
+            "id": "kb:160",
+            "source": "7~9章(2).md · 第九章总结：行为激活疗法的精髓",
+            "score": 10.5965
+          },
+          {
+            "id": "kb:16",
+            "source": "1~6章(2).md · 保持行为激活",
+            "score": 10.2867
+          }
+        ]
+      },
+      "vector": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 61.398,
+        "hits": [
+          {
+            "id": "kb:24",
+            "source": "1~6章(2).md · 合作(Collaboration)",
+            "score": 0.8501297539920809
+          },
+          {
+            "id": "kb:160",
+            "source": "7~9章(2).md · 第九章总结：行为激活疗法的精髓",
+            "score": 0.7312489477712177
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 0.5,
+        "ndcg_at_k": 0.6309297535714575,
+        "correct_empty": null,
+        "elapsed_ms": 70.378,
+        "hits": [
+          {
+            "id": "kb:160",
+            "source": "7~9章(2).md · 第九章总结：行为激活疗法的精髓",
+            "score": 0.03252247488101534
+          },
+          {
+            "id": "kb:24",
+            "source": "1~6章(2).md · 合作(Collaboration)",
+            "score": 0.032266458495966696
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-05",
+      "kind": "colloquial",
+      "module": "module_1",
+      "query": "怎么回应来访者对治疗的担心？",
+      "p0": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 6.765,
+        "hits": [
+          {
+            "id": "kb:8",
+            "source": "1~6章(2).md · 来访者的担心与咨询师的回应",
+            "score": 21.8561
+          },
+          {
+            "id": "kb:70",
+            "source": "1~6章(2).md · 来访者的担心-由外而内的困惑",
+            "score": 15.3754
+          }
+        ]
+      },
+      "vector": {
+        "returned": 2,
+        "hit_at_k": 0,
+        "recall_at_k": 0.0,
+        "precision_returned": 0.0,
+        "mrr": 0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 58.883,
+        "hits": [
+          {
+            "id": "kb:30",
+            "source": "1~6章(2).md · 真正关心的好处",
+            "score": 0.739210603363351
+          },
+          {
+            "id": "kb:130",
+            "source": "7~9章(2).md · 强调沉思后果与解决问题策略",
+            "score": 0.7091083704281164
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 65.739,
+        "hits": [
+          {
+            "id": "kb:8",
+            "source": "1~6章(2).md · 来访者的担心与咨询师的回应",
+            "score": 0.030886196246139225
+          },
+          {
+            "id": "kb:150",
+            "source": "7~9章(2).md · 艾丽西亚-面对未来的复发担忧",
+            "score": 0.028693528693528692
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-06",
+      "kind": "term",
+      "module": "module_1",
+      "query": "如何在治疗中强化适应性行为？",
+      "p0": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 6.276,
+        "hits": [
+          {
+            "id": "kb:31",
+            "source": "1~6章(2).md · 在治疗中强化适应性行为",
+            "score": 85.4189
+          },
+          {
+            "id": "kb:20",
+            "source": "1~6章(2).md · 治疗师的个人风格",
+            "score": 34.9215
+          }
+        ]
+      },
+      "vector": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 0.5,
+        "ndcg_at_k": 0.6309297535714575,
+        "correct_empty": null,
+        "elapsed_ms": 58.55,
+        "hits": [
+          {
+            "id": "kb:152",
+            "source": "7~9章(2).md · 促进泛化与制作个人治疗手册",
+            "score": 0.724457796743442
+          },
+          {
+            "id": "kb:31",
+            "source": "1~6章(2).md · 在治疗中强化适应性行为",
+            "score": 0.7189398783337719
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 66.373,
+        "hits": [
+          {
+            "id": "kb:31",
+            "source": "1~6章(2).md · 在治疗中强化适应性行为",
+            "score": 0.03252247488101534
+          },
+          {
+            "id": "kb:20",
+            "source": "1~6章(2).md · 治疗师的个人风格",
+            "score": 0.0304147465437788
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-07",
+      "kind": "bilingual",
+      "module": "module_2",
+      "query": "跳舞算什么活动？",
+      "p0": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 0.3333333333333333,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 0.6366824387328317,
+        "correct_empty": null,
+        "elapsed_ms": 31.126,
+        "hits": [
+          {
+            "id": "kb:172",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Dancing",
+            "score": 10.2554
+          },
+          {
+            "id": "kb:171",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Dancing",
+            "score": 9.9158
+          },
+          {
+            "id": "kb:275",
+            "source": "动机访谈法.md · 图表3-3关于每一个Ml过程的一些提问",
+            "score": 2.5491
+          },
+          {
+            "id": "kb:264",
+            "source": "动机访谈法.md · 以人为中心照护的一些原则",
+            "score": 2.4069
+          }
+        ]
+      },
+      "vector": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 0.3333333333333333,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 0.6366824387328317,
+        "correct_empty": null,
+        "elapsed_ms": 54.187,
+        "hits": [
+          {
+            "id": "kb:171",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Dancing",
+            "score": 0.6999705229602835
+          },
+          {
+            "id": "kb:172",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Dancing",
+            "score": 0.644895585880456
+          },
+          {
+            "id": "kb:1045",
+            "source": "运动与心理健康相关文献_2(1).md · Physical activity",
+            "score": 0.5786158695917097
+          },
+          {
+            "id": "kb:860",
+            "source": "运动和心理健康相关文献_3.md · Dynamic (Isokinetic) Muscle Actions",
+            "score": 0.5646388636385307
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 0.3333333333333333,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 0.6366824387328317,
+        "correct_empty": null,
+        "elapsed_ms": 88.304,
+        "hits": [
+          {
+            "id": "kb:171",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Dancing",
+            "score": 0.03252247488101534
+          },
+          {
+            "id": "kb:172",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Dancing",
+            "score": 0.03252247488101534
+          },
+          {
+            "id": "kb:1045",
+            "source": "运动与心理健康相关文献_2(1).md · Physical activity",
+            "score": 0.015873015873015872
+          },
+          {
+            "id": "kb:275",
+            "source": "动机访谈法.md · 图表3-3关于每一个Ml过程的一些提问",
+            "score": 0.015873015873015872
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-08",
+      "kind": "bilingual",
+      "module": "module_2",
+      "query": "我打算打篮球",
+      "p0": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 0.5,
+        "precision_returned": 0.25,
+        "mrr": 0.25,
+        "ndcg_at_k": 0.2640681225725909,
+        "correct_empty": null,
+        "elapsed_ms": 35.556,
+        "hits": [
+          {
+            "id": "kb:124",
+            "source": "7~9章(2).md · 肯尼斯-失业与反刍",
+            "score": 7.3576
+          },
+          {
+            "id": "kb:578",
+            "source": "动机访谈法.md · 实现意图",
+            "score": 6.0597
+          },
+          {
+            "id": "kb:516",
+            "source": "动机访谈法.md · 选择中立性",
+            "score": 5.7774
+          },
+          {
+            "id": "kb:210",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Sports",
+            "score": 2.8918
+          }
+        ]
+      },
+      "vector": {
+        "returned": 0,
+        "hit_at_k": 0,
+        "recall_at_k": 0.0,
+        "precision_returned": null,
+        "mrr": 0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 52.74,
+        "hits": []
+      },
+      "hybrid": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 0.5,
+        "precision_returned": 0.25,
+        "mrr": 0.25,
+        "ndcg_at_k": 0.2640681225725909,
+        "correct_empty": null,
+        "elapsed_ms": 89.042,
+        "hits": [
+          {
+            "id": "kb:124",
+            "source": "7~9章(2).md · 肯尼斯-失业与反刍",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:578",
+            "source": "动机访谈法.md · 实现意图",
+            "score": 0.016129032258064516
+          },
+          {
+            "id": "kb:516",
+            "source": "动机访谈法.md · 选择中立性",
+            "score": 0.015873015873015872
+          },
+          {
+            "id": "kb:210",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Sports",
+            "score": 0.015625
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-09",
+      "kind": "english",
+      "module": "module_2",
+      "query": "yoga MET classification",
+      "p0": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 0.5,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 0.6366824387328317,
+        "correct_empty": null,
+        "elapsed_ms": 29.656,
+        "hits": [
+          {
+            "id": "kb:169",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Conditioning Exercise",
+            "score": 7.5318
+          },
+          {
+            "id": "kb:168",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Conditioning Exercise",
+            "score": 5.3181
+          },
+          {
+            "id": "kb:1232",
+            "source": "运动与心理健康相关文献_4.md · Table 1. Outcomes of exercise trials in psychotic disorders",
+            "score": 2.3683
+          },
+          {
+            "id": "kb:1233",
+            "source": "运动与心理健康相关文献_4.md · Table 1. Outcomes of exercise trials in psychotic disorders",
+            "score": 2.3683
+          }
+        ]
+      },
+      "vector": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 0.5,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 0.6366824387328317,
+        "correct_empty": null,
+        "elapsed_ms": 53.382,
+        "hits": [
+          {
+            "id": "kb:169",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Conditioning Exercise",
+            "score": 0.6298916175427022
+          },
+          {
+            "id": "kb:168",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Conditioning Exercise",
+            "score": 0.6087468916179534
+          },
+          {
+            "id": "kb:1236",
+            "source": "运动与心理健康相关文献_4.md · Table 1. Outcomes of exercise trials in psychotic disorders",
+            "score": 0.5740817106374312
+          },
+          {
+            "id": "kb:1045",
+            "source": "运动与心理健康相关文献_2(1).md · Physical activity",
+            "score": 0.5119284331213171
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 0.5,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 0.6366824387328317,
+        "correct_empty": null,
+        "elapsed_ms": 88.285,
+        "hits": [
+          {
+            "id": "kb:169",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Conditioning Exercise",
+            "score": 0.03278688524590164
+          },
+          {
+            "id": "kb:168",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Conditioning Exercise",
+            "score": 0.03225806451612903
+          },
+          {
+            "id": "kb:1045",
+            "source": "运动与心理健康相关文献_2(1).md · Physical activity",
+            "score": 0.029411764705882353
+          },
+          {
+            "id": "kb:1232",
+            "source": "运动与心理健康相关文献_4.md · Table 1. Outcomes of exercise trials in psychotic disorders",
+            "score": 0.015873015873015872
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-10",
+      "kind": "bilingual",
+      "module": "module_2",
+      "query": "乒乓球的活动分类",
+      "p0": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.25,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 30.987,
+        "hits": [
+          {
+            "id": "kb:217",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Sports",
+            "score": 19.9462
+          },
+          {
+            "id": "kb:169",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Conditioning Exercise",
+            "score": 15.1771
+          },
+          {
+            "id": "kb:125",
+            "source": "7~9章(2).md · 评估沉思与干预重点",
+            "score": 6.3373
+          },
+          {
+            "id": "kb:325",
+            "source": "动机访谈法.md · 结构化的价值观探索",
+            "score": 4.3547
+          }
+        ]
+      },
+      "vector": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 55.102,
+        "hits": [
+          {
+            "id": "kb:217",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Sports",
+            "score": 0.6516595564878529
+          },
+          {
+            "id": "kb:211",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Sports",
+            "score": 0.5727420530816388
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.25,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 87.614,
+        "hits": [
+          {
+            "id": "kb:217",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Sports",
+            "score": 0.03278688524590164
+          },
+          {
+            "id": "kb:169",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Conditioning Exercise",
+            "score": 0.016129032258064516
+          },
+          {
+            "id": "kb:125",
+            "source": "7~9章(2).md · 评估沉思与干预重点",
+            "score": 0.015873015873015872
+          },
+          {
+            "id": "kb:325",
+            "source": "动机访谈法.md · 结构化的价值观探索",
+            "score": 0.015625
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-11",
+      "kind": "bilingual",
+      "module": "module_2",
+      "query": "做家务拖地的身体活动分类",
+      "p0": {
+        "returned": 3,
+        "hit_at_k": 1,
+        "recall_at_k": 0.5,
+        "precision_returned": 0.3333333333333333,
+        "mrr": 1.0,
+        "ndcg_at_k": 0.6131471927654584,
+        "correct_empty": null,
+        "elapsed_ms": 34.714,
+        "hits": [
+          {
+            "id": "kb:176",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Home Activities",
+            "score": 39.7924
+          },
+          {
+            "id": "kb:177",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Home Activities",
+            "score": 31.0294
+          },
+          {
+            "id": "kb:71",
+            "source": "1~6章(2).md · 行为激活的生理基础",
+            "score": 9.6634
+          }
+        ]
+      },
+      "vector": {
+        "returned": 4,
+        "hit_at_k": 0,
+        "recall_at_k": 0.0,
+        "precision_returned": 0.0,
+        "mrr": 0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 63.123,
+        "hits": [
+          {
+            "id": "kb:179",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Home Activities",
+            "score": 0.6029570583945854
+          },
+          {
+            "id": "kb:860",
+            "source": "运动和心理健康相关文献_3.md · Dynamic (Isokinetic) Muscle Actions",
+            "score": 0.5941566504671669
+          },
+          {
+            "id": "kb:200",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Occupation",
+            "score": 0.5940995535291185
+          },
+          {
+            "id": "kb:1073",
+            "source": "运动与心理健康相关文献_2(1).md · Introduction",
+            "score": 0.5911223517569584
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 0.5,
+        "precision_returned": 0.25,
+        "mrr": 1.0,
+        "ndcg_at_k": 0.6131471927654584,
+        "correct_empty": null,
+        "elapsed_ms": 101.062,
+        "hits": [
+          {
+            "id": "kb:176",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Home Activities",
+            "score": 0.03177805800756621
+          },
+          {
+            "id": "kb:177",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Home Activities",
+            "score": 0.03021353930031804
+          },
+          {
+            "id": "kb:860",
+            "source": "运动和心理健康相关文献_3.md · Dynamic (Isokinetic) Muscle Actions",
+            "score": 0.016129032258064516
+          },
+          {
+            "id": "kb:71",
+            "source": "1~6章(2).md · 行为激活的生理基础",
+            "score": 0.015873015873015872
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-12",
+      "kind": "bilingual",
+      "module": "module_2",
+      "query": "太极活动是什么类型？",
+      "p0": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.25,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 33.357,
+        "hits": [
+          {
+            "id": "kb:217",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Sports",
+            "score": 7.2536
+          },
+          {
+            "id": "kb:51",
+            "source": "1~6章(2).md · 活动监测的回顾",
+            "score": 5.8912
+          },
+          {
+            "id": "kb:161",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 2024 Adult Compendium 身体活动分类",
+            "score": 4.9796
+          },
+          {
+            "id": "kb:89",
+            "source": "1~6章(2).md · 利用自然强化-普雷马克原则",
+            "score": 4.3494
+          }
+        ]
+      },
+      "vector": {
+        "returned": 4,
+        "hit_at_k": 0,
+        "recall_at_k": 0.0,
+        "precision_returned": 0.0,
+        "mrr": 0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 57.035,
+        "hits": [
+          {
+            "id": "kb:860",
+            "source": "运动和心理健康相关文献_3.md · Dynamic (Isokinetic) Muscle Actions",
+            "score": 0.767730491826222
+          },
+          {
+            "id": "kb:86",
+            "source": "1~6章(2).md · 原则六：强调行为的自然强化",
+            "score": 0.6517265721030713
+          },
+          {
+            "id": "kb:90",
+            "source": "1~6章(2).md · 行为激活疗法中组织安排活动的策略",
+            "score": 0.5979656047822579
+          },
+          {
+            "id": "kb:1045",
+            "source": "运动与心理健康相关文献_2(1).md · Physical activity",
+            "score": 0.5860539045437098
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.25,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 90.975,
+        "hits": [
+          {
+            "id": "kb:217",
+            "source": "2024-adult-compendium身体活动分类(1)(1).xlsx · 身体活动分类：Sports",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:860",
+            "source": "运动和心理健康相关文献_3.md · Dynamic (Isokinetic) Muscle Actions",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:51",
+            "source": "1~6章(2).md · 活动监测的回顾",
+            "score": 0.016129032258064516
+          },
+          {
+            "id": "kb:86",
+            "source": "1~6章(2).md · 原则六：强调行为的自然强化",
+            "score": 0.016129032258064516
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-13",
+      "kind": "term",
+      "module": "module_2",
+      "query": "怎样询问开放式问题？",
+      "p0": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 0.6666666666666666,
+        "precision_returned": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_k": 0.7653606369886217,
+        "correct_empty": null,
+        "elapsed_ms": 33.495,
+        "hits": [
+          {
+            "id": "kb:311",
+            "source": "动机访谈法.md · 询问开放式问题",
+            "score": 63.5746
+          },
+          {
+            "id": "kb:277",
+            "source": "动机访谈法.md · 询问开放式问题",
+            "score": 55.1984
+          }
+        ]
+      },
+      "vector": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 0.6666666666666666,
+        "precision_returned": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_k": 0.7653606369886217,
+        "correct_empty": null,
+        "elapsed_ms": 55.62,
+        "hits": [
+          {
+            "id": "kb:311",
+            "source": "动机访谈法.md · 询问开放式问题",
+            "score": 0.826540976418796
+          },
+          {
+            "id": "kb:277",
+            "source": "动机访谈法.md · 询问开放式问题",
+            "score": 0.7745106029733297
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 0.6666666666666666,
+        "precision_returned": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_k": 0.7653606369886217,
+        "correct_empty": null,
+        "elapsed_ms": 94.799,
+        "hits": [
+          {
+            "id": "kb:311",
+            "source": "动机访谈法.md · 询问开放式问题",
+            "score": 0.03278688524590164
+          },
+          {
+            "id": "kb:277",
+            "source": "动机访谈法.md · 询问开放式问题",
+            "score": 0.03225806451612903
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-14",
+      "kind": "term",
+      "module": "module_2",
+      "query": "动机访谈的四个过程是什么？",
+      "p0": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 36.0,
+        "hits": [
+          {
+            "id": "kb:268",
+            "source": "动机访谈法.md · 动机式访谈法的四个过程",
+            "score": 45.0929
+          },
+          {
+            "id": "kb:381",
+            "source": "动机访谈法.md · 动机式访谈法的伦理和四个过程",
+            "score": 38.1853
+          }
+        ]
+      },
+      "vector": {
+        "returned": 3,
+        "hit_at_k": 0,
+        "recall_at_k": 0.0,
+        "precision_returned": 0.0,
+        "mrr": 0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 60.925,
+        "hits": [
+          {
+            "id": "kb:276",
+            "source": "动机访谈法.md · 动机式访谈法的核心技能和四个过程",
+            "score": 0.663234300943971
+          },
+          {
+            "id": "kb:294",
+            "source": "动机访谈法.md · 什么能促进导进的关系？",
+            "score": 0.646516604662214
+          },
+          {
+            "id": "kb:128",
+            "source": "7~9章(2).md · 别光说不做与沉思干预策略",
+            "score": 0.5741439994702531
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 3,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.3333333333333333,
+        "mrr": 0.5,
+        "ndcg_at_k": 0.6309297535714575,
+        "correct_empty": null,
+        "elapsed_ms": 94.404,
+        "hits": [
+          {
+            "id": "kb:381",
+            "source": "动机访谈法.md · 动机式访谈法的伦理和四个过程",
+            "score": 0.0304147465437788
+          },
+          {
+            "id": "kb:268",
+            "source": "动机访谈法.md · 动机式访谈法的四个过程",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:128",
+            "source": "7~9章(2).md · 别光说不做与沉思干预策略",
+            "score": 0.0136986301369863
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-15",
+      "kind": "term",
+      "module": "module_3",
+      "query": "重复和替代有哪些行为改变技术？",
+      "p0": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 25.715,
+        "hits": [
+          {
+            "id": "kb:602",
+            "source": "行为改变技术分类法第一版(1).md · 重复和替代",
+            "score": 56.6092
+          },
+          {
+            "id": "kb:606",
+            "source": "行为改变技术分类法第一版(1).md · 前置条件",
+            "score": 17.192
+          }
+        ]
+      },
+      "vector": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.25,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 61.345,
+        "hits": [
+          {
+            "id": "kb:602",
+            "source": "行为改变技术分类法第一版(1).md · 重复和替代",
+            "score": 0.6153382070723419
+          },
+          {
+            "id": "kb:151",
+            "source": "7~9章(2).md · 行为激活的整体治疗逻辑与泛化",
+            "score": 0.5936357958385853
+          },
+          {
+            "id": "kb:272",
+            "source": "动机访谈法.md · 计划过程",
+            "score": 0.5878051758179319
+          },
+          {
+            "id": "kb:606",
+            "source": "行为改变技术分类法第一版(1).md · 前置条件",
+            "score": 0.5792243942053827
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.25,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 87.339,
+        "hits": [
+          {
+            "id": "kb:602",
+            "source": "行为改变技术分类法第一版(1).md · 重复和替代",
+            "score": 0.03278688524590164
+          },
+          {
+            "id": "kb:606",
+            "source": "行为改变技术分类法第一版(1).md · 前置条件",
+            "score": 0.031754032258064516
+          },
+          {
+            "id": "kb:151",
+            "source": "7~9章(2).md · 行为激活的整体治疗逻辑与泛化",
+            "score": 0.016129032258064516
+          },
+          {
+            "id": "kb:272",
+            "source": "动机访谈法.md · 计划过程",
+            "score": 0.015873015873015872
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-16",
+      "kind": "term",
+      "module": "module_3",
+      "query": "行为比较有哪些具体方法？",
+      "p0": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.25,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 26.259,
+        "hits": [
+          {
+            "id": "kb:600",
+            "source": "行为改变技术分类法第一版(1).md · 行为比较",
+            "score": 15.5034
+          },
+          {
+            "id": "kb:502",
+            "source": "动机访谈法.md · 回顾过去的成功",
+            "score": 10.8371
+          },
+          {
+            "id": "kb:391",
+            "source": "动机访谈法.md · 引出",
+            "score": 8.0324
+          },
+          {
+            "id": "kb:148",
+            "source": "7~9章(2).md · 附录：排除障碍指导原则表",
+            "score": 4.5838
+          }
+        ]
+      },
+      "vector": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.25,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 56.173,
+        "hits": [
+          {
+            "id": "kb:600",
+            "source": "行为改变技术分类法第一版(1).md · 行为比较",
+            "score": 0.7298309549158106
+          },
+          {
+            "id": "kb:602",
+            "source": "行为改变技术分类法第一版(1).md · 重复和替代",
+            "score": 0.7018298635756597
+          },
+          {
+            "id": "kb:151",
+            "source": "7~9章(2).md · 行为激活的整体治疗逻辑与泛化",
+            "score": 0.7000146629955994
+          },
+          {
+            "id": "kb:86",
+            "source": "1~6章(2).md · 原则六：强调行为的自然强化",
+            "score": 0.6894742604726969
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.25,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 84.002,
+        "hits": [
+          {
+            "id": "kb:600",
+            "source": "行为改变技术分类法第一版(1).md · 行为比较",
+            "score": 0.03278688524590164
+          },
+          {
+            "id": "kb:502",
+            "source": "动机访谈法.md · 回顾过去的成功",
+            "score": 0.016129032258064516
+          },
+          {
+            "id": "kb:602",
+            "source": "行为改变技术分类法第一版(1).md · 重复和替代",
+            "score": 0.016129032258064516
+          },
+          {
+            "id": "kb:151",
+            "source": "7~9章(2).md · 行为激活的整体治疗逻辑与泛化",
+            "score": 0.015873015873015872
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-17",
+      "kind": "term",
+      "module": "module_3",
+      "query": "计划与目标怎么制定？",
+      "p0": {
+        "returned": 1,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 25.376,
+        "hits": [
+          {
+            "id": "kb:595",
+            "source": "行为改变技术分类法第一版(1).md · 计划与目标",
+            "score": 36.1842
+          }
+        ]
+      },
+      "vector": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.25,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 60.129,
+        "hits": [
+          {
+            "id": "kb:595",
+            "source": "行为改变技术分类法第一版(1).md · 计划与目标",
+            "score": 0.7834110349267637
+          },
+          {
+            "id": "kb:556",
+            "source": "动机访谈法.md · 三个计划方案",
+            "score": 0.7175483899166779
+          },
+          {
+            "id": "kb:564",
+            "source": "动机访谈法.md · 方案二：当有几个清晰的选择时",
+            "score": 0.703831396518886
+          },
+          {
+            "id": "kb:84",
+            "source": "1~6章(2).md · 分级复杂任务",
+            "score": 0.6939724398105416
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.25,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 82.252,
+        "hits": [
+          {
+            "id": "kb:595",
+            "source": "行为改变技术分类法第一版(1).md · 计划与目标",
+            "score": 0.03278688524590164
+          },
+          {
+            "id": "kb:556",
+            "source": "动机访谈法.md · 三个计划方案",
+            "score": 0.016129032258064516
+          },
+          {
+            "id": "kb:564",
+            "source": "动机访谈法.md · 方案二：当有几个清晰的选择时",
+            "score": 0.015873015873015872
+          },
+          {
+            "id": "kb:84",
+            "source": "1~6章(2).md · 分级复杂任务",
+            "score": 0.015625
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-18",
+      "kind": "term",
+      "module": "module_3",
+      "query": "怎样安排行为后果？",
+      "p0": {
+        "returned": 1,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 26.855,
+        "hits": [
+          {
+            "id": "kb:608",
+            "source": "行为改变技术分类法第一版(1).md · 安排行为后果",
+            "score": 44.8237
+          }
+        ]
+      },
+      "vector": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.25,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 56.185,
+        "hits": [
+          {
+            "id": "kb:608",
+            "source": "行为改变技术分类法第一版(1).md · 安排行为后果",
+            "score": 0.7643981852306966
+          },
+          {
+            "id": "kb:42",
+            "source": "1~6章(2).md · 行为和后果-正强化",
+            "score": 0.698691203639275
+          },
+          {
+            "id": "kb:599",
+            "source": "行为改变技术分类法第一版(1).md · (不干预条件下的) 自然结果 / 影响",
+            "score": 0.6922212888915416
+          },
+          {
+            "id": "kb:147",
+            "source": "7~9章(2).md · 常见问题3：线索控制与依随性管理",
+            "score": 0.6894793376844874
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 4,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.25,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 90.184,
+        "hits": [
+          {
+            "id": "kb:608",
+            "source": "行为改变技术分类法第一版(1).md · 安排行为后果",
+            "score": 0.03278688524590164
+          },
+          {
+            "id": "kb:42",
+            "source": "1~6章(2).md · 行为和后果-正强化",
+            "score": 0.016129032258064516
+          },
+          {
+            "id": "kb:599",
+            "source": "行为改变技术分类法第一版(1).md · (不干预条件下的) 自然结果 / 影响",
+            "score": 0.015873015873015872
+          },
+          {
+            "id": "kb:147",
+            "source": "7~9章(2).md · 常见问题3：线索控制与依随性管理",
+            "score": 0.015625
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-19",
+      "kind": "term",
+      "module": "module_4",
+      "query": "如何保持乐观并面对失败？",
+      "p0": {
+        "returned": 1,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 7.618,
+        "hits": [
+          {
+            "id": "kb:143",
+            "source": "7~9章(2).md · 保持乐观与面对失败",
+            "score": 41.1274
+          }
+        ]
+      },
+      "vector": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 62.69,
+        "hits": [
+          {
+            "id": "kb:143",
+            "source": "7~9章(2).md · 保持乐观与面对失败",
+            "score": 0.5917458258168817
+          },
+          {
+            "id": "kb:123",
+            "source": "7~9章(2).md · 沉思的类型与危害",
+            "score": 0.55378477611601
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 71.177,
+        "hits": [
+          {
+            "id": "kb:143",
+            "source": "7~9章(2).md · 保持乐观与面对失败",
+            "score": 0.03278688524590164
+          },
+          {
+            "id": "kb:123",
+            "source": "7~9章(2).md · 沉思的类型与危害",
+            "score": 0.016129032258064516
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-20",
+      "kind": "term",
+      "module": "module_4",
+      "query": "如何制作个人治疗手册并促进泛化？",
+      "p0": {
+        "returned": 1,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 6.366,
+        "hits": [
+          {
+            "id": "kb:152",
+            "source": "7~9章(2).md · 促进泛化与制作个人治疗手册",
+            "score": 86.0167
+          }
+        ]
+      },
+      "vector": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 60.72,
+        "hits": [
+          {
+            "id": "kb:152",
+            "source": "7~9章(2).md · 促进泛化与制作个人治疗手册",
+            "score": 0.657069943763491
+          },
+          {
+            "id": "kb:7",
+            "source": "1~6章(2).md · 行为激活疗法的高度个人化",
+            "score": 0.586312401471229
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 67.179,
+        "hits": [
+          {
+            "id": "kb:152",
+            "source": "7~9章(2).md · 促进泛化与制作个人治疗手册",
+            "score": 0.03278688524590164
+          },
+          {
+            "id": "kb:7",
+            "source": "1~6章(2).md · 行为激活疗法的高度个人化",
+            "score": 0.016129032258064516
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-21",
+      "kind": "term",
+      "module": "module_4",
+      "query": "沉思有哪些类型和危害？",
+      "p0": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 6.177,
+        "hits": [
+          {
+            "id": "kb:123",
+            "source": "7~9章(2).md · 沉思的类型与危害",
+            "score": 11.4419
+          },
+          {
+            "id": "kb:127",
+            "source": "7~9章(2).md · 沉思的维持机制与2分钟规则",
+            "score": 5.3535
+          }
+        ]
+      },
+      "vector": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 61.906,
+        "hits": [
+          {
+            "id": "kb:123",
+            "source": "7~9章(2).md · 沉思的类型与危害",
+            "score": 0.6274856535457273
+          },
+          {
+            "id": "kb:125",
+            "source": "7~9章(2).md · 评估沉思与干预重点",
+            "score": 0.613076627977442
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 64.626,
+        "hits": [
+          {
+            "id": "kb:123",
+            "source": "7~9章(2).md · 沉思的类型与危害",
+            "score": 0.03278688524590164
+          },
+          {
+            "id": "kb:125",
+            "source": "7~9章(2).md · 评估沉思与干预重点",
+            "score": 0.016129032258064516
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-22",
+      "kind": "term",
+      "module": "module_4",
+      "query": "怎样专注手头任务，RCA是什么？",
+      "p0": {
+        "returned": 1,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 6.434,
+        "hits": [
+          {
+            "id": "kb:134",
+            "source": "7~9章(2).md · 伊丽莎白-专注于手头的任务与RCA",
+            "score": 10.8604
+          }
+        ]
+      },
+      "vector": {
+        "returned": 1,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 57.148,
+        "hits": [
+          {
+            "id": "kb:134",
+            "source": "7~9章(2).md · 伊丽莎白-专注于手头的任务与RCA",
+            "score": 0.5419914454493913
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 1,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 66.309,
+        "hits": [
+          {
+            "id": "kb:134",
+            "source": "7~9章(2).md · 伊丽莎白-专注于手头的任务与RCA",
+            "score": 0.03278688524590164
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-23",
+      "kind": "term",
+      "module": "module_4",
+      "query": "线索控制与依随性管理如何应用？",
+      "p0": {
+        "returned": 1,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 6.13,
+        "hits": [
+          {
+            "id": "kb:147",
+            "source": "7~9章(2).md · 常见问题3：线索控制与依随性管理",
+            "score": 78.2153
+          }
+        ]
+      },
+      "vector": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 57.259,
+        "hits": [
+          {
+            "id": "kb:147",
+            "source": "7~9章(2).md · 常见问题3：线索控制与依随性管理",
+            "score": 0.6465550914389597
+          },
+          {
+            "id": "kb:144",
+            "source": "7~9章(2).md · 识别阻碍因素与“微调”计划",
+            "score": 0.6094273829324194
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 67.056,
+        "hits": [
+          {
+            "id": "kb:147",
+            "source": "7~9章(2).md · 常见问题3：线索控制与依随性管理",
+            "score": 0.03278688524590164
+          },
+          {
+            "id": "kb:144",
+            "source": "7~9章(2).md · 识别阻碍因素与“微调”计划",
+            "score": 0.016129032258064516
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-24",
+      "kind": "term",
+      "module": "module_4",
+      "query": "怎么将行为激活扩展到新的生活情形？",
+      "p0": {
+        "returned": 1,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_k": 1.0,
+        "correct_empty": null,
+        "elapsed_ms": 8.027,
+        "hits": [
+          {
+            "id": "kb:154",
+            "source": "7~9章(2).md · 将行为激活扩展到新的生活情形和目标",
+            "score": 102.9989
+          }
+        ]
+      },
+      "vector": {
+        "returned": 2,
+        "hit_at_k": 0,
+        "recall_at_k": 0.0,
+        "precision_returned": 0.0,
+        "mrr": 0,
+        "ndcg_at_k": 0.0,
+        "correct_empty": null,
+        "elapsed_ms": 59.694,
+        "hits": [
+          {
+            "id": "kb:151",
+            "source": "7~9章(2).md · 行为激活的整体治疗逻辑与泛化",
+            "score": 0.7387695649559531
+          },
+          {
+            "id": "kb:9",
+            "source": "1~6章(2).md · 行为激活的结构: 由外而内",
+            "score": 0.7245815663042203
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 2,
+        "hit_at_k": 1,
+        "recall_at_k": 1.0,
+        "precision_returned": 0.5,
+        "mrr": 0.5,
+        "ndcg_at_k": 0.6309297535714575,
+        "correct_empty": null,
+        "elapsed_ms": 65.939,
+        "hits": [
+          {
+            "id": "kb:151",
+            "source": "7~9章(2).md · 行为激活的整体治疗逻辑与泛化",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:154",
+            "source": "7~9章(2).md · 将行为激活扩展到新的生活情形和目标",
+            "score": 0.01639344262295082
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-25",
+      "kind": "chitchat",
+      "module": "module_1",
+      "query": "晚上好",
+      "p0": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 6.419,
+        "hits": []
+      },
+      "vector": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 49.538,
+        "hits": []
+      },
+      "hybrid": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 55.47,
+        "hits": []
+      }
+    },
+    {
+      "id": "holdout-26",
+      "kind": "chitchat",
+      "module": "module_2",
+      "query": "感谢你的回复，再见",
+      "p0": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 33.802,
+        "hits": []
+      },
+      "vector": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 55.65,
+        "hits": []
+      },
+      "hybrid": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 94.036,
+        "hits": []
+      }
+    },
+    {
+      "id": "holdout-27",
+      "kind": "chitchat",
+      "module": "module_3",
+      "query": "我暂时不聊了",
+      "p0": {
+        "returned": 1,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 26.025,
+        "hits": [
+          {
+            "id": "kb:55",
+            "source": "1~6章(2).md · 艾丽西亚的活动与情绪间的联系（二）",
+            "score": 1.6515
+          }
+        ]
+      },
+      "vector": {
+        "returned": 3,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 58.064,
+        "hits": [
+          {
+            "id": "kb:153",
+            "source": "7~9章(2).md · 附录：艾丽西亚的笔记以及治疗后的计划",
+            "score": 0.5584132164484252
+          },
+          {
+            "id": "kb:457",
+            "source": "动机访谈法.md · 摘要",
+            "score": 0.5458546557785195
+          },
+          {
+            "id": "kb:317",
+            "source": "动机访谈法.md · 导进过程：一个临床实例",
+            "score": 0.5045412505085449
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 4,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 79.842,
+        "hits": [
+          {
+            "id": "kb:153",
+            "source": "7~9章(2).md · 附录：艾丽西亚的笔记以及治疗后的计划",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:55",
+            "source": "1~6章(2).md · 艾丽西亚的活动与情绪间的联系（二）",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:457",
+            "source": "动机访谈法.md · 摘要",
+            "score": 0.016129032258064516
+          },
+          {
+            "id": "kb:317",
+            "source": "动机访谈法.md · 导进过程：一个临床实例",
+            "score": 0.015873015873015872
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-28",
+      "kind": "chitchat",
+      "module": "module_4",
+      "query": "行，那就这样",
+      "p0": {
+        "returned": 2,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 6.816,
+        "hits": [
+          {
+            "id": "kb:143",
+            "source": "7~9章(2).md · 保持乐观与面对失败",
+            "score": 0.9359
+          },
+          {
+            "id": "kb:151",
+            "source": "7~9章(2).md · 行为激活的整体治疗逻辑与泛化",
+            "score": 0.9359
+          }
+        ]
+      },
+      "vector": {
+        "returned": 1,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 55.289,
+        "hits": [
+          {
+            "id": "kb:37",
+            "source": "1~6章(2).md · 评估行为-ABCs",
+            "score": 0.5090716924363318
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 2,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 59.774,
+        "hits": [
+          {
+            "id": "kb:143",
+            "source": "7~9章(2).md · 保持乐观与面对失败",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:37",
+            "source": "1~6章(2).md · 评估行为-ABCs",
+            "score": 0.01639344262295082
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-29",
+      "kind": "chitchat",
+      "module": "module_1",
+      "query": "收到",
+      "p0": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 5.552,
+        "hits": []
+      },
+      "vector": {
+        "returned": 2,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 50.691,
+        "hits": [
+          {
+            "id": "kb:38",
+            "source": "1~6章(2).md · 定义和描述行为",
+            "score": 0.7058367306875982
+          },
+          {
+            "id": "kb:37",
+            "source": "1~6章(2).md · 评估行为-ABCs",
+            "score": 0.6991765808019872
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 2,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 53.952,
+        "hits": [
+          {
+            "id": "kb:38",
+            "source": "1~6章(2).md · 定义和描述行为",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:37",
+            "source": "1~6章(2).md · 评估行为-ABCs",
+            "score": 0.016129032258064516
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-30",
+      "kind": "chitchat",
+      "module": "module_2",
+      "query": "你现在能收到消息吗",
+      "p0": {
+        "returned": 4,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 30.095,
+        "hits": [
+          {
+            "id": "kb:573",
+            "source": "动机访谈法.md · 方案三：从零开始发展计划",
+            "score": 6.1072
+          },
+          {
+            "id": "kb:302",
+            "source": "动机访谈法.md · 倾听会节约时间",
+            "score": 2.1982
+          },
+          {
+            "id": "kb:137",
+            "source": "7~9章(2).md · 艾丽西亚-礼拜与咖啡派对的挫折",
+            "score": 1.3227
+          },
+          {
+            "id": "kb:27",
+            "source": "1~6章(2).md · 反例1-没有共情",
+            "score": 1.3227
+          }
+        ]
+      },
+      "vector": {
+        "returned": 3,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 60.328,
+        "hits": [
+          {
+            "id": "kb:399",
+            "source": "动机访谈法.md · 引出",
+            "score": 0.5333239255824181
+          },
+          {
+            "id": "kb:18",
+            "source": "1~6章(2).md · 艾丽西亚-设定目标",
+            "score": 0.519632525278064
+          },
+          {
+            "id": "kb:559",
+            "source": "动机访谈法.md · 召唤CATs：引出行动型改变语句",
+            "score": 0.5143290470253343
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 4,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 88.527,
+        "hits": [
+          {
+            "id": "kb:399",
+            "source": "动机访谈法.md · 引出",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:573",
+            "source": "动机访谈法.md · 方案三：从零开始发展计划",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:18",
+            "source": "1~6章(2).md · 艾丽西亚-设定目标",
+            "score": 0.016129032258064516
+          },
+          {
+            "id": "kb:137",
+            "source": "7~9章(2).md · 艾丽西亚-礼拜与咖啡派对的挫折",
+            "score": 0.015873015873015872
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-31",
+      "kind": "irrelevant",
+      "module": "module_3",
+      "query": "帮我把这一段聊天删除",
+      "p0": {
+        "returned": 2,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 25.096,
+        "hits": [
+          {
+            "id": "kb:355",
+            "source": "动机访谈法.md · 第二种情况：方向需要选择——议题配对",
+            "score": 4.3976
+          },
+          {
+            "id": "kb:396",
+            "source": "动机访谈法.md · 使用支持当事人自主性的语言",
+            "score": 3.975
+          }
+        ]
+      },
+      "vector": {
+        "returned": 1,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 57.065,
+        "hits": [
+          {
+            "id": "kb:317",
+            "source": "动机访谈法.md · 导进过程：一个临床实例",
+            "score": 0.5165730071249625
+          }
+        ]
+      },
+      "hybrid": {
+        "returned": 2,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 82.132,
+        "hits": [
+          {
+            "id": "kb:317",
+            "source": "动机访谈法.md · 导进过程：一个临床实例",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:355",
+            "source": "动机访谈法.md · 第二种情况：方向需要选择——议题配对",
+            "score": 0.01639344262295082
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-32",
+      "kind": "irrelevant",
+      "module": "module_4",
+      "query": "在哪里修改我的昵称",
+      "p0": {
+        "returned": 2,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 6.04,
+        "hits": [
+          {
+            "id": "kb:107",
+            "source": "1~6章(2).md · 共情验证来访者的自动回避，承认改变所面临的挑战",
+            "score": 3.1485
+          },
+          {
+            "id": "kb:117",
+            "source": "1~6章(2).md · 干预过程中遇到回避怎么办",
+            "score": 3.1485
+          }
+        ]
+      },
+      "vector": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 53.356,
+        "hits": []
+      },
+      "hybrid": {
+        "returned": 2,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 67.697,
+        "hits": [
+          {
+            "id": "kb:107",
+            "source": "1~6章(2).md · 共情验证来访者的自动回避，承认改变所面临的挑战",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:117",
+            "source": "1~6章(2).md · 干预过程中遇到回避怎么办",
+            "score": 0.016129032258064516
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-33",
+      "kind": "irrelevant",
+      "module": "module_1",
+      "query": "英雄联盟台服更新失败",
+      "p0": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 6.03,
+        "hits": []
+      },
+      "vector": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 57.486,
+        "hits": []
+      },
+      "hybrid": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 62.409,
+        "hits": []
+      }
+    },
+    {
+      "id": "holdout-34",
+      "kind": "irrelevant",
+      "module": "module_2",
+      "query": "查询上海明天的气温",
+      "p0": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 31.32,
+        "hits": []
+      },
+      "vector": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 56.087,
+        "hits": []
+      },
+      "hybrid": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 88.655,
+        "hits": []
+      }
+    },
+    {
+      "id": "holdout-35",
+      "kind": "irrelevant",
+      "module": "module_3",
+      "query": "帮我解决数据库索引报错",
+      "p0": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 25.494,
+        "hits": []
+      },
+      "vector": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 60.732,
+        "hits": []
+      },
+      "hybrid": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 86.485,
+        "hits": []
+      }
+    },
+    {
+      "id": "holdout-36",
+      "kind": "irrelevant",
+      "module": "module_4",
+      "query": "今天没什么想说的事情",
+      "p0": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 7.168,
+        "hits": []
+      },
+      "vector": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 60.564,
+        "hits": []
+      },
+      "hybrid": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 62.635,
+        "hits": []
+      }
+    },
+    {
+      "id": "holdout-37",
+      "kind": "irrelevant",
+      "module": "module_1",
+      "query": "你说的话我已经看到了",
+      "p0": {
+        "returned": 2,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 6.23,
+        "hits": [
+          {
+            "id": "kb:80",
+            "source": "1~6章(2).md · 艾丽西亚-困难应对办法",
+            "score": 4.1696
+          },
+          {
+            "id": "kb:22",
+            "source": "1~6章(2).md · 案例-如何认可来访者",
+            "score": 3.8436
+          }
+        ]
+      },
+      "vector": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 56.418,
+        "hits": []
+      },
+      "hybrid": {
+        "returned": 2,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 61.826,
+        "hits": [
+          {
+            "id": "kb:80",
+            "source": "1~6章(2).md · 艾丽西亚-困难应对办法",
+            "score": 0.01639344262295082
+          },
+          {
+            "id": "kb:22",
+            "source": "1~6章(2).md · 案例-如何认可来访者",
+            "score": 0.016129032258064516
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-38",
+      "kind": "irrelevant",
+      "module": "module_2",
+      "query": "zyxqwvbnm",
+      "p0": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 27.594,
+        "hits": []
+      },
+      "vector": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 62.569,
+        "hits": []
+      },
+      "hybrid": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 83.953,
+        "hits": []
+      }
+    },
+    {
+      "id": "holdout-39",
+      "kind": "module_boundary",
+      "module": "module_4",
+      "query": "篮球 basketball MET",
+      "p0": {
+        "returned": 1,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 5.445,
+        "hits": [
+          {
+            "id": "kb:124",
+            "source": "7~9章(2).md · 肯尼斯-失业与反刍",
+            "score": 1.7712
+          }
+        ]
+      },
+      "vector": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 57.064,
+        "hits": []
+      },
+      "hybrid": {
+        "returned": 1,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": 0.0,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 0,
+        "elapsed_ms": 62.137,
+        "hits": [
+          {
+            "id": "kb:124",
+            "source": "7~9章(2).md · 肯尼斯-失业与反刍",
+            "score": 0.01639344262295082
+          }
+        ]
+      }
+    },
+    {
+      "id": "holdout-40",
+      "kind": "module_boundary",
+      "module": "module_4",
+      "query": "乒乓球 table tennis MET",
+      "p0": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 5.697,
+        "hits": []
+      },
+      "vector": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 53.55,
+        "hits": []
+      },
+      "hybrid": {
+        "returned": 0,
+        "hit_at_k": null,
+        "recall_at_k": null,
+        "precision_returned": null,
+        "mrr": null,
+        "ndcg_at_k": null,
+        "correct_empty": 1,
+        "elapsed_ms": 59.976,
+        "hits": []
+      }
+    }
+  ],
+  "schema_version": 1,
+  "split": "holdout",
+  "manifest": [
+    {
+      "source": "1~6章(2).md",
+      "category": "BA",
+      "sha256": "f36ac3ddcb376f1d47a2c5d0ea09790be5df6e1f6373a3463b50f5c84bbfcaee"
+    },
+    {
+      "source": "7~9章(2).md",
+      "category": "BA",
+      "sha256": "4a2b97ddcdd2c1c11e2cda3589d5d9ebe3e411a154a3c835692df3ef6dc4c50c"
+    },
+    {
+      "source": "2024-adult-compendium身体活动分类(1)(1).xlsx",
+      "category": "PA",
+      "sha256": "2adbad7aef45473347a2fdb3c021ac89a8d889e18158225f3f5e89717a67d2a2"
+    },
+    {
+      "source": "动机访谈法.md",
+      "category": "MI",
+      "sha256": "d12ec9b57a6e4803885c0f32feddc86c8e3ff0e1a15523a5678fddf989dd584e"
+    },
+    {
+      "source": "行为改变技术分类法第一版(1).md",
+      "category": "BCT",
+      "sha256": "b3f3a9a8837894c6bf82c39fd4f13006fbc90326a6dbbe4b8977611d45df5121"
+    },
+    {
+      "source": "运动和心理健康相关文献_3.md",
+      "category": "PA",
+      "sha256": "dd201d876162d7d539a43d4cbbc2e9dda2257456ce02b6c1c925be2032036e7a"
+    },
+    {
+      "source": "运动与心理健康相关文献_1(1).md",
+      "category": "PA",
+      "sha256": "0f5fa77084023f7fd008bfb61550e345fbb4d17b35fe53b9a3dd469822f9cbf0"
+    },
+    {
+      "source": "运动与心理健康相关文献_2(1).md",
+      "category": "PA",
+      "sha256": "9d110d1b5504039e84b2a533b74737554b829987f361d992f5b2c6f7959d4017"
+    },
+    {
+      "source": "运动与心理健康相关文献_4.md",
+      "category": "PA",
+      "sha256": "5231eebf9002fbed83ba19e93f2ee14b8c938b6dc21ce6d3b34dcdc98319e623"
+    },
+    {
+      "source": "知识条目1(1).md",
+      "category": "BCT",
+      "sha256": "76ec08e9db7360677c6a3f43206f2fe032f5c9eae461d21ae763ec80b10700df"
+    }
+  ],
+  "chunks": 1331,
+  "collection": "ba_local_de0fd4e3921e41c28e846e2327bdb554468cdfbf5ad5497c1a53e008752082e7",
+  "embedding": "fastembed-0.7.4:sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2:5c77a9d2efad18b678486b45e7858af72b58986d1d1f018523e729f69608d29f:mean-window-v1:120",
+  "policy": {
+    "candidates": 20,
+    "vector_min_score": 0.5,
+    "rrf_k": 60,
+    "max_per_source": 2
+  },
+  "label_status": "assistant_authored_pending_domain_review",
+  "dataset_sha256": "8dc7c793c14f8f7954de3cefe73d95fbd9cad5164a313686fcdc64a037228446",
+  "limitations": "Assistant-authored labels; not clinical/answer-quality validation. Cosine threshold is experimental. Latency excludes model initialization; vector and hybrid each include their own query embedding. No reranker.",
+  "code_sha256": "5eed4e8d6c13d6c37e2afeddd07936bdd1f873d960973253ce125d6badeed88b"
+}

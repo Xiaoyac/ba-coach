@@ -1,7 +1,11 @@
 # 心理学 AI 项目 · Psychology AI
 
+当前交付进度见 [项目进度（2026-09-11）](PROJECT_PROGRESS_20260911.md)，最新验收见 [端到端验收报告](E2E_ACCEPTANCE_FIXED_20260911.md)。仓库版本与生产部署版本请分别查看，勿视为自动同步。
+
 Standalone web app for a psychology AI workflow migrated off Coze.
 FastAPI backend + Next.js/React frontend.
+
+管理员测试工作台：六列评测集、Excel/CSV 导入、自动运行归档、连续追问与人工评审。实现、验证和上线边界见 [测试记录网页化实施报告](WEB_TEST_WORKBENCH_IMPLEMENTATION.md)。
 
 ```
 心理学项目/
@@ -520,8 +524,11 @@ Chinese bi/trigrams plus a bilingual activity/clinical query expander make
 Chinese turns match both the Chinese coaching manuals and the English PA
 papers/Adult Compendium. The 1,000+ chunk lexical index is built once in
 memory at startup and refreshed after an administrator import, rather than
-scanning MySQL on every turn. Results reserve room for each matching knowledge
-family so one very long book cannot occupy the whole retrieval budget. The old
+scanning MySQL on every turn. Results now pass absolute-score, evidence-coverage
+and relative-score gates before global ranking with a two-chunk source cap.
+Categories have no guaranteed slots and weak results never backfill empty slots.
+The reproducible P0 benchmark and configuration are documented in
+`RAG_P0_IMPLEMENTATION.md`. The old
 `StubKnowledgeBase` remains only for isolated graph tests.
 
 Knowledge categories are routed before ranking, so material cannot leak into
@@ -642,6 +649,19 @@ When you paste the real module prompts in, keep `MODULE_CHECKLISTS` in
 `app/prompts.py` aligned with them — it's a distilled summary of the same
 steps, and a stale checklist can drift from what the full prompt actually
 says.
+
+## Local vector RAG experiment
+
+Local rule-based retrieval gating, paired benchmarks, and log monitoring are
+documented in [RAG_INTENT_GATE_IMPLEMENTATION.md](RAG_INTENT_GATE_IMPLEMENTATION.md).
+`KNOWLEDGE_INTENT_GATE_ENABLED=false` disables this gate after worker restart.
+The gate adds no LLM calls; deployment status and limits are recorded in the report.
+
+See [RAG_VECTOR_STEP1.md](RAG_VECTOR_STEP1.md) for the optional CPU embedding +
+local Qdrant baseline, P0/vector/hybrid comparison commands, and limitations.
+Install `backend/requirements-rag.txt` in the backend virtual environment first.
+The experiment reads project knowledge files and does not change the business
+database or the production retrieval backend.
 
 ## Before production
 

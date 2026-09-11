@@ -20,6 +20,7 @@ from typing import Callable, Protocol
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
+from .config import get_settings
 from .db import get_sessionmaker
 from .knowledge_store import (
     IGNORED_KNOWLEDGE_SOURCE_NAMES,
@@ -50,6 +51,45 @@ class _IndexedKnowledgeChunk:
     content: str
     terms: Counter[str]
     heading_terms: Counter[str]
+    evidence_terms: frozenset[str]
+
+
+@dataclass(frozen=True)
+class RetrievalPolicy:
+    """Lexical gates, not calibrated probabilities. Tune on a fixed corpus."""
+
+    min_score: float = 0.1
+    min_coverage: float = 0.12
+    relative_score: float = 0.2
+    max_per_source: int = 2
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.min_score) or self.min_score < 0:
+            raise ValueError("min_score must be finite and nonnegative")
+        if not 0 <= self.min_coverage <= 1 or not 0 <= self.relative_score <= 1:
+            raise ValueError("coverage and relative_score must be in [0, 1]")
+        if self.max_per_source < 1:
+            raise ValueError("max_per_source must be positive")
+
+
+@dataclass(frozen=True)
+class RankedCandidate:
+    chunk: KnowledgeChunk
+    category: str
+    source_id: int
+    coverage: float
+
+
+def index_chunk(*, id: int, source_id: int, source_name: str, category: str,
+                heading: str, content: str) -> _IndexedKnowledgeChunk:
+    """Same index construction for production and offline corpus evaluation."""
+    return _IndexedKnowledgeChunk(
+        id=id, source_id=source_id, source_name=source_name, category=category,
+        heading=heading, content=content,
+        terms=_search_terms(f"{source_name} {heading} {content}"),
+        heading_terms=_search_terms(f"{source_name} {heading}"),
+        evidence_terms=frozenset(_search_terms(f"{heading} {content}")),
+    )
 
 
 class KnowledgeBase(Protocol):
@@ -134,6 +174,31 @@ def _tokenize(text: str) -> set[str]:
 
 
 _LATIN_OR_CJK = re.compile(r"[a-z0-9]+|[一-鿿]+")
+
+# These discourse fragments are not evidence of a knowledge need. They still
+# participate in the legacy score, but cannot qualify a reference for injection.
+# Keep this conservative: domain-bearing terms (emotion, avoidance, etc.) stay.
+_NON_EVIDENCE_TERMS = frozenset(
+    "你好 您好 早上好 晚上好 谢谢 感谢 再见 拜拜 好的 嗯嗯 明白 知道 收到 继续 "
+    "今天 明天 昨天 刚才 现在 暂时 一下 一些 一个 这个 那个 这样 那样 什么 为什么 "
+    "怎么 如何 可以 能够 可能 应该 需要 已经 还是 然后 因为 所以 但是 如果 "
+    "事情 感觉 回复 看到 说的 说话 知道了 明白了 没什么 先到 到这里 这里 "
+    "谢谢你 这件事情 再说 怎么样 刚才说的 "
+    "我想 帮我 我们 你们 自己 你的 我的 我是 你是 这是 那是 不能 不要 "
+    "the and for you your can how what this that with are was have from".split()
+)
+
+
+def _evidence_query_terms(query: str) -> set[str]:
+    # Remove complete filler phrases BEFORE n-gramming; simply dropping 今天
+    # from 今天先到这里 would leave cross-boundary noise such as 天先/天先到.
+    cleaned = query.lower()
+    for phrase in sorted(_NON_EVIDENCE_TERMS, key=lambda s: (-len(s), s)):
+        if phrase.isascii():
+            cleaned = re.sub(r"\b" + re.escape(phrase) + r"\b", " ", cleaned)
+        else:
+            cleaned = cleaned.replace(phrase, " ")
+    return set(_search_terms(cleaned))
 
 
 # The PA compendium and most PA papers use English activity names, while the
@@ -250,6 +315,88 @@ class StubKnowledgeBase:
         return [chunk for chunk in scored if chunk.score > 0][:top_k]
 
 
+def rank_candidates(
+    index: tuple[_IndexedKnowledgeChunk, ...], *, module: str, query: str,
+) -> list[RankedCandidate]:
+    """Preserve the existing lexical score; expose support for filtering.
+
+    Coverage is IDF-weighted query coverage. Explicit bilingual aliases get
+    their own coverage channel, so a Chinese sentence can retrieve one precise
+    English activity row without requiring Chinese characters in that row.
+    """
+    query = query.strip()
+    allowed = {c for c, modules in KNOWLEDGE_CATEGORY_MODULES.items() if module in modules}
+    documents = [d for d in index if d.category in allowed]
+    expanded = expand_knowledge_query(query)
+    query_terms = _search_terms(expanded)
+    if not query_terms or not documents:
+        return []
+    count = len(documents)
+    frequencies = Counter(t for d in documents for t in d.terms if t in query_terms)
+    idfs = {t: math.log(1 + (count - frequencies[t] + 0.5) / (frequencies[t] + 0.5))
+            for t in query_terms}
+    evidence_terms = _evidence_query_terms(expanded)
+    denominator = sum(idfs[t] for t in sorted(evidence_terms))
+    aliases = set(_search_terms(expanded[len(query):]))
+    alias_total = sum(idfs[t] for t in sorted(aliases))
+    scored = []
+    for document in documents:
+        common = set(query_terms) & set(document.terms)
+        if not common:
+            continue
+        # Sort terms so floating point accumulation is repeatable across processes.
+        score = sum(idfs[t] * document.terms[t] / (document.terms[t] + 1.2)
+                    * (1.45 if t in document.heading_terms else 1.0)
+                    for t in sorted(common))
+        score *= 0.5 + len(common) / len(query_terms)
+        # File names may improve ranking, but only actual headings/body can
+        # supply evidence. A shared filename substring must not pass the gate.
+        evidence_matches = common & evidence_terms & document.evidence_terms
+        support = (sum(idfs[t] for t in sorted(evidence_matches)) / denominator
+                   if denominator else 0.0)
+        if alias_total:
+            support = max(support, sum(idfs[t] for t in sorted(evidence_matches & aliases)) / alias_total)
+        scored.append(RankedCandidate(
+            chunk=KnowledgeChunk(
+                id=f"kb:{document.id}", text=document.content,
+                source=(f"{document.source_name} · {document.heading}"
+                        if document.heading else document.source_name),
+                score=round(score, 4),
+            ),
+            category=document.category, source_id=document.source_id, coverage=support,
+        ))
+    return sorted(scored, key=lambda c: (-c.chunk.score, c.chunk.id))
+
+
+def select_candidates(
+    ranked: list[RankedCandidate], *, top_k: int, policy: RetrievalPolicy,
+) -> list[KnowledgeChunk]:
+    """Gate first, then take globally ranked results with a per-source cap.
+
+    No category receives a reserved slot. Do not backfill below-threshold or
+    over-cap results, even if that leaves fewer than top_k references.
+    """
+    if top_k <= 0:
+        return []
+    eligible = [c for c in ranked if c.chunk.score >= policy.min_score
+                and c.coverage >= policy.min_coverage]
+    if not eligible:
+        return []
+    cutoff = max(policy.min_score, eligible[0].chunk.score * policy.relative_score)
+    counts: Counter[int] = Counter()
+    selected = []
+    for candidate in eligible:
+        if candidate.chunk.score < cutoff:
+            continue
+        if counts[candidate.source_id] >= policy.max_per_source:
+            continue
+        counts[candidate.source_id] += 1
+        selected.append(candidate.chunk)
+        if len(selected) == top_k:
+            break
+    return selected
+
+
 class DatabaseKnowledgeBase:
     """Module-filtered lexical retrieval over administrator-imported sources.
 
@@ -258,8 +405,18 @@ class DatabaseKnowledgeBase:
     changing the graph, database import format, or admin endpoints.
     """
 
-    def __init__(self, sessionmaker_provider: Callable = get_sessionmaker):
+    def __init__(self, sessionmaker_provider: Callable = get_sessionmaker,
+                 *, policy: RetrievalPolicy | None = None):
         self._sessionmaker_provider = sessionmaker_provider
+        if policy is None:
+            settings = get_settings()
+            policy = RetrievalPolicy(
+                min_score=settings.knowledge_min_score,
+                min_coverage=settings.knowledge_min_coverage,
+                relative_score=settings.knowledge_relative_score,
+                max_per_source=settings.knowledge_max_per_source,
+            )
+        self.policy = policy
         self._index: tuple[_IndexedKnowledgeChunk, ...] | None = None
         self._index_loaded_at = 0.0
         self._index_lock = asyncio.Lock()
@@ -308,17 +465,13 @@ class DatabaseKnowledgeBase:
                     )
                 ).all()
             self._index = tuple(
-                _IndexedKnowledgeChunk(
+                index_chunk(
                     id=row.id,
                     source_id=source.id,
                     source_name=source.name,
                     category=source.category,
                     heading=row.heading,
                     content=row.content,
-                    terms=_search_terms(
-                        f"{source.name} {row.heading} {row.content}"
-                    ),
-                    heading_terms=_search_terms(f"{source.name} {row.heading}"),
                 )
                 for row, source in rows
             )
@@ -342,68 +495,8 @@ class DatabaseKnowledgeBase:
             logger.exception("knowledge retrieval failed for %s", module)
             return []
 
-        documents = [document for document in index if document.category in allowed]
-        query_terms = _search_terms(expand_knowledge_query(query))
-        if not query_terms or not documents:
-            return []
-        document_count = len(documents)
-        frequencies = Counter(
-            term
-            for document in documents
-            for term in set(document.terms)
-            if term in query_terms
-        )
-        scored: list[tuple[KnowledgeChunk, str, int]] = []
-        for document in documents:
-            terms = document.terms
-            common = set(query_terms) & set(terms)
-            if not common:
-                continue
-            score = 0.0
-            for term in common:
-                inverse_frequency = math.log(
-                    1 + (document_count - frequencies[term] + 0.5) / (frequencies[term] + 0.5)
-                )
-                term_frequency = terms[term] / (terms[term] + 1.2)
-                title_boost = 1.45 if term in document.heading_terms else 1.0
-                score += inverse_frequency * term_frequency * title_boost
-            coverage = len(common) / len(query_terms)
-            score *= 0.5 + coverage
-            chunk = KnowledgeChunk(
-                id=f"kb:{document.id}",
-                text=document.content,
-                source=(
-                    f"{document.source_name} · {document.heading}"
-                    if document.heading
-                    else document.source_name
-                ),
-                score=round(score, 4),
-            )
-            scored.append((chunk, document.category, document.source_id))
-        scored.sort(key=lambda item: (-item[0].score, item[0].id))
-
-        # Modules 2 and 3 each draw from three knowledge families. A very long
-        # book must not occupy every slot just because it contains a common
-        # word many times, so take the strongest matching chunk per category
-        # first, then fill the remaining budget by global score.
-        selected: list[KnowledgeChunk] = []
-        selected_ids: set[str] = set()
-        used_categories: set[str] = set()
-        for chunk, category, _source_id in scored:
-            if category in used_categories:
-                continue
-            selected.append(chunk)
-            selected_ids.add(chunk.id)
-            used_categories.add(category)
-            if len(selected) == top_k:
-                return selected
-        for chunk, _category, _source_id in scored:
-            if chunk.id in selected_ids:
-                continue
-            selected.append(chunk)
-            if len(selected) == top_k:
-                break
-        return selected
+        ranked = rank_candidates(index, module=module, query=query)
+        return select_candidates(ranked, top_k=top_k, policy=self.policy)
 
 
 _knowledge_base: KnowledgeBase | None = None

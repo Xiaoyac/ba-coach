@@ -3,6 +3,7 @@ from .admin_accounts import router as admin_accounts_router
 from .admin_knowledge import router as admin_knowledge_router
 from .admin_prompts import router as admin_prompts_router
 from .admin_sandbox import router as admin_sandbox_router
+from .admin_evaluations import router as admin_evaluations_router
 from .auth import router as auth_router
 from .chat import router as chat_router
 from .conversations import router as conversation_router
@@ -15,6 +16,7 @@ __all__ = [
     "admin_knowledge_router",
     "admin_prompts_router",
     "admin_sandbox_router",
+    "admin_evaluations_router",
     "auth_router",
     "chat_router",
     "conversation_router",

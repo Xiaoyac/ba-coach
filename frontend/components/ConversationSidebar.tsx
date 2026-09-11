@@ -46,6 +46,8 @@ export default function ConversationSidebar({
   onRename,
   onTogglePin,
   onStartSandbox,
+  onOpenTestWorkbench,
+  onOpenDailyRecords,
   sandboxBusy = false,
   open,
   onClose,
@@ -61,6 +63,8 @@ export default function ConversationSidebar({
   onTogglePin: (sessionId: string, pinned: boolean) => void;
   /** Present only for administrators; absence removes the control entirely. */
   onStartSandbox?: (module: SandboxModule) => void;
+  onOpenTestWorkbench?: () => void;
+  onOpenDailyRecords?: () => void;
   sandboxBusy?: boolean;
   /** Mobile-drawer state. Ignored at `md:` and up, where the rail is static. */
   open: boolean;
@@ -136,6 +140,10 @@ export default function ConversationSidebar({
         className="fixed inset-y-0 left-0 z-30 flex w-72 flex-col overflow-clip rounded-r-[28px] border border-line bg-panel depth-panel backdrop-blur-2xl transition-transform duration-300 ease-out md:static md:z-auto md:h-full md:w-64 md:shrink-0 md:!translate-x-0 md:rounded-[28px]"
       >
         <div className="shrink-0 space-y-2 p-3">
+          {onOpenDailyRecords && <button type="button" onClick={onOpenDailyRecords}
+            className="w-full rounded-2xl border border-line px-3.5 py-2.5 text-left text-sm text-ink">我的每日记录</button>}
+          {onOpenTestWorkbench && <button type="button" onClick={onOpenTestWorkbench}
+            className="w-full rounded-2xl border border-accent-edge bg-accent-wash px-3.5 py-2.5 text-left text-sm text-accent-ink">测试工作台</button>}
           {onStartSandbox && (
             <AdminSandboxControl busy={sandboxBusy} onStart={onStartSandbox} />
           )}

@@ -77,6 +77,7 @@ MODULE_TWO: tuple[Spec, ...] = (
     Spec("core_values", "text", "用户在对话中表达的核心价值观"),
     Spec("core_values_impact", "text", "该价值观如何影响其活动选择"),
     Spec("target_activity_content", "varchar", "目标活动做什么（What）", 255),
+    Spec("schedule_text", "varchar", "用户确认的自然语言安排，如每周三晚饭后；不要只因无法转换日期而丢弃，未知为 null", 255),
     Spec(
         "target_activity_time",
         "datetime",
@@ -85,7 +86,8 @@ MODULE_TWO: tuple[Spec, ...] = (
     Spec("target_activity_location", "varchar", "在哪里做（Where）", 255),
     Spec("target_activity_duration_minutes", "int", "计划时长，单位分钟，整数"),
     Spec("target_activity_companion", "varchar", "和谁一起（Who），独自完成写「独自」", 32),
-    Spec("potential_barriers", "json", "可能遇到的障碍，字符串数组；没谈到给 []"),
+    Spec("frequency_rule", "json", '明确表达的执行频率，{"schema_version":1,"text":"每周三次"}，不得推断，未知为 null'),
+    Spec("potential_barriers", "json", "可能遇到的障碍，字符串数组；没谈到给 []；只有用户明确表示无障碍时记录该原意，不得把未知写成无障碍"),
     Spec(
         "barrier_coping_plan",
         "json",
@@ -137,7 +139,7 @@ MODULE_FOUR: tuple[Spec, ...] = (
     Spec(
         "review_decision",
         "int",
-        "复盘决定：1=继续原目标，2=更换目标，3=调整目标；无法判断给 null",
+        "复盘决定：1=继续原目标，2=更换目标，3=调整目标，4=结束目标；无法判断给 null",
     ),
     Spec("review_summary", "text", "本轮复盘总结"),
 )

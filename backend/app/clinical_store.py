@@ -69,7 +69,7 @@ MODULE_TO_ENUM: dict[str, str] = {
 # `risk_expression_type` are small codes with their own documented ranges.
 _INT_RANGES: dict[str, tuple[int, int]] = {
     "execution_result": (1, 4),
-    "review_decision": (1, 3),
+    "review_decision": (1, 4),
     "risk_status": (0, 1),
     "risk_expression_type": (1, 3),
     "target_activity_duration_minutes": (0, 24 * 60),
@@ -167,6 +167,10 @@ async def persist_module_record(
     Only non-null extracted values are applied: a later pass that could not
     determine `core_values` must not erase what an earlier one found.
     """
+    from .v2_profile import enabled
+    if enabled():
+        from .v2_workflow import persist_record
+        return await persist_record(sessionmaker, module=module, user_id=user_id, data=data, cycle_id=cycle_id)
     model = MODULE_MODELS.get(module)
     if model is None or not data:
         return None
@@ -317,6 +321,12 @@ async def load_profile_context(
     coach may propose, and a coach that respects it only on turn one is worse
     than one that never knew. It is a single indexed lookup by uuid.
     """
+    from .v2_profile import enabled, read
+    if enabled():
+        async with sessionmaker() as db:
+            profile = await read(db, user_id)
+            return ["用户档案（用户填写的限制和话题边界必须尊重，未知值不要推断）：" +
+                    json.dumps(profile.model_dump(exclude={"available_providers", "preferred_provider", "tag", "display_id"}), ensure_ascii=False)]
     lines: list[str] = []
     async with sessionmaker() as db:
         profile = (
@@ -367,16 +377,8 @@ async def load_profile_context(
         ).scalar_one_or_none()
 
         entries: list[tuple[str | None, str | None, str | None]]
-        if ext and ext.supporters:
-            entries = [
-                (e.get("relation"), e.get("nickname"), e.get("influence"))
-                for e in ext.supporters
-            ]
-        else:
-            entries = [
-                (profile.supporter1_relation, profile.supporter1_nickname, profile.supporter1_influence),
-                (profile.supporter2_relation, profile.supporter2_nickname, profile.supporter2_influence),
-            ]
+        from .supporters import effective_supporters
+        entries = [(s.relation, s.nickname, s.influence) for s in effective_supporters(profile, ext)]
 
         supporters = []
         for relation, nick, influence in entries:
@@ -415,6 +417,10 @@ async def load_clinical_context(
     by reading that row back. Without this the coach re-asks for a plan the
     subject already made, which reads as not having listened.
     """
+    from .v2_profile import enabled
+    if enabled():
+        from .v2_workflow import clinical_context
+        return await clinical_context(sessionmaker, user_id, session_id)
     lines: list[str] = []
     async with sessionmaker() as db:
         cycle_id = (

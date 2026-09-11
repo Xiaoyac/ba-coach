@@ -25,6 +25,8 @@ import PromptManagerModal from "@/components/PromptManagerModal";
 import AdminAccountManagerModal from "@/components/AdminAccountManagerModal";
 import IssueReportModal from "@/components/IssueReportModal";
 import AdminIssueReportModal from "@/components/AdminIssueReportModal";
+import TestWorkbench from "@/components/TestWorkbench";
+import ProgramPanel from "@/components/ProgramPanel";
 import { captureViewport } from "@/lib/capture";
 import { ReportMark } from "@/components/icons";
 import {
@@ -95,6 +97,11 @@ export default function ConversationWorkspace({
   // Opened only from the header button now — nothing checks assessment
   // status on mount, so chat is never blocked behind this.
   const [assessmentOpen, setAssessmentOpen] = useState(false);
+  const [assessmentView, setAssessmentView] = useState<"record" | "history">("record");
+  const appliedRevisions = useRef(new Map<string, number>());
+  const pendingFloor = useRef<{ sessionId: string | null; count: number } | null>(null);
+  const activeSend = useRef<AbortController | null>(null);
+  useEffect(() => () => activeSend.current?.abort(), []);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [emailSettingsOpen, setEmailSettingsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -106,6 +113,7 @@ export default function ConversationWorkspace({
   const [reportScreenshot, setReportScreenshot] = useState<string | null>(null);
   const [reportCaptureError, setReportCaptureError] = useState<string | null>(null);
   const [sandboxStarting, setSandboxStarting] = useState(false);
+  const [testWorkbenchOpen, setTestWorkbenchOpen] = useState(false);
   const creatingConversationRef = useRef<Promise<ConversationDetail> | null>(null);
   // The live-sync stream can observe a deletion just before the DELETE fetch
   // resolves. Mark locally initiated deletions so only one code path chooses
@@ -147,6 +155,12 @@ export default function ConversationWorkspace({
     // Never overwrite an assistant bubble while this device is appending
     // streamed deltas. The send completion path performs a full fetch.
     if (busyRef.current) return;
+    const revision = detail.revision ?? 0;
+    if (revision < (appliedRevisions.current.get(detail.session_id) ?? -1)) return;
+    const floor = pendingFloor.current;
+    if (floor?.sessionId === detail.session_id && detail.messages.length < floor.count) return;
+    appliedRevisions.current.set(detail.session_id, revision);
+    if (floor?.sessionId === detail.session_id) pendingFloor.current = null;
     setMessages((prev) => {
       const same =
         prev.length === detail.messages.length &&
@@ -398,6 +412,14 @@ export default function ConversationWorkspace({
   }, [sessionId, applyRemoteSnapshot]);
 
   async function handleSend(text: string) {
+    if (busyRef.current) return;
+    const controller = new AbortController();
+    activeSend.current = controller;
+    const baseline = messages.length;
+    pendingFloor.current = { sessionId, count: baseline + 2 };
+    let recovered = false;
+    let checking = false;
+    const recoveryRequest: { current: AbortController | null } = { current: null };
     const sendGeneration = viewGenerationRef.current;
     const ownsVisibleConversation = () =>
       sendGeneration === viewGenerationRef.current;
@@ -405,6 +427,27 @@ export default function ConversationWorkspace({
     setBusy(true);
     busyRef.current = true;
     let resolvedSessionId = sessionId;
+    // Poll even during generation: iOS can leave a dead SSE read pending.
+    const recovery = window.setInterval(async () => {
+      if (!resolvedSessionId || checking || controller.signal.aborted) return;
+      checking = true;
+      recoveryRequest.current = new AbortController();
+      const readTimeout = window.setTimeout(() => recoveryRequest.current?.abort(), 8000);
+      try {
+        const detail = await fetchConversation(resolvedSessionId, recoveryRequest.current.signal);
+        if (ownsVisibleConversation() && !controller.signal.aborted &&
+            detail.messages[baseline]?.role === "user" && detail.messages[baseline]?.content === text &&
+            detail.messages[baseline + 1]?.role === "assistant" && detail.messages[baseline + 1]?.content) {
+          recovered = true;
+          controller.abort();
+          busyRef.current = false;
+          applyRemoteSnapshot(detail);
+          setError(null);
+        }
+      } catch { /* The next bounded poll retries. */ }
+      finally { window.clearTimeout(readTimeout); checking = false; }
+    }, 5000);
+    const deadline = window.setTimeout(() => controller.abort(), 180000);
     // Push the user turn plus an empty assistant turn that deltas append to.
     setMessages((prev) => [
       ...prev,
@@ -429,6 +472,7 @@ export default function ConversationWorkspace({
             // once the graph has made it) — merge rather than replace.
             if (meta.session_id) {
               resolvedSessionId = meta.session_id;
+              if (pendingFloor.current) pendingFloor.current.sessionId = meta.session_id;
               setSessionId(meta.session_id);
             }
             setRouting((prev) => ({ ...prev, ...meta }));
@@ -481,10 +525,17 @@ export default function ConversationWorkspace({
             if (ownsVisibleConversation()) setError(detail);
           },
         },
+        controller.signal,
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (!recovered && ownsVisibleConversation()) setError(controller.signal.aborted
+        ? "等待回复超时，已停止转圈并继续同步记录。请稍后查看，避免重复发送。"
+        : err instanceof Error ? err.message : String(err));
     } finally {
+      window.clearInterval(recovery);
+      window.clearTimeout(deadline);
+      recoveryRequest.current?.abort();
+      activeSend.current = null;
       setBusy(false);
       busyRef.current = false;
       // Replace optimistic/local-only messages with the complete durable
@@ -493,8 +544,9 @@ export default function ConversationWorkspace({
       // count while being entirely different content.
       if (resolvedSessionId && ownsVisibleConversation()) {
         try {
-          const detail = await fetchConversation(resolvedSessionId);
+          const detail = await fetchConversation(resolvedSessionId, AbortSignal.timeout(10000));
           applyRemoteSnapshot(detail);
+          if (detail.messages[baseline]?.content === text && detail.messages[baseline + 1]?.content) setError(null);
         } catch {
           // The live stream will retry with a full snapshot. Chat completion
           // itself succeeded, so a transient sync read is not a user-facing
@@ -690,11 +742,17 @@ export default function ConversationWorkspace({
           accountRole === "admin" ? handleStartSandbox : undefined
         }
         sandboxBusy={busy || sandboxStarting}
+        onOpenTestWorkbench={accountRole === "admin" ? () => setTestWorkbenchOpen(true) : undefined}
+        onOpenDailyRecords={() => { setAssessmentView("history"); setAssessmentOpen(true); setSidebarOpen(false); }}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />
 
-      <div className="flex h-full min-w-0 flex-1 justify-center">
+      <div className="flex h-full min-w-0 flex-1 flex-col items-center">
+        <ProgramPanel sessionId={sessionId} busy={busy} onChanged={async () => {
+          if (sessionId) applyRemoteSnapshot(await fetchConversation(sessionId));
+        }} />
+        <div className="flex min-h-0 w-full flex-1 justify-center">
         {/* `key` forces a full remount on conversation switch, so Chat's own
             local state (the draft input, composer height, scroll position)
             resets the same way a fresh page load would rather than carrying
@@ -708,7 +766,7 @@ export default function ConversationWorkspace({
           error={error}
           onSend={handleSend}
           onOpenSidebar={() => setSidebarOpen(true)}
-          onOpenAssessment={() => setAssessmentOpen(true)}
+          onOpenAssessment={() => { setAssessmentView("record"); setAssessmentOpen(true); }}
           displayName={displayName}
           accountUsername={accountUsername}
           displayIdentity={displayIdentity}
@@ -721,6 +779,7 @@ export default function ConversationWorkspace({
           onOpenAccountManager={() => setAccountManagerOpen(true)}
           onOpenIssueManager={() => setIssueManagerOpen(true)}
         />
+        </div>
       </div>
 
       {/* Keep support reachable without crowding the conversation header.
@@ -778,6 +837,7 @@ export default function ConversationWorkspace({
       {accountRole === "admin" && issueManagerOpen && (
         <AdminIssueReportModal onClose={() => setIssueManagerOpen(false)} />
       )}
+      {accountRole === "admin" && testWorkbenchOpen && <TestWorkbench onClose={() => setTestWorkbenchOpen(false)} />}
 
       {issueReportOpen && (
         <IssueReportModal
@@ -794,7 +854,7 @@ export default function ConversationWorkspace({
       )}
 
       {assessmentOpen && (
-        <DailyAssessmentModal onClose={() => setAssessmentOpen(false)} />
+        <DailyAssessmentModal initialView={assessmentView} onClose={() => setAssessmentOpen(false)} />
       )}
     </div>
   );

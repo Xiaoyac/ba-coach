@@ -595,7 +595,7 @@ async def test_summarizer_prompt_is_not_the_router_prompt(context, memos) -> Non
 # ---------------------------------------------------------------------------
 
 
-async def test_module_node_retrieves_knowledge(context) -> None:
+async def test_module_node_retrieves_knowledge(context, approved_mediator) -> None:
     final = await run(
         {"user_input": "grounding exercise", "forced_module": "module_3", "metadata": {}},
         context,
@@ -606,7 +606,7 @@ async def test_module_node_retrieves_knowledge(context) -> None:
     assert len(chunks) <= MODULE_CONFIGS["module_3"].top_k
 
 
-async def test_retrieved_knowledge_reaches_the_prompt(context, provider) -> None:
+async def test_retrieved_knowledge_reaches_the_prompt(context, provider, approved_mediator) -> None:
     await run(
         {"user_input": "grounding exercise", "forced_module": "module_3", "metadata": {}},
         context,
@@ -616,7 +616,7 @@ async def test_retrieved_knowledge_reaches_the_prompt(context, provider) -> None
     assert "grounding" in system.lower()
 
 
-async def test_global_prompt_stays_first_and_cacheable(context, provider) -> None:
+async def test_global_prompt_stays_first_and_cacheable(context, provider, approved_mediator) -> None:
     # A query that genuinely overlaps module_2's seed corpus, so there is a
     # volatile knowledge segment to assert about at all.
     await run(
@@ -635,10 +635,10 @@ async def test_global_prompt_stays_first_and_cacheable(context, provider) -> Non
     assert segments[2].cacheable
     # Volatile tail (knowledge/memory/context) must NOT carry a breakpoint.
     assert not segments[-1].cacheable
-    assert "# Retrieved Knowledge" in segments[-1].text
+    assert any("# Retrieved Knowledge" in s.text and not s.cacheable for s in segments)
 
 
-async def test_knowledge_is_labelled_as_untrusted_data(context, provider) -> None:
+async def test_knowledge_is_labelled_as_untrusted_data(context, provider, approved_mediator) -> None:
     await run(
         {"user_input": "open questions", "forced_module": "module_1", "metadata": {}},
         context,

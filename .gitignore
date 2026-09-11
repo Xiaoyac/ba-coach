@@ -33,6 +33,7 @@ pnpm-debug.log*
 *.log
 runtime-logs/
 .tools/
+.rag-local/
 
 # Assistant/editor-local state
 .claude/

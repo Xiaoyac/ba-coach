@@ -1,0 +1,179 @@
+{
+  "$defs": {
+    "ActivityLogIn": {
+      "description": "One activity card from step 1 of the wizard.",
+      "properties": {
+        "time_slot": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Time Slot",
+          "type": "string"
+        },
+        "activity": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Activity",
+          "type": "string"
+        },
+        "emotion": {
+          "maximum": 5,
+          "minimum": 0,
+          "title": "Emotion",
+          "type": "integer"
+        },
+        "achievement": {
+          "maximum": 5,
+          "minimum": 0,
+          "title": "Achievement",
+          "type": "integer"
+        },
+        "connection": {
+          "maximum": 5,
+          "minimum": 0,
+          "title": "Connection",
+          "type": "integer"
+        },
+        "enjoyment": {
+          "maximum": 5,
+          "minimum": 0,
+          "title": "Enjoyment",
+          "type": "integer"
+        },
+        "importance": {
+          "maximum": 5,
+          "minimum": 0,
+          "title": "Importance",
+          "type": "integer"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "required": [
+        "time_slot",
+        "activity",
+        "emotion",
+        "achievement",
+        "connection",
+        "enjoyment",
+        "importance"
+      ],
+      "title": "ActivityLogIn",
+      "type": "object"
+    },
+    "DailySummaryIn": {
+      "description": "The 0–10 sliders from step 2 of the wizard.",
+      "properties": {
+        "completion_rate": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Completion Rate",
+          "type": "integer"
+        },
+        "activity_level": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Activity Level",
+          "type": "integer"
+        },
+        "social_connection": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Social Connection",
+          "type": "integer"
+        },
+        "approach_vs_avoidance": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Approach Vs Avoidance",
+          "type": "integer"
+        },
+        "overall_mood": {
+          "maximum": 10,
+          "minimum": 0,
+          "title": "Overall Mood",
+          "type": "integer"
+        },
+        "reflection_note": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reflection Note"
+        }
+      },
+      "required": [
+        "completion_rate",
+        "activity_level",
+        "social_connection",
+        "approach_vs_avoidance",
+        "overall_mood"
+      ],
+      "title": "DailySummaryIn",
+      "type": "object"
+    }
+  },
+  "description": "POST /api/assessment — a completed assessment for one local day.",
+  "properties": {
+    "local_date": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Local Date"
+    },
+    "timezone": {
+      "anyOf": [
+        {
+          "maxLength": 64,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Timezone"
+    },
+    "activities": {
+      "items": {
+        "$ref": "#/$defs/ActivityLogIn"
+      },
+      "maxItems": 50,
+      "minItems": 1,
+      "title": "Activities",
+      "type": "array"
+    },
+    "summary": {
+      "$ref": "#/$defs/DailySummaryIn"
+    }
+  },
+  "required": [
+    "activities",
+    "summary"
+  ],
+  "title": "AssessmentSubmission",
+  "type": "object"
+}

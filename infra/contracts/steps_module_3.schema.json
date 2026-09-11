@@ -1,0 +1,13 @@
+{
+  "type": "array",
+  "items": {
+    "type": "string",
+    "enum": [
+      "recording_explained",
+      "recording_plan_agreed",
+      "execution_contract_reached"
+    ]
+  },
+  "uniqueItems": true,
+  "maxItems": 3
+}

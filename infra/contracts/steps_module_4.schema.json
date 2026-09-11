@@ -1,0 +1,15 @@
+{
+  "type": "array",
+  "items": {
+    "type": "string",
+    "enum": [
+      "execution_reviewed",
+      "abc_chain_completed",
+      "barriers_identified",
+      "coping_strategy_selected",
+      "review_decision_made"
+    ]
+  },
+  "uniqueItems": true,
+  "maxItems": 5
+}

@@ -21,6 +21,18 @@ class Settings(BaseSettings):
     # ---- App ----------------------------------------------------------
     app_name: str = "psychology-ai-api"
     debug: bool = False
+    # Disable for code-only releases that must not create tables or backfill data.
+    startup_db_maintenance: bool = True
+    database_schema_version: Literal["legacy", "v2"] = "legacy"
+    # Lexical retrieval gates. Restart workers after changing these settings.
+    knowledge_min_score: float = Field(default=0.1, ge=0, allow_inf_nan=False)
+    knowledge_min_coverage: float = Field(default=0.12, ge=0, le=1)
+    knowledge_relative_score: float = Field(default=0.2, ge=0, le=1)
+    knowledge_max_per_source: int = Field(default=2, ge=1)
+    knowledge_intent_gate_enabled: bool = True
+    knowledge_mediator_enabled: bool = True
+    answer_validator_enabled: bool = True
+    knowledge_mediator_timeout_seconds: float = Field(default=12, ge=1, le=60)
     api_prefix: str = "/api"
 
     # Comma-separated in .env, e.g. "http://localhost:3000,https://app.example.com".

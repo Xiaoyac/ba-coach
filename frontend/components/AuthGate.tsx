@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import AuthScreen from "@/components/AuthScreen";
 import ConversationWorkspace from "@/components/ConversationWorkspace";
 import RequiredEmailModal from "@/components/RequiredEmailModal";
-import { fetchMe, getToken, logout, type Account } from "@/lib/auth";
+import { clearToken, fetchMe, getToken, logout, type Account } from "@/lib/auth";
 
 interface AuthState {
   account: Account | null;
@@ -29,6 +29,16 @@ interface AuthState {
  * of requests that all 401.
  */
 export default function AuthGate() {
+  const [expired, setExpired] = useState(false);
+  useEffect(() => {
+    const expire = () => {
+      clearToken();
+      setExpired(true);
+      setState({ account: null, checking: false });
+    };
+    window.addEventListener("bacoach-auth-expired", expire);
+    return () => window.removeEventListener("bacoach-auth-expired", expire);
+  }, []);
   // Always `checking` on the first render, on both sides. Deriving it from
   // `getToken()` instead would read localStorage — which does not exist during
   // SSR — so the server would render the sign-in screen while the client
@@ -85,9 +95,10 @@ export default function AuthGate() {
 
   if (!state.account) {
     return (
-      <AuthScreen
-        onAuthenticated={(account) => setState({ account, checking: false })}
-      />
+      <>
+        {expired && <p role="alert" className="fixed top-3 left-4 right-4 z-50 rounded-xl bg-panel p-3 text-center text-sm text-alert-ink">登录已失效，请重新登录。已保存的记录不会丢失。</p>}
+        <AuthScreen onAuthenticated={(account) => { setExpired(false); setState({ account, checking: false }); }} />
+      </>
     );
   }
 

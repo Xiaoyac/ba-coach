@@ -15,6 +15,8 @@
  */
 
 const TOKEN_KEY = "psy-auth-token";
+let memoryToken: string | null = null;
+let memoryOnly = false;
 
 export interface Account {
   username: string;
@@ -54,23 +56,27 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 /** Read the stored token, or null. Safe when storage is blocked. */
 export function getToken(): string | null {
+  if (memoryOnly) return memoryToken;
   try {
     return localStorage.getItem(TOKEN_KEY);
   } catch {
-    return null;
+    return memoryToken;
   }
 }
 
 function setToken(token: string): void {
+  memoryToken = token;
   try {
     localStorage.setItem(TOKEN_KEY, token);
   } catch {
     // Private browsing with storage blocked: the session lasts as long as the
     // page does. Signing in still works; it just won't survive a reload.
+    memoryOnly = true;
   }
 }
 
 export function clearToken(): void {
+  memoryToken = null;
   try {
     localStorage.removeItem(TOKEN_KEY);
   } catch {

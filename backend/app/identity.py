@@ -142,4 +142,8 @@ async def optional_subject_id(
     request: Request, db: AsyncSession = Depends(get_db)
 ) -> str | None:
     caller = await _resolve(request, db)
+    # An expired logged-in request must not silently become an anonymous chat:
+    # the answer would not be stored and would disappear on synchronization.
+    if caller is None and request.headers.get("Authorization") is not None:
+        raise _UNAUTHENTICATED
     return caller.subject_id if caller else None

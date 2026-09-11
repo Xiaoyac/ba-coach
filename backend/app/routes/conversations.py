@@ -99,6 +99,7 @@ def _detail(c: Conversation, *, next_module: str | None = None) -> ConversationD
         updated_at=c.updated_at,
         pinned=c.pinned,
         messages=[project_message(message) for message in c.messages],
+        revision=c.revision,
         next_module=next_module,
     )
 
@@ -137,6 +138,12 @@ async def create_conversation(
         await db.rollback()
         await store.reset(session.session_id)
         raise
+    from ..v2_profile import enabled as v2_enabled
+    if v2_enabled():
+        runtime = await db.get(ConversationRuntimeState, conversation.id)
+        await store.adopt(session.session_id,
+            [Message(role=m.role, content=m.content) for m in conversation.messages],
+            runtime.module, runtime.memory)
     return await _detail_with_runtime(db, conversation)
 
 
@@ -355,6 +362,13 @@ async def delete_conversation(
         conversation = await _owned_or_404(
             db, session_id=session_id, subject_id=subject_id
         )
+        from ..v2_profile import enabled as v2_enabled
+        if v2_enabled():
+            from ..v2_deletion import detach_conversation
+            await detach_conversation(db, conversation)
+            await db.commit()
+            await store.reset(session_id)
+            return
         cycle_ids = select(PACycle.id).where(PACycle.conversation_id == conversation.id)
         # Explicit child deletes make the endpoint deterministic even in local
         # SQLite where foreign-key cascades may be disabled. The externally

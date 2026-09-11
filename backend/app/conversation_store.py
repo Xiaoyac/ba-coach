@@ -46,18 +46,26 @@ async def create_conversation_with_opening(
     )
     db.add(conversation)
     await db.flush()
+    from .v2_profile import enabled as v2_enabled
+    initial = None
+    opening_text = OPENING_MESSAGE_TEXT
+    if v2_enabled():
+        from .v2_repository import initial_module
+        initial = await initial_module(db, user_id=subject_id)
+        if initial == "module_2":
+            opening_text = "欢迎回来。之前的问题理解进度会保留；请在上方目标面板选择要继续的目标，或创建一个新目标。"
     db.add(
         ConversationMessage(
             conversation_id=conversation.id,
             position=-1,
             role="assistant",
-            content=OPENING_MESSAGE_TEXT,
+            content=opening_text,
         )
     )
     db.add(
         ConversationRuntimeState(
             conversation_id=conversation.id,
-            module=None,
+            module=initial,
             memory={},
         )
     )
@@ -361,6 +369,7 @@ async def complete_background_routing(
     finish_reason: str | None = None,
     error_code: str | None = None,
     prompt_version: str | None = None,
+    workflow_decision: dict | None = None,
 ) -> bool:
     """Atomically publish a delayed router result and durable graph state."""
     row = (
@@ -405,7 +414,7 @@ async def complete_background_routing(
         finish_reason=finish_reason,
         error_code=error_code,
         prompt_version=prompt_version,
-        event_metadata={"next_module": module},
+        event_metadata={"next_module": module, "workflow_decision": workflow_decision},
     )
 
     # Router enrichment is not new user activity. Revision still changes so

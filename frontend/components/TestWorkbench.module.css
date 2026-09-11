@@ -1,0 +1,19 @@
+.workbench { --workbench-row: color-mix(in srgb, var(--color-accent, #c8aa79) 6%, transparent); }
+.workbench button { transition: background .15s, border-color .15s, box-shadow .15s; }
+.workbench button:focus-visible, .workbench input:focus-visible, .workbench textarea:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.workbench input[type=checkbox] { width: 16px; height: 16px; accent-color: #a18151; cursor: pointer; }
+.workbench table { border-collapse: separate; border-spacing: 0; }
+.workbench table th { border-top: 0; border-left: 0; border-right: 0; padding: 16px; font-size: 11px; letter-spacing: .04em; white-space: nowrap; }
+.workbench table td { border-top: 0; border-left: 0; border-right: 0; padding: 16px; line-height: 1.75; }
+.workbench tbody tr:nth-child(even) { background: var(--workbench-row); }
+.workbench tbody tr[data-selected=true] { background: color-mix(in srgb, #bfa06e 15%, transparent); }
+.workbench tbody tr:hover { background: color-mix(in srgb, #bfa06e 11%, transparent); }
+.workbench table button { white-space: nowrap; }
+.workbench textarea { resize: vertical; }
+.workbench select { color-scheme: dark; }
+:global(.theme-warm) .workbench select { color-scheme: light; }
+.workbench [data-workbench-layer] { background: var(--color-canvas); }
+@media (min-width: 768px) {
+  .workbench table th:nth-child(2), .workbench table td:nth-child(2) { min-width: 95px; }
+}
+@media (prefers-reduced-motion: reduce) { .workbench button { transition: none; } }

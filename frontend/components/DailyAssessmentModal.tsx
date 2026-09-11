@@ -77,14 +77,17 @@ const defaultSummary = (): DailySummary => ({
 
 export default function DailyAssessmentModal({
   onClose,
+  initialView = "record",
 }: {
   /** Fired whenever the window goes away — submitted, skipped, the X, or
    *  clicking outside it. This is a manually opened tool now, not a gate
    *  the rest of the app waits on, so the caller only ever needs "it's
    *  closed" and doesn't have to tell those cases apart. */
   onClose: () => void;
+  initialView?: "record" | "history";
 }) {
-  const [view, setView] = useState<"record" | "history">("record");
+  const [view, setView] = useState<"record" | "history">(initialView);
+  useEffect(() => { if (initialView === "history") void loadHistory(0, false); }, [initialView]);
   const [step, setStep] = useState<1 | 2>(1);
   const [activities, setActivities] = useState<ActivityLog[]>([emptyActivity()]);
   const [summary, setSummary] = useState<DailySummary>(defaultSummary);

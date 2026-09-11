@@ -150,7 +150,7 @@ async def test_chinese_activity_query_reaches_english_compendium_row(
 
 
 @pytest.mark.asyncio
-async def test_retrieval_reserves_room_for_each_matching_module_category(
+async def test_equally_relevant_categories_remain_eligible(
     db_sessionmaker,
 ) -> None:
     async with db_sessionmaker() as db:
@@ -197,6 +197,7 @@ def test_imported_knowledge_reaches_the_next_agent_turn(
     knowledge_admin_headers: dict[str, str],
     auth_headers: dict[str, str],
     provider,
+    approved_mediator,
 ) -> None:
     sentinel = "ACTIVITY-MONITORING-KNOWLEDGE-SENTINEL"
     response = client.post(

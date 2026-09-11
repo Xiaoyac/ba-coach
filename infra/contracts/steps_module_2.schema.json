@@ -1,0 +1,14 @@
+{
+  "type": "array",
+  "items": {
+    "type": "string",
+    "enum": [
+      "pa_concept_understood",
+      "values_or_intention_explored",
+      "activity_selected",
+      "pa_card_completed"
+    ]
+  },
+  "uniqueItems": true,
+  "maxItems": 4
+}

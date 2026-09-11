@@ -19,11 +19,12 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .providers.base import LLMProvider
 from .reasoning import normalize_reasoning_channels
 from .workflow_state import normalise_completed_steps, required_steps_complete
+from .workflow_contract import step_prompt_contract
 
 logger = logging.getLogger(__name__)
 
@@ -33,13 +34,13 @@ ROUTER_RUNTIME_CONTRACT = """\
 - 较早轮次已经完成并获用户确认的步骤仍然有效；最后一轮没有复述不代表进度清零。
 - module_1 → module_2 只要求：已取得足够的困扰核心事例、已结合该经历完成抑郁循环与 BA 基础解释、用户已明确理解并愿意开始目标设定。不得要求 module_1 先开展 module_2 的具体目标设定内容。
 - 困扰信息“足够”不等于穷尽全部背景；已有一个足以解释行为—情绪循环的具体事例即可。
-- 输出必须同时携带本模块已经完成的结构化步骤键；步骤只可累加，不得撤销。
-- module_1 可用步骤键：core_problem_example, depression_cycle_formulated, ba_education_completed, goal_setting_consent。
-- module_2 可用步骤键：pa_concept_understood, values_or_intention_explored, activity_selected, pa_card_completed。
-- module_3 可用步骤键：recording_explained, recording_plan_agreed, execution_contract_reached。
-- module_4 可用步骤键：execution_reviewed, abc_chain_completed, barriers_identified, coping_strategy_selected, review_decision_made。
+- 输出必须同时携带本模块已经完成的结构化步骤键；通常累加，用户明确纠正时按下述撤销接口处理。
 - 只输出：{"target_module":"1|2|3|4","completed_steps":["合法步骤键", ...]}。
 """
+
+ROUTER_RUNTIME_CONTRACT += step_prompt_contract()
+ROUTER_RUNTIME_CONTRACT += "\nM2 的 completed_steps 表示对话证据是否足够，不表示网页已经提交。用户在聊天明确同意完整计划时可报告 pa_card_completed；网页确认和数据库跳转由后端执行。不要因教练正确地说还需网页确认而把已经满足的对话证据判为未完成。"
+ROUTER_RUNTIME_CONTRACT += "\n修正规则优先于旧的只累加规则：若用户本轮明确否定或更正旧完成证据，输出 revoked_steps（合法步骤键）和 revocation_evidence（本轮用户原话的精确片段）。只撤销受影响步骤；没有明确纠正则 revoked_steps=[]，不能因本轮没提及而撤销。撤销后留在当前模块重新讨论。JSON 允许这两个附加字段。"
 
 # ---------------------------------------------------------------------------
 # The business-rule prompt. Its transition invariants remain the specified
@@ -128,6 +129,8 @@ class RouterDecision:
     finish_reason: str | None = None
     request_id: str | None = None
     error_code: str | None = None
+    revoked_steps: list[str] = field(default_factory=list)
+    revocation_evidence: str | None = None
 
 
 def extract_pa_card(text: str) -> str | None:
@@ -316,10 +319,20 @@ async def decide_target_module_with_reasoning(
             error_code="invalid_router_json",
         )
 
+    revoked_steps, revocation_evidence = [], None
+    try:
+        correction = json.loads(raw.strip().removeprefix("```json").removesuffix("```").strip())
+        quote = correction.get("revocation_evidence")
+        if isinstance(quote, str) and quote.strip() and quote in user_input:
+            revoked_steps = normalise_completed_steps(current_module, correction.get("revoked_steps"))
+            revocation_evidence = quote if revoked_steps else None
+    except (ValueError, AttributeError, TypeError):
+        pass
     completed_steps = normalise_completed_steps(
         current_module,
         (completed_steps or []) + _parse_completed_steps(raw, current_module),
     )
+    completed_steps = [s for s in completed_steps if s not in revoked_steps]
     resolved = _clamp(
         current_short,
         proposed,
@@ -328,6 +341,8 @@ async def decide_target_module_with_reasoning(
     )
     return RouterDecision(
         target_module=_SHORT_TO_FULL[resolved],
+        revoked_steps=revoked_steps,
+        revocation_evidence=revocation_evidence,
         reasoning_content=normalized.reasoning,
         model=completion.model,
         completed_steps=completed_steps,
