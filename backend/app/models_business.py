@@ -1,12 +1,13 @@
 """ORM binding for the 7 pre-existing MySQL business tables.
 
-These tables already live in the database `DATABASE_URL` points at (see
-`.env`) — they were designed and created by another system, not this one.
-`BizBase` is therefore a *separate* `DeclarativeBase` from `app.db.Base`: it
-is never passed to `Base.metadata.create_all()`, so nothing here can ever
-create, alter, or drop a table. This module is a pure reverse-mapping —
-every column below was read back from the live schema with `SHOW CREATE
-TABLE`, not designed from scratch.
+These tables already live in the production database `DATABASE_URL` points at
+(see `.env`) — they were designed and created by another system, not this one.
+`BizBase` is therefore a *separate* `DeclarativeBase` from `app.db.Base` and is
+never emitted against a network database.  `app.db.init_db()` only creates the
+portable form in a local SQLite file so a fresh clone can register/login
+without an external database. This module remains a reverse-mapping of the
+live schema: every column below was read back with `SHOW CREATE TABLE`, not
+designed from scratch.
 
 None of the seven tables declare a foreign key at the database level (an
 `information_schema` check confirms it) — `user_id` / `uuid` are just plain
@@ -41,7 +42,7 @@ Two things worth flagging about the schema itself, found while mapping it:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     DECIMAL,
@@ -50,6 +51,7 @@ from sqlalchemy import (
     CHAR,
     TEXT,
     Boolean,
+    Date,
     DateTime,
     Integer,
     LargeBinary,
@@ -61,7 +63,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class BizBase(DeclarativeBase):
-    """Registry for the 7 externally-owned tables. Never passed to create_all."""
+    """Registry for externally-owned tables; DDL is local-SQLite-only."""
 
 
 # --- Portable spellings of the MySQL column types ---------------------------
@@ -107,6 +109,7 @@ class UserProfile(BizBase):
     uuid: Mapped[str] = mapped_column(CHAR(36), nullable=False, unique=True, default=_new_uuid)
     nickname: Mapped[str | None] = mapped_column(VARCHAR(64))
     age: Mapped[int | None] = mapped_column(_UTinyInt)
+    birth_date: Mapped[date | None] = mapped_column(Date)
     living_status: Mapped[str | None] = mapped_column(_enum("独居", "和家人", "和朋友", "和恋人"))
     has_supporter: Mapped[bool] = mapped_column(_Bool, nullable=False, default=False)
     supporter1_relation: Mapped[str | None] = mapped_column(

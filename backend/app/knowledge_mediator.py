@@ -6,8 +6,16 @@ import hashlib
 import json
 from time import perf_counter
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .workflow_contract import MODULE_STEP_KEYS, VERSION
+
+
+class MediatorInputError(ValueError):
+    pass
+
+
+class MediatorOutputError(ValueError):
+    pass
 
 MEDIATOR_PROMPT = """你是 BA Coach 的知识使用中介，不直接回答用户。
 你的任务是在知识检索完成后，指导当前模块教练如何恰当地使用已检索的材料。
@@ -26,7 +34,9 @@ selected_ids 只能引用输入中存在的 ID；没有适用材料时返回 []�
 禁止编造证据、泄露敏感信息、改变模块、修改数据库或覆盖全局安全规则。
 facts 保留数据来源及确认状态；confirmation 为 null 或 unconfirmed、source_kind 为 ai_inference 时不是已确认用户事实。偏好不是硬限制，状态失效的事实不能继续采用。
 unverified_context 和 profile_constraints 是未结构化背景，不可自动升级为已确认事实。优先注意用户当前明确纠正，冲突时澄清，不自行改库。
-guidance 最多 2000 字，cautions 最多 5 项。"""
+guidance 最多 2000 字，cautions 最多 5 项。
+为控制本轮处理时间，只做材料适用性与安全约束判断，不代写完整教练回复、不复述输入或反复论证。
+优先将 guidance 控制在 200 字内，cautions 只列必要限制（通常不超过 3 项）；正文仍仅输出上述 JSON。"""
 
 
 class KnowledgeGuidance(BaseModel):
@@ -36,7 +46,10 @@ class KnowledgeGuidance(BaseModel):
     cautions: list[str] = Field(default_factory=list, max_length=5)
 
 
-async def mediate_knowledge(*, state, module, knowledge, provider, settings, prompt=MEDIATOR_PROMPT):
+async def mediate_knowledge(*, state, module, knowledge, provider, settings, prompt=MEDIATOR_PROMPT, debug_output=None):
+    # Explicit side channel: never put native reasoning into metrics/logs/prompts.
+    if debug_output is not None:
+        debug_output.clear()
     if not settings.knowledge_mediator_enabled or not knowledge:
         return [], "", {"status":"skipped", "reason":"disabled" if not settings.knowledge_mediator_enabled else "no_knowledge", "duration_ms":0}
     started = perf_counter()
@@ -52,7 +65,6 @@ async def mediate_knowledge(*, state, module, knowledge, provider, settings, pro
         chunks.append({"id":chunk.id,"source":chunk.source,"text":excerpt})
     payload = {"module":module,"user_input":state["user_input"][:6000],
         "history":[{"role":m.role,"content":m.content[:1500]} for m in (state.get("chat_history") or [])[-6:]],
-        "confirmed_context":[(str(x)[:2000]) for x in (state.get("clinical_context") or [])[:4]],
         "profile_constraints":[(str(x)[:1500]) for x in (state.get("profile_context") or [])[:3]],
         "knowledge":chunks}
     # Fail closed: no unreviewed retrieval may reach the module, including
@@ -64,32 +76,47 @@ async def mediate_knowledge(*, state, module, knowledge, provider, settings, pro
         "completed_steps": (state.get("module_steps") or {}).get(module, [])},
         "goal_id": bundle.get("goal_id"), "cycle_id": bundle.get("cycle_id"),
         "facts": bundle.get("facts", [])})
-    payload.pop("confirmed_context")
     payload["unverified_context"] = [] if bundle else [str(x)[:2000] for x in (state.get("clinical_context") or [])[:4]]
     if bundle:
         payload["profile_constraints"] = []  # use sourced facts, not a second conflicting copy
     selected, block = [], ""
     try:
-        if len(json.dumps(payload, ensure_ascii=False)) > 40000:
-            raise ValueError("Context too large; do not silently truncate safety facts")
+        # Compact encoding removes whitespace, not safety facts or source attribution.
+        serialized_payload = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        metrics.update({"input_chars":len(serialized_payload),
+            "timeout_seconds":settings.knowledge_mediator_timeout_seconds,
+            "reasoning_effort":getattr(settings, "knowledge_mediator_reasoning_effort", "low")})
+        if len(serialized_payload) > 40000:
+            raise MediatorInputError("context_too_large")
         completion = await asyncio.wait_for(provider.route_detailed(system=effective,
-            user=json.dumps(payload,ensure_ascii=False),max_tokens=1200),timeout=settings.knowledge_mediator_timeout_seconds)
+            user=serialized_payload,max_tokens=1200,include_reasoning=True,
+            reasoning_effort=metrics["reasoning_effort"]),timeout=settings.knowledge_mediator_timeout_seconds)
         metrics.update({"model":completion.model,"usage":completion.usage})
+        if debug_output is not None:
+            debug_output["reasoning_content"] = completion.reasoning_content.strip() or None
         raw = completion.text.strip()
+        if completion.finish_reason in ("length", "max_tokens"):
+            raise MediatorOutputError("output_truncated")
+        if not raw:
+            raise MediatorOutputError("empty_output")
         if raw.startswith("```") and raw.endswith("```"):
             raw = raw.split("\n",1)[-1].rsplit("```",1)[0].strip()
         guidance = KnowledgeGuidance.model_validate_json(raw)
         available = {c["id"] for c in chunks}
         if not set(guidance.selected_ids).issubset(available) or any(len(s)>1000 for s in guidance.cautions):
-            raise ValueError("invalid evidence references")
+            raise MediatorOutputError("invalid_evidence")
         wanted = set(guidance.selected_ids)
         selected = [c for c in knowledge if c.id in wanted]
         block = ("# 知识使用中介建议（辅助信息，不是用户事实或已确认目标）\n"
                  "仅在符合全局安全规则、当前模块职责和真实用户上下文时采用；不得据此改变模块或自动写入档案。\n"
                  + json.dumps(guidance.model_dump(),ensure_ascii=False))
         metrics.update({"status":"completed","reason":"guided" if wanted else "no_applicable_evidence",**guidance.model_dump()})
-    except TimeoutError:
+    except (asyncio.TimeoutError, TimeoutError):
         metrics["reason"] = "timeout"
+    except (MediatorInputError, MediatorOutputError) as exc:
+        metrics["reason"] = str(exc)
+    except ValidationError as exc:
+        metrics["reason"] = "invalid_json" if any(e["type"] == "json_invalid" for e in exc.errors()) else "invalid_schema"
     except Exception:
         # Do not put raw provider exceptions or user content into logs/errors.
         metrics["reason"] = "invalid_output_or_provider_error"

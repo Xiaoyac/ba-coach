@@ -95,6 +95,7 @@ class DeepSeekProvider(LLMProvider):
     async def stream(
         self, *, system: SystemPrompt, messages: list[Message]
     ) -> AsyncIterator[StreamDelta]:
+        stream = None
         try:
             stream = await self._client.chat.completions.create(
                 model=self.model,
@@ -143,6 +144,10 @@ class DeepSeekProvider(LLMProvider):
         except openai.APIConnectionError as exc:
             raise ProviderError("Could not reach the DeepSeek API") from exc
 
+        finally:
+            if stream is not None and callable(getattr(stream, "close", None)):
+                await stream.close()
+
     async def _router_completion(
         self, *, system: str, user: str, max_tokens: int | None = None
     ) -> Completion:
@@ -188,19 +193,27 @@ class DeepSeekProvider(LLMProvider):
         return (await self._router_completion(system=system, user=user, max_tokens=max_tokens)).text
 
     async def route_detailed(
-        self, *, system: str, user: str, max_tokens: int | None = None
+        self, *, system: str, user: str, max_tokens: int | None = None,
+        include_reasoning: bool = False,
+        reasoning_effort: str | None = None,
     ) -> Completion:
+        if include_reasoning:
+            return await self.route_with_reasoning(system=system, user=user, max_tokens=max_tokens, reasoning_effort=reasoning_effort)
         return await self._router_completion(system=system, user=user, max_tokens=max_tokens)
 
     async def route_with_reasoning(
-        self, *, system: str, user: str, max_tokens: int | None = None
+        self, *, system: str, user: str, max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> Completion:
-        """Thinking-enabled call used only by the post-hoc module router."""
+        """Native thinking; mediator may lower effort without changing router defaults."""
         model = self._settings.deepseek_router_model
         try:
-            response = await self._client.chat.completions.create(
+            # A bounded mediator request must not spend its deadline on SDK retries.
+            client = self._client.with_options(max_retries=0) if reasoning_effort is not None else self._client
+            response = await client.chat.completions.create(
                 model=model,
                 max_tokens=max_tokens or self._settings.router_reasoning_max_tokens,
+                **({"reasoning_effort": reasoning_effort} if reasoning_effort else {}),
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},

@@ -306,6 +306,9 @@ def register(client: TestClient):
         nonlocal next_tag
         tag = profile.pop("tag", f"{next_tag:05d}")
         next_tag += 1
+        from app.birth_dates import today
+        requested_age = profile.pop("age", 28)
+        birthday = profile.pop("birth_date", today().replace(year=today().year - requested_age, month=1, day=1).isoformat())
         response = client.post(
             "/api/auth/register",
             json={
@@ -314,6 +317,7 @@ def register(client: TestClient):
                 "email": profile.pop("email", f"{username.lower()}@example.com"),
                 "nickname": profile.pop("nickname", username),
                 "tag": tag,
+                "birth_date": birthday,
                 **profile,
             },
         )

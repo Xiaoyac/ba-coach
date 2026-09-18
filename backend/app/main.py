@@ -25,6 +25,7 @@ from .routes import (
     admin_sandbox_router,
     admin_evaluations_router,
     assessment_router,
+    admin_assessments_router,
     auth_router,
     chat_router,
     conversation_router,
@@ -114,11 +115,14 @@ def create_app() -> FastAPI:
     app.include_router(admin_evaluations_router, prefix=settings.api_prefix)
     app.include_router(chat_router, prefix=settings.api_prefix)
     app.include_router(assessment_router, prefix=settings.api_prefix)
+    app.include_router(admin_assessments_router, prefix=settings.api_prefix)
     app.include_router(conversation_router, prefix=settings.api_prefix)
     app.include_router(issue_reports_router, prefix=settings.api_prefix)
     app.include_router(profile_router, prefix=settings.api_prefix)
     from .routes.program import router as program_router
     app.include_router(program_router, prefix=settings.api_prefix)
+    from .routes.push import router as push_router
+    app.include_router(push_router, prefix=settings.api_prefix)
 
     @app.get("/health", response_model=HealthResponse, tags=["meta"])
     async def health() -> HealthResponse:

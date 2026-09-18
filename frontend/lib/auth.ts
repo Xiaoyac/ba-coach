@@ -29,6 +29,7 @@ export interface Account {
   email: string | null;
   email_verified: boolean;
   email_required: boolean;
+  birth_date_required?: boolean;
   email_delivery_available: boolean;
 }
 
@@ -45,7 +46,7 @@ export interface RegisterInput {
   nickname: string;
   tag: string;
   /** Stable enough to ask once — everything else is edited in the profile. */
-  age?: number | null;
+  birth_date: string;
   living_status?: string | null;
   communication_preference?: string | null;
   physical_condition?: string[];
@@ -111,6 +112,11 @@ async function parseAuth(res: Response): Promise<AuthPayload> {
     // FastAPI puts the human-readable reason in `detail`; a 422 puts a list of
     // field errors there instead, which is not worth rendering raw.
     const detail = typeof body?.detail === "string" ? body.detail : null;
+    const birthdayInvalid = res.status === 422 && Array.isArray(body?.detail) &&
+      body.detail.some((issue: { loc?: unknown[] }) => issue.loc?.includes("birth_date"));
+    if (birthdayInvalid) {
+      throw new AuthError("请填写有效的出生日期，当前支持 10–120 岁。若没有日期栏，请刷新网页。", res.status);
+    }
     throw new AuthError(detail ?? "请求失败，请稍后再试", res.status);
   }
   setToken(body.token);
@@ -133,6 +139,13 @@ export async function register(input: RegisterInput): Promise<Account> {
     body: JSON.stringify(input),
   });
   return (await parseAuth(res)).account;
+}
+
+export async function saveBirthDate(birthDate: string): Promise<Account> {
+  const response = await fetch(`${API_BASE}/api/auth/birth-date`, {
+    method: "PUT", headers: headers(true), body: JSON.stringify({ birth_date: birthDate }),
+  });
+  return parseResponse<Account>(response, "出生日期保存失败，请核对日期后重试（当前支持 10–120 岁）");
 }
 
 export async function login(
@@ -260,6 +273,7 @@ export async function resetPassword(
 }
 
 export async function logout(): Promise<void> {
+  await import('@/lib/push').then(m=>m.clearLocalPush()).catch(()=>{});
   try {
     await fetch(`${API_BASE}/api/auth/logout`, {
       method: "POST",

@@ -109,6 +109,9 @@ export default function AssessmentHistory({
 
       {records.map((record) => {
         const expanded = expandedId === record.id;
+        const modern = record.scale_version === 2;
+        const maximum = modern ? 5 : 10;
+        const labels = modern ? SUMMARY_LABELS.filter(s => ["completion_rate", "activity_level", "overall_mood"].includes(s.key)) : SUMMARY_LABELS;
         return (
           <article
             key={record.id}
@@ -135,7 +138,7 @@ export default function AssessmentHistory({
                   {formatLocalDate(record.local_date)}
                 </span>
                 <span className="mt-1 block text-[0.75rem] text-ink-faint">
-                  {record.activities.length} 项活动 · 整体心情 {record.overall_mood ?? "—"}/10
+                  {record.activities.length} 项活动 · 整体心情 {record.overall_mood ?? "—"}/{maximum}{!modern && " · 旧版量表"}
                 </span>
               </span>
               <ChevronDownMark
@@ -147,16 +150,16 @@ export default function AssessmentHistory({
 
             {expanded && (
               <div className="border-t border-line px-4 pb-5 pt-4 sm:px-5">
-                <div className="grid grid-cols-5 gap-1.5">
-                  {SUMMARY_LABELS.map(({ key, label }) => (
+                <div className={`grid ${modern ? "grid-cols-3" : "grid-cols-5"} gap-1.5`}>
+                  {labels.map(({ key, label }) => (
                     <div
                       key={key}
                       className="rounded-xl border border-line bg-canvas/35 px-1.5 py-2 text-center"
                     >
                       <p className="text-[0.62rem] text-ink-faint">{label}</p>
                       <p className="mt-0.5 text-[0.82rem] font-medium tabular-nums text-ink">
-                        {record[key] ?? "—"}
-                        <span className="ml-0.5 text-[0.58rem] font-normal text-ink-faint">/10</span>
+                        {key === "completion_rate" && record.completion_not_applicable ? "不适用" : <>{record[key] ?? "—"}
+                        <span className="ml-0.5 text-[0.58rem] font-normal text-ink-faint">/{maximum}</span></>}
                       </p>
                     </div>
                   ))}
@@ -218,7 +221,7 @@ function ActivityHistoryCard({ activity }: { activity: StoredActivityLog }) {
       <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1.5 border-t border-line pt-2.5">
         {ACTIVITY_LABELS.map(({ key, label }) => (
           <span key={key} className="text-[0.68rem] text-ink-faint">
-            {label} <strong className="font-medium tabular-nums text-ink-muted">{activity[key]}/5</strong>
+            {label} <strong className="font-medium tabular-nums text-ink-muted">{activity[key] == null ? "未填写" : `${activity[key]}/5`}</strong>
           </span>
         ))}
       </div>

@@ -12,9 +12,10 @@
 export type Theme = "dark" | "warm";
 
 export const THEME_KEY = "psy-theme";
+export const DEFAULT_THEME: Theme = "warm";
 
 /** Keeps mobile browser chrome (address bar, status bar) matching the app. */
 export const THEME_META_COLOR: Record<Theme, string> = {
-  dark: "#151618",
-  warm: "#f7f5f0",
+  dark: "#010a13",
+  warm: "#f2eee5",
 };

@@ -57,6 +57,7 @@ from ..prompts import (
 )
 from ..providers.base import LLMProvider, ProviderError, as_text
 from ..reasoning import ThinkingTagStreamGuard, normalize_reasoning_channels
+from ..retrieval import DatabaseKnowledgeBase
 from ..retrieval_intent import decide_retrieval
 from ..router_agent import decide_target_module_with_reasoning, extract_pa_card
 from ..schemas import Message
@@ -499,10 +500,10 @@ def make_module_node(module_name: str, config: ModuleConfig):
             async with context.sessionmaker() as db:
                 _, program = await runtime_for(db, state["session_id"])
             blocked_reply = None
-            if program and not program["active_goal_id"]:
-                blocked_reply = "请先在上方「我的目标」中选择一个已有目标，或填写一个新目标。之前的进度会保留，选好后我们接着聊。"
-            elif program and program["flow_status"] == "completed":
-                blocked_reply = "这次目标的记录已经结束并保留。如果想讨论其他目标，请新建一段聊天，再选择或创建目标。"
+            if program and program["flow_status"] == "completed":
+                blocked_reply = "这次目标的记录已经结束并保留。如果想继续其他目标或讨论新方向，请新建一段聊天。"
+            if program and program["flow_status"] == "paused":
+                blocked_reply = "这个目标已暂停，历史记录仍保留。想继续时，可以新建聊天并选择“恢复并继续”这个目标，也可以讨论其他方向，不需要现在决定。"
             if blocked_reply:
                 if context.stream:
                     _emit({"type": "delta", "text": blocked_reply})
@@ -538,15 +539,21 @@ def make_module_node(module_name: str, config: ModuleConfig):
             gate_ms = (perf_counter() - gate_started) * 1000
             retrieval_started = perf_counter()
             outcome = "skipped"
+            cache_metrics = {"cache": "bypass_custom_or_skipped"}
             try:
                 if decision.retrieve:
                     outcome = "error"
-                    knowledge = await context.knowledge_base.search(
-                        module=module_name,
-                        query=_knowledge_query(state),
-                        top_k=config.top_k,
-                    )
+                    search_args = {"module": module_name, "query": _knowledge_query(state), "top_k": config.top_k}
+                    if isinstance(context.knowledge_base, DatabaseKnowledgeBase):
+                        subject, session = state.get("subject_id"), state.get("session_id")
+                        scope = (subject, session, str(bool((state.get("memory") or {}).get("sandbox_mode")))) if subject and session else None
+                        knowledge, cache_metrics = await context.knowledge_base.search_with_diagnostics(
+                            **search_args, cache_scope=scope)
+                    else:
+                        knowledge = await context.knowledge_base.search(**search_args)
                     outcome = "returned" if knowledge else "empty"
+                    if cache_metrics.get("status", "").startswith("withheld_"):
+                        outcome = "error"
             finally:
                 retrieval_ms = (perf_counter() - retrieval_started) * 1000 if decision.retrieve else 0.0
                 retrieval_metrics = {
@@ -558,7 +565,9 @@ def make_module_node(module_name: str, config: ModuleConfig):
                     "returned": len(knowledge),
                     "context_chars": sum(len(chunk.text) for chunk in knowledge),
                     "retriever": type(context.knowledge_base).__name__,
+                    "ranking_mode": getattr(context.knowledge_base, "ranking_mode", "custom"),
                     "module": module_name,
+                    "exact_cache": cache_metrics,
                 }
                 # Structured server log: no query, transcript, user ID, or reference text.
                 logger.info("retrieval_gate %s", json.dumps(retrieval_metrics, ensure_ascii=False))
@@ -568,7 +577,8 @@ def make_module_node(module_name: str, config: ModuleConfig):
                     "node": module_name,
                     "detail": {
                         "retrieved": [chunk.id for chunk in knowledge],
-                        "top_score": knowledge[0].score if knowledge else 0.0,
+                        "top_score": knowledge[0].score if knowledge else None,
+                        "score_type": knowledge[0].score_type if knowledge else None,
                         "duration_ms": round(gate_ms + retrieval_ms),
                         "intent_gate": retrieval_metrics,
                     },
@@ -596,6 +606,9 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 # falls back to the source-controlled defaults and is logged.
                 logger.exception("failed to load prompt overrides for %s", module_name)
 
+        # Keep an immutable turn snapshot before the safety-context fail-closed path.
+        recalled_knowledge = list(knowledge)
+        context_withheld = False
         mediator_state = dict(state)
         from ..v2_profile import enabled as knowledge_v2_enabled
         if knowledge_v2_enabled() and context.sessionmaker and state.get("subject_id") and state.get("session_id"):
@@ -606,10 +619,12 @@ def make_module_node(module_name: str, config: ModuleConfig):
             except Exception:
                 # Unknown safety context must not enable unreviewed retrieval.
                 knowledge = []
+                context_withheld = True
                 logger.warning("knowledge_context unavailable; withholding retrieved knowledge")
+        mediator_debug = {}
         guided_knowledge, guidance_block, mediator_metrics = await mediate_knowledge(
             state=mediator_state, module=module_name, knowledge=knowledge, provider=context.router_provider,
-            settings=context.settings, prompt=mediator_prompt)
+            settings=context.settings, prompt=mediator_prompt, debug_output=mediator_debug)
         _emit({"type":"trace", "node":"knowledge_mediator", "detail":mediator_metrics})
         logger.info("knowledge_mediator %s", json.dumps({k:v for k,v in mediator_metrics.items() if k not in ("guidance","cautions")},ensure_ascii=False))
         if context.sessionmaker is not None and mediator_metrics["status"] != "skipped":
@@ -639,6 +654,13 @@ def make_module_node(module_name: str, config: ModuleConfig):
         telemetry = dict(state.get("telemetry") or {})
         telemetry["retrieval"] = retrieval_metrics
         telemetry["knowledge_mediator"] = mediator_metrics
+        from ..knowledge_references import reference_snapshot
+        telemetry["knowledge_references"] = reference_snapshot(
+            module=module_name, recalled=recalled_knowledge, provided=guided_knowledge,
+            retrieval=retrieval_metrics, mediator=mediator_metrics,
+            context_withheld=context_withheld,
+            mediator_reasoning=mediator_debug.get("reasoning_content"),
+        )
         telemetry["prompt_version"] = hashlib.sha256(
             as_text(system).encode("utf-8")
         ).hexdigest()[:16]
@@ -753,7 +775,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
             telemetry["answer_validator"] = validation
             _emit({"type": "trace", "node": "answer_validator", "detail": validation})
             block_codes = {f['code'] for f in validation['findings'] if f['severity'] == 'block'}
-            if block_codes == {'uncommitted_workflow_claim'} and not update.get('error'):
+            if block_codes and block_codes <= {'uncommitted_workflow_claim', 'panel_confirmation_instruction'} and not update.get('error'):
                 update['final_response'] = truthful_workflow_reply(authority)
                 update['reasoning_content'] = ''
                 validation['status'] = 'corrected'
@@ -1121,13 +1143,75 @@ async def _summarize_and_save(
         if v2_enabled() and sessionmaker is not None:
             from ..v2_repository import append_memory
             async with sessionmaker() as db:
+                from ..models import Conversation, ConversationMessage
+                from sqlalchemy import select
+                # A slow summary must not recreate memory after source deletion.
+                source_conversation = (await db.execute(select(Conversation.id).where(
+                    Conversation.session_id == session_id,
+                    Conversation.subject_id == subject_id).with_for_update())).scalar_one_or_none()
+                if source_conversation is None:
+                    return
+                source_message = (await db.execute(select(ConversationMessage.id).where(
+                    ConversationMessage.conversation_id == source_conversation,
+                    ConversationMessage.role == "user").order_by(ConversationMessage.position.desc()).limit(1))).scalar_one_or_none()
+                if source_message is None:
+                    return
                 await append_memory(db, user_id=subject_id, memory_type="模块总结",
-                                    content=summary.strip(), source_kind="ai_inference")
+                                    content=summary.strip(), source_kind="ai_inference",
+                                    source_message_id=source_message)
                 await db.commit()
         elif memos is not None:
             await memos.save_memo(subject_id, summary.strip())
     except Exception:  # noqa: BLE001 — background task, nothing to propagate to
         logger.exception("background summarization failed for subject %s", subject_id[:8])
+
+
+async def _extract_module_data(
+    provider: LLMProvider,
+    sessionmaker,
+    *,
+    subject_id: str,
+    module: str,
+    transcript: str,
+    max_tokens: int,
+    session_id: str | None = None,
+    evidence_turns: list[tuple[str, str]] | None = None,
+) -> dict:
+    """Extract and audit validated module data without writing a record."""
+    started = perf_counter()
+    raw, completion = await extract_module_record_detailed(
+        provider, module=module, transcript=transcript, max_tokens=max_tokens
+    )
+    data = coerce(MODULE_SPECS[module], raw)
+    if module == "module_4" and isinstance(raw.get("m4_contract"), dict):
+        data["m4_contract"] = raw["m4_contract"]
+    if module in {"module_2", "module_4"}:
+        for key in ("goal_proposal", "plan_context", "activity_observations", "review_followup", "activity_corrections"):
+            if key in raw and isinstance(raw[key], (dict, list)):
+                data[key] = raw[key]
+    if module == "module_1" and evidence_turns is not None:
+        from ..m1_contract import snapshot
+        data = snapshot(raw, data, evidence_turns, session_id)
+    await save_ai_event(
+        sessionmaker,
+        stage="clinical_extraction",
+        session_id=session_id,
+        subject_id=subject_id,
+        provider=provider.name,
+        model_name=completion.model,
+        duration_ms=int((perf_counter() - started) * 1000),
+        usage=completion.usage,
+        request_id=completion.request_id,
+        finish_reason=completion.finish_reason,
+        error_code=None if completion.text else "empty_completion",
+        prompt_version=hashlib.sha256(
+            ("clinical_" + module + ("_20260914" if module == "module_1" else "_20260917" if module == "module_4" else "_v1")).encode("utf-8")
+        ).hexdigest()[:16],
+        event_metadata={"module": module, **({"contract_version": data["m1_contract"]["version"],
+            "contract_path": data["m1_contract"]["path"], "missing_fields": data["m1_contract"]["missing_fields"]}
+            if "m1_contract" in data else {})},
+    )
+    return data
 
 
 async def _extract_and_persist_module(
@@ -1141,39 +1225,25 @@ async def _extract_and_persist_module(
     reuse_latest: bool,
     cycle_id: str | None = None,
     session_id: str | None = None,
+    evidence_turns: list[tuple[str, str]] | None = None,
+    evidence_turn_id: int | None = None,
 ) -> None:
-    """Extract one module's fields and write them. Never raises.
-
-    Runs detached, after the reply has gone out, for the same reason the
-    summarizer does: this is a second LLM round trip, and making the person
-    wait for bookkeeping would be paying latency for something they never see.
-    """
+    """Extract one module's fields and write them. Never raises."""
     try:
-        started = perf_counter()
-        raw, completion = await extract_module_record_detailed(
-            provider, module=module, transcript=transcript, max_tokens=max_tokens
-        )
-        data = coerce(MODULE_SPECS[module], raw)
-        await save_ai_event(
-            sessionmaker,
-            stage="clinical_extraction",
-            session_id=session_id,
-            subject_id=subject_id,
-            provider=provider.name,
-            model_name=completion.model,
-            duration_ms=int((perf_counter() - started) * 1000),
-            usage=completion.usage,
-            request_id=completion.request_id,
-            finish_reason=completion.finish_reason,
-            error_code=None if completion.text else "empty_completion",
-            prompt_version=hashlib.sha256(
-                ("clinical_" + module + "_v1").encode("utf-8")
-            ).hexdigest()[:16],
-            event_metadata={"module": module},
-        )
+        data = await _extract_module_data(provider, sessionmaker,
+            subject_id=subject_id, module=module, transcript=transcript,
+            max_tokens=max_tokens, session_id=session_id, evidence_turns=evidence_turns)
+        # Do not turn an empty/invalid extraction into a nominally successful
+        # source write by adding bookkeeping keys first.  In V2 that would
+        # otherwise make a stale draft look fresh after a correction.
         if not data:
             logger.info("clinical: nothing extractable for %s (%s…)", module, subject_id[:8])
             return
+        if "m1_contract" in data:
+            data["m1_contract"]["assistant_message_id"] = evidence_turn_id
+        if module in {"module_2", "module_3", "module_4"}:
+            data["_source_session_id"] = session_id
+            data["_source_assistant_message_id"] = evidence_turn_id
         await persist_module_record(
             sessionmaker,
             module=module,
@@ -1253,7 +1323,7 @@ def _dispatch_transition_jobs(
         state["user_input"],
         state.get("final_response", ""),
     )
-    if context.sessionmaker is not None and not (context.settings.database_schema_version == "v2" and current == "module_2"):
+    if context.sessionmaker is not None and not (context.settings.database_schema_version == "v2" and current in {"module_1", "module_2", "module_3", "module_4"}):
         async def _clinical_jobs() -> None:
             # Keep these two writes sequential. Apart from avoiding needless
             # pool pressure in production, test SQLite uses one shared
@@ -1313,16 +1383,40 @@ async def _run_background_routing(
     started = perf_counter()
     try:
         reply = state.get("final_response", "")
-        if (context.settings.database_schema_version == "v2" and current == "module_2"
-                and context.sessionmaker is not None and state.get("subject_id") and state.get("active_cycle_id")
-                and not state.get("error") and not (state.get("memory") or {}).get("sandbox_mode")):
+        m1_turns = None
+        if (current in {"module_1", "module_4"} and context.settings.database_schema_version == "v2"
+                and context.sessionmaker is not None and state.get("subject_id")):
+            # M1 evidence can span more than the short-term 40-message window.
+            # Read only this user's persisted conversation, with trusted roles.
+            from sqlalchemy import select
+            from ..models import Conversation, ConversationMessage
+            async with context.sessionmaker() as evidence_db:
+                rows = (await evidence_db.execute(select(ConversationMessage).join(
+                    Conversation, Conversation.id == ConversationMessage.conversation_id).where(
+                    Conversation.session_id == session_id, Conversation.subject_id == state["subject_id"])
+                    .order_by(ConversationMessage.position))).scalars().all()
+                if rows and rows[-1].id == assistant_message_id:
+                    if current == "module_4":
+                        from ..m4_contract import cycle_messages
+                        rows = await cycle_messages(evidence_db, rows)
+                    m1_turns = [(m.role, m.content) for m in rows if m.content]
+            if m1_turns is None:
+                m1_turns = [(m.role, m.content) for m in state.get('chat_history') or [] if m.content]
+                m1_turns += [("user", state['user_input']), ("assistant", reply)]
+        if (context.settings.database_schema_version == "v2" and current in {"module_1", "module_2", "module_3", "module_4"}
+                and context.sessionmaker is not None and state.get("subject_id")
+                and (current == "module_1" or state.get("active_cycle_id"))
+                and not state.get("error")
+                and (state.get("memory") or {}).get("sandbox_mode") != "true"):
             # A draft is a prerequisite for confirmation, not a consequence of
             # a module transition. Extract before judging readiness each turn.
             await _extract_and_persist_module(context.provider, context.sessionmaker,
                 subject_id=state['subject_id'], module=current,
-                transcript=_format_transcript(state.get('chat_history') or [],state['user_input'],reply),
+                transcript=(("当前系统目标背景（不是用户执行事实）：\n" + "\n".join(state.get("clinical_context") or []) + "\n本周期对话：\n") if current == "module_4" else "") + ("\n".join(f"{role}：{content}" for role, content in m1_turns) if m1_turns is not None else _format_transcript(state.get('chat_history') or [],state['user_input'],reply)),
                 max_tokens=context.settings.extraction_max_tokens,reuse_latest=True,
-                cycle_id=state['active_cycle_id'],session_id=session_id)
+                cycle_id=state.get('active_cycle_id'),session_id=session_id,
+                evidence_turns=m1_turns,
+                evidence_turn_id=assistant_message_id)
             from ..v2_workflow import load_workflow
             fresh_steps, _ = await load_workflow(context.sessionmaker,session_id)
             state = {**state, 'module_steps':fresh_steps}
@@ -1346,6 +1440,22 @@ async def _run_background_routing(
             max_tokens=context.settings.router_reasoning_max_tokens,
             completed_steps=(state.get("module_steps") or {}).get(current, []),
         )
+        new_goal_data = None
+        if (context.settings.database_schema_version == "v2" and current == "module_2"
+                and context.sessionmaker is not None and state.get("subject_id")
+                and not state.get("active_cycle_id")
+                and not state.get("error") and not (state.get("memory") or {}).get("sandbox_mode")):
+            try:
+                new_goal_data = await _extract_module_data(
+                    context.provider, context.sessionmaker,
+                    subject_id=state["subject_id"], module=current,
+                    transcript=_format_transcript(
+                        state.get("chat_history") or [], state["user_input"], reply),
+                    max_tokens=context.settings.extraction_max_tokens,
+                    session_id=session_id,
+                )
+            except Exception:  # extraction failure must never invent a goal
+                logger.exception("new-goal extraction failed for session %s", session_id)
         target = decision.target_module
         requested_target = target
         result_line = (
@@ -1374,13 +1484,28 @@ async def _run_background_routing(
                 async with context.sessionmaker() as route_db:
                     from ..v2_profile import enabled as v2_enabled
                     if v2_enabled():
-                        from ..v2_workflow import record_steps
+                        from ..v2_workflow import create_goal_from_agent_dialogue, record_steps, runtime_for
+                        if new_goal_data:
+                            new_goal_data["_source_assistant_message_id"] = assistant_message_id
+                            from ..goal_contract import evidence_messages, capture_activities
+                            conv, runtime_state = await runtime_for(route_db, session_id)
+                            messages = await evidence_messages(route_db, conv.id, state["subject_id"]) if conv else []
+                            if runtime_state and messages and messages[-1].id == assistant_message_id:
+                                await capture_activities(route_db, user_id=state["subject_id"], conversation=conv,
+                                    state=runtime_state, raw=new_goal_data.get("activity_observations"), messages=messages,
+                                    corrections=new_goal_data.get("activity_corrections"))
+                            created = await create_goal_from_agent_dialogue(
+                                route_db, session_id=session_id, user_id=state["subject_id"],
+                                data=new_goal_data, completed_steps=decision.completed_steps,
+                                assistant_message_id=assistant_message_id)
+                            if created:
+                                active_cycle_id = created["cycle_id"]
                         target, active_cycle_id = await record_steps(route_db, session_id=session_id,
                             user_id=state["subject_id"], module=current, requested_target=target,
                             steps=decision.completed_steps, assistant_message_id=assistant_message_id,
                             revoked_steps=decision.revoked_steps, revocation_evidence=decision.revocation_evidence)
                         if target != requested_target:
-                            routing_reasoning = f"已记录步骤，等待用户在目标面板确认记录；当前仍为 {target}。"
+                            routing_reasoning = f"后台核验后的实际阶段：{target}。讨论及确认均在聊天中完成；没有完整、当前有效的用户同意证据时不推进。"
                     else:
                         active_cycle_id = await apply_router_decision(
                             route_db, session_id=session_id, subject_id=state["subject_id"],
@@ -1391,13 +1516,22 @@ async def _run_background_routing(
                         current_module=current,
                         target_module=target,
                     )
+                    # V2 extraction can have just written a durable freshness
+                    # marker.  Publish that current database memory, not the
+                    # pre-extraction graph snapshot, or this bookkeeping
+                    # update would erase the marker before confirmation sees it.
+                    published_memory = state.get("memory") or {}
+                    if v2_enabled():
+                        _, durable_state = await runtime_for(route_db, session_id)
+                        if durable_state:
+                            published_memory = durable_state["memory"] or {}
                     await complete_background_routing(
                         route_db,
                         subject_id=state["subject_id"],
                         session_id=session_id,
                         assistant_message_id=assistant_message_id,
                         module=target,
-                        memory=state.get("memory") or {},
+                        memory=published_memory,
                         routing_reasoning_content=routing_reasoning,
                         router_model_name=decision.model,
                         router_duration_ms=duration_ms,
@@ -1420,13 +1554,15 @@ async def _run_background_routing(
                     )
 
             # Publish in-memory state only after the durable transaction passes.
+            if context.settings.database_schema_version == "v2" and context.sessionmaker is not None and state.get("subject_id") and assistant_message_id is not None:
+                await context.store.set_memory(session_id, published_memory)
             await context.store.set_module(session_id, target)
 
         _dispatch_transition_jobs(
             state,
             context,
             current=current,
-            target=requested_target,
+            target=target,
             cycle_id=source_cycle_id or active_cycle_id,
         )
         logger.info(
@@ -1632,6 +1768,11 @@ async def update_memory_and_format_node(
     session_id = state["session_id"]
     reply = state.get("final_response", "")
     error = state.get("error")
+
+    # Once validated generation converges, finish atomically instead of letting
+    # a late stop leave half-updated in-memory state or interrupt persistence.
+    if context.generation is not None:
+        context.generation.seal()
 
     await context.store.append(session_id, Message(role="user", content=state["user_input"]))
     if reply:

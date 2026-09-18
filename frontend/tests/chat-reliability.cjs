@@ -37,7 +37,7 @@ const {chromium} = require('playwright');
     };
   });
   try {
-    await page.goto('http://127.0.0.1:3108');
+    await page.goto(process.env.CHAT_RELIABILITY_QA_URL || 'http://127.0.0.1:3108');
     const input=page.getByPlaceholder('慢慢说…');
     await input.fill('第一次'); await input.press('Enter');
     await page.locator('strong').filter({hasText:'先试五分钟'}).waitFor();
@@ -51,7 +51,9 @@ const {chromium} = require('playwright');
     await page.waitForFunction(()=>document.querySelectorAll('strong').length===2,{},{timeout:15000});
     await page.waitForFunction(()=>!document.querySelector('textarea').disabled);
     // Mobile drawer entry is available to a non-admin account.
-    await page.getByRole('button',{name:'我的每日记录',exact:true}).evaluate(el=>el.click());
+    await page.getByRole('button',{name:'切换对话侧栏',exact:true}).click();
+    await page.getByRole('button',{name:'记录今日',exact:true}).click();
+    await page.getByRole('button',{name:'查看历史',exact:true}).click();
     await page.getByRole('heading',{name:'历史每日记录'}).waitFor();
     await page.getByText('还没有历史记录').waitFor();
     await page.getByRole('button',{name:'关闭',exact:true}).click();

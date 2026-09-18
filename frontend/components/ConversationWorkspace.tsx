@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { streamChat, type ChatMessage, type RoutingMeta } from "@/lib/api";
+import { cancelGeneration, sameMessageTiming, streamChat, type ChatMessage, type RoutingMeta } from "@/lib/api";
 import {
   createConversation,
   deleteConversation,
@@ -25,10 +25,13 @@ import PromptManagerModal from "@/components/PromptManagerModal";
 import AdminAccountManagerModal from "@/components/AdminAccountManagerModal";
 import IssueReportModal from "@/components/IssueReportModal";
 import AdminIssueReportModal from "@/components/AdminIssueReportModal";
+import AdminDailyRecords from "@/components/AdminDailyRecords";
 import TestWorkbench from "@/components/TestWorkbench";
-import ProgramPanel from "@/components/ProgramPanel";
+import GoalOverview from "@/components/GoalOverview";
+import PushReminderModal from "@/components/PushReminderModal";
+import GoalStartChooser from "@/components/GoalStartChooser";
+import { chooseProgramGoal, fetchProgram, type GoalSelection } from "@/lib/program";
 import { captureViewport } from "@/lib/capture";
-import { ReportMark } from "@/components/icons";
 import {
   startAdminSandbox,
   type SandboxModule,
@@ -41,6 +44,19 @@ import {
  */
 const SYNC_RECONNECT_MS = 1_000;
 const SYNC_FALLBACK_INTERVAL_MS = 2_000;
+
+type ConversationTurn = {
+  id: string;
+  sessionId: string;
+  startedAt: number;
+  controller: AbortController;
+  cancelled: boolean;
+  stopRequested: boolean;
+  messages: ChatMessage[];
+  routing: Partial<RoutingMeta>;
+  error: string | null;
+  notice: string | null;
+};
 
 /**
  * Mirrors the server's ORDER BY (pinned desc, updated_at desc). The list
@@ -78,13 +94,14 @@ export default function ConversationWorkspace({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const activeSessionIdRef = useRef<string | null>(sessionId);
-  activeSessionIdRef.current = sessionId;
-  // Every navigation gets a generation. Async loads and chat streams may
-  // finish later, but only work belonging to the current generation may
-  // mutate the transcript on screen.
+  // Navigation reads use a version; streams have their own per-room task.
+  // Late navigation loads cannot replace a newer room, and a stream can
+  // resume painting when the user returns to its room.
   const viewGenerationRef = useRef(0);
   const [routing, setRouting] = useState<Partial<RoutingMeta>>({});
   const [busy, setBusy] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [generationNotice, setGenerationNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Starts true: held through the mount-time history check below so a
   // subject with a past conversation doesn't flash the scripted opening
@@ -93,21 +110,52 @@ export default function ConversationWorkspace({
 
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [conversationsLoading, setConversationsLoading] = useState(true);
+  const [programRefreshKey, setProgramRefreshKey] = useState(0);
+  const [goalsOpen, setGoalsOpen] = useState(false);
+  const [pushSettingsOpen, setPushSettingsOpen] = useState(false);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("pa_push_check") === "1") {
+      setPushSettingsOpen(true);
+      url.searchParams.delete("pa_push_check");
+      window.history.replaceState(window.history.state, "", url.toString());
+    }
+    if (url.searchParams.get("pa_reminder") === "1") {
+      setGoalsOpen(true);
+      url.searchParams.delete("pa_reminder");
+      window.history.replaceState(window.history.state, "", url.toString());
+    }
+  }, []);
+  const [goalStartOpen, setGoalStartOpen] = useState(false);
+  const [goalSelecting, setGoalSelecting] = useState(false);
+  const goalSelectingRef = useRef(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [desktopLayout, setDesktopLayout] = useState(true);
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 768px)");
+    const update = () => { setDesktopLayout(media.matches); if (media.matches) setSidebarOpen(false); };
+    update(); media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
   // Opened only from the header button now — nothing checks assessment
   // status on mount, so chat is never blocked behind this.
   const [assessmentOpen, setAssessmentOpen] = useState(false);
   const [assessmentView, setAssessmentView] = useState<"record" | "history">("record");
   const appliedRevisions = useRef(new Map<string, number>());
-  const pendingFloor = useRef<{ sessionId: string | null; count: number } | null>(null);
-  const activeSend = useRef<AbortController | null>(null);
-  useEffect(() => () => activeSend.current?.abort(), []);
+  const pendingFloors = useRef(new Map<string, number>());
+  const turns = useRef(new Map<string, ConversationTurn>());
+  useEffect(() => () => {
+    for (const turn of turns.current.values()) turn.controller.abort();
+    turns.current.clear();
+  }, []);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [emailSettingsOpen, setEmailSettingsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [promptManagerOpen, setPromptManagerOpen] = useState(false);
   const [accountManagerOpen, setAccountManagerOpen] = useState(false);
   const [issueManagerOpen, setIssueManagerOpen] = useState(false);
+  const [adminDailyOpen, setAdminDailyOpen] = useState(false);
   const [issueReportOpen, setIssueReportOpen] = useState(false);
   const [reportPreparing, setReportPreparing] = useState(false);
   const [reportScreenshot, setReportScreenshot] = useState<string | null>(null);
@@ -119,6 +167,33 @@ export default function ConversationWorkspace({
   // resolves. Mark locally initiated deletions so only one code path chooses
   // the next conversation (and therefore only one blank draft can be made).
   const deletingSessionIdsRef = useRef(new Set<string>());
+
+  function publishTurn(turn: ConversationTurn) {
+    if (activeSessionIdRef.current !== turn.sessionId || turns.current.get(turn.sessionId) !== turn) return;
+    setMessages(turn.messages);
+    setRouting(turn.routing);
+    setError(turn.error);
+    setGenerationNotice(turn.notice);
+    setStopping(turn.stopRequested);
+    busyRef.current = true;
+    setBusy(true);
+  }
+
+  function showConversation(detail: ConversationDetail) {
+    activeSessionIdRef.current = detail.session_id;
+    setSessionId(detail.session_id);
+    const turn = turns.current.get(detail.session_id);
+    if (turn) {
+      publishTurn(turn);
+      return;
+    }
+    busyRef.current = false;
+    setBusy(false);
+    setStopping(false);
+    setGenerationNotice(null);
+    setMessages(detail.messages);
+    setRouting(detail.next_module ? { next_module: detail.next_module, routing_pending: false, routed_by: "stored_state" } : {});
+  }
 
   const applyRemoteSnapshot = useCallback((detail: ConversationDetail) => {
     setConversations((prev) =>
@@ -140,6 +215,7 @@ export default function ConversationWorkspace({
     // snapshot while React is switching views. Keep its sidebar metadata,
     // but never attach its module state or messages to the active chat.
     if (activeSessionIdRef.current !== detail.session_id) return;
+    if (turns.current.has(detail.session_id)) return;
 
     setRouting((prev) =>
       detail.next_module
@@ -154,13 +230,12 @@ export default function ConversationWorkspace({
 
     // Never overwrite an assistant bubble while this device is appending
     // streamed deltas. The send completion path performs a full fetch.
-    if (busyRef.current) return;
     const revision = detail.revision ?? 0;
     if (revision < (appliedRevisions.current.get(detail.session_id) ?? -1)) return;
-    const floor = pendingFloor.current;
-    if (floor?.sessionId === detail.session_id && detail.messages.length < floor.count) return;
+    const floor = pendingFloors.current.get(detail.session_id);
+    if (floor !== undefined && detail.messages.length < floor) return;
     appliedRevisions.current.set(detail.session_id, revision);
-    if (floor?.sessionId === detail.session_id) pendingFloor.current = null;
+    pendingFloors.current.delete(detail.session_id);
     setMessages((prev) => {
       const same =
         prev.length === detail.messages.length &&
@@ -175,7 +250,8 @@ export default function ConversationWorkspace({
             (message.routing_reasoning_content ?? "") ===
               (detail.messages[index].routing_reasoning_content ?? "") &&
             (message.router_model_name ?? "") ===
-              (detail.messages[index].router_model_name ?? ""),
+              (detail.messages[index].router_model_name ?? "") &&
+            sameMessageTiming(message, detail.messages[index]),
         );
       return same ? prev : detail.messages;
     });
@@ -196,8 +272,15 @@ export default function ConversationWorkspace({
     }
   }
 
-  async function beginConversation(): Promise<void> {
+  async function beginConversation(): Promise<ConversationDetail | null> {
     const generation = ++viewGenerationRef.current;
+    activeSessionIdRef.current = null;
+    setSessionId(null);
+    setMessages([]);
+    busyRef.current = false;
+    setBusy(false);
+    setStopping(false);
+    setGenerationNotice(null);
     setLoadingConversation(true);
     setError(null);
     setSidebarOpen(false);
@@ -208,10 +291,8 @@ export default function ConversationWorkspace({
         creatingConversationRef.current ??
         (creatingConversationRef.current = createConversation());
       const detail = await request;
-      if (generation !== viewGenerationRef.current) return;
-      setMessages(detail.messages);
-      setSessionId(detail.session_id);
-      setRouting({});
+      if (generation !== viewGenerationRef.current) return null;
+      showConversation(detail);
       setConversations((prev) =>
         sortConversations([
           {
@@ -223,11 +304,14 @@ export default function ConversationWorkspace({
           ...prev.filter((item) => item.session_id !== detail.session_id),
         ]),
       );
+      activeSessionIdRef.current = detail.session_id;
+      return detail;
     } catch (err) {
-      if (generation !== viewGenerationRef.current) return;
+      if (generation !== viewGenerationRef.current) return null;
       setMessages([]);
       setSessionId(null);
       setError(err instanceof Error ? err.message : String(err));
+      return null;
     } finally {
       creatingConversationRef.current = null;
       if (generation === viewGenerationRef.current) {
@@ -251,8 +335,13 @@ export default function ConversationWorkspace({
       prev.filter((c) => c.session_id !== targetSessionId),
     );
     if (deletingSessionIdsRef.current.has(targetSessionId)) return;
-    setError("这条对话已经不存在了，已从列表中移除。");
-    if (targetSessionId === sessionId) {
+    const deletedTurn = turns.current.get(targetSessionId);
+    turns.current.delete(targetSessionId);
+    pendingFloors.current.delete(targetSessionId);
+    deletedTurn?.controller.abort();
+    if (targetSessionId === activeSessionIdRef.current) {
+      setError("这条对话已经不存在了，已从列表中移除。");
+      activeSessionIdRef.current = null;
       setMessages([]);
       setSessionId(null);
       setRouting({});
@@ -273,22 +362,24 @@ export default function ConversationWorkspace({
 
   async function loadConversation(targetSessionId: string) {
     const generation = ++viewGenerationRef.current;
+    activeSessionIdRef.current = targetSessionId;
+    setSessionId(targetSessionId);
+    const running = turns.current.get(targetSessionId);
+    if (running) publishTurn(running);
+    else {
+      setMessages([]);
+      setRouting({});
+      busyRef.current = false;
+      setBusy(false);
+      setStopping(false);
+      setGenerationNotice(null);
+    }
     setLoadingConversation(true);
     setError(null);
     try {
       const detail = await fetchConversation(targetSessionId);
       if (generation !== viewGenerationRef.current) return;
-      setMessages(detail.messages);
-      setSessionId(detail.session_id);
-      setRouting(
-        detail.next_module
-          ? {
-              next_module: detail.next_module,
-              routing_pending: false,
-              routed_by: "stored_state",
-            }
-          : {},
-      );
+      showConversation(detail);
     } catch (err) {
       if (generation !== viewGenerationRef.current) return;
       if (isMissing(err)) dropMissingConversation(targetSessionId);
@@ -411,153 +502,157 @@ export default function ConversationWorkspace({
     };
   }, [sessionId, applyRemoteSnapshot]);
 
+  async function handleStop() {
+    const sourceId = activeSessionIdRef.current;
+    const turn = sourceId ? turns.current.get(sourceId) : undefined;
+    if (!turn || turn.stopRequested) return;
+    turn.stopRequested = true;
+    turn.notice = "正在停止生成…";
+    publishTurn(turn);
+    try {
+      const result = await cancelGeneration(turn.id);
+      if (turns.current.get(turn.sessionId) !== turn) return;
+      if (result.status === "cancelled") {
+        turn.cancelled = true;
+        turn.controller.abort();
+      } else if (result.status === "finalizing" || result.status === "finished") {
+        turn.stopRequested = false;
+        turn.notice = "回复已完成，正在同步记录。";
+        publishTurn(turn);
+      }
+    } catch {
+      if (turns.current.get(turn.sessionId) !== turn) return;
+      turn.stopRequested = false;
+      turn.notice = null;
+      turn.error = "停止请求未确认，请重试。当前回复可能仍在生成。";
+      publishTurn(turn);
+    }
+  }
+
   async function handleSend(text: string) {
-    if (busyRef.current) return;
+    const sourceId = activeSessionIdRef.current;
+    if (!sourceId || sourceId !== sessionId || loadingConversation || goalSelectingRef.current || turns.current.has(sourceId)) return;
     const controller = new AbortController();
-    activeSend.current = controller;
     const baseline = messages.length;
-    pendingFloor.current = { sessionId, count: baseline + 2 };
+    const turn: ConversationTurn = {
+      id: crypto.randomUUID(), sessionId: sourceId, startedAt: Date.now(), controller, cancelled: false, stopRequested: false,
+      messages: [...messages, { role: "user", content: text }, {
+        role: "assistant", content: "", reasoning_content: "", model_name: null,
+        routing_reasoning_content: "", router_model_name: null,
+      }],
+      routing: { ...routing }, error: null, notice: null,
+    };
+    turns.current.set(sourceId, turn);
+    pendingFloors.current.set(sourceId, baseline + 2);
+    publishTurn(turn);
     let recovered = false;
+    let recoveredDetail: ConversationDetail | null = null;
     let checking = false;
     const recoveryRequest: { current: AbortController | null } = { current: null };
-    const sendGeneration = viewGenerationRef.current;
-    const ownsVisibleConversation = () =>
-      sendGeneration === viewGenerationRef.current;
-    setError(null);
-    setBusy(true);
-    busyRef.current = true;
-    let resolvedSessionId = sessionId;
-    // Poll even during generation: iOS can leave a dead SSE read pending.
+    const ownsTask = () => turns.current.get(sourceId) === turn;
+    const hasDurableReply = (detail: ConversationDetail) =>
+      detail.session_id === sourceId && detail.messages[baseline]?.role === "user" &&
+      detail.messages[baseline]?.content === text && detail.messages[baseline + 1]?.role === "assistant" &&
+      !!detail.messages[baseline + 1]?.content;
+    const updateAssistant = (update: (message: ChatMessage) => ChatMessage) => {
+      if (!ownsTask()) return;
+      const next = [...turn.messages];
+      const last = next[next.length - 1];
+      if (last?.role !== "assistant") return;
+      next[next.length - 1] = update(last);
+      turn.messages = next;
+      publishTurn(turn);
+    };
+    // Recovery belongs to the task, not the currently visible chat. A hidden
+    // task can finish without touching another room's busy/error/stop state.
     const recovery = window.setInterval(async () => {
-      if (!resolvedSessionId || checking || controller.signal.aborted) return;
+      if (!ownsTask() || checking || controller.signal.aborted || turn.stopRequested) return;
       checking = true;
-      recoveryRequest.current = new AbortController();
-      const readTimeout = window.setTimeout(() => recoveryRequest.current?.abort(), 8000);
+      const request = new AbortController();
+      recoveryRequest.current = request;
+      const readTimeout = window.setTimeout(() => request.abort(), 8000);
       try {
-        const detail = await fetchConversation(resolvedSessionId, recoveryRequest.current.signal);
-        if (ownsVisibleConversation() && !controller.signal.aborted &&
-            detail.messages[baseline]?.role === "user" && detail.messages[baseline]?.content === text &&
-            detail.messages[baseline + 1]?.role === "assistant" && detail.messages[baseline + 1]?.content) {
+        const detail = await fetchConversation(sourceId, request.signal);
+        if (ownsTask() && !controller.signal.aborted && hasDurableReply(detail)) {
           recovered = true;
+          recoveredDetail = detail;
           controller.abort();
-          busyRef.current = false;
-          applyRemoteSnapshot(detail);
-          setError(null);
         }
       } catch { /* The next bounded poll retries. */ }
       finally { window.clearTimeout(readTimeout); checking = false; }
     }, 5000);
     const deadline = window.setTimeout(() => controller.abort(), 180000);
-    // Push the user turn plus an empty assistant turn that deltas append to.
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", content: text },
-      {
-        role: "assistant",
-        content: "",
-        reasoning_content: "",
-        model_name: null,
-        routing_reasoning_content: "",
-        router_model_name: null,
-      },
-    ]);
-
     try {
       await streamChat(
-        { message: text, session_id: sessionId },
+        { message: text, session_id: sourceId, generation_id: turn.id },
         {
+          onCancelled: () => { turn.cancelled = true; },
           onMeta: (meta) => {
-            if (!ownsVisibleConversation()) return;
-            // Meta arrives in two parts (session id first, routing decision
-            // once the graph has made it) — merge rather than replace.
-            if (meta.session_id) {
-              resolvedSessionId = meta.session_id;
-              if (pendingFloor.current) pendingFloor.current.sessionId = meta.session_id;
-              setSessionId(meta.session_id);
-            }
-            setRouting((prev) => ({ ...prev, ...meta }));
-            if (meta.model) {
-              setMessages((prev) => {
-                const next = [...prev];
-                const last = next[next.length - 1];
-                if (last?.role === "assistant") {
-                  next[next.length - 1] = { ...last, model_name: meta.model };
-                }
-                return next;
-              });
-            }
+            if (!ownsTask() || (meta.session_id && meta.session_id !== sourceId)) return;
+            turn.routing = { ...turn.routing, ...meta };
+            if (meta.model) updateAssistant(message => ({ ...message, model_name: meta.model }));
+            else publishTurn(turn);
           },
-          onDelta: (delta) => {
-            if (!ownsVisibleConversation()) return;
-            setMessages((prev) => {
-              const next = [...prev];
-              const last = next[next.length - 1];
-              next[next.length - 1] = { ...last, content: last.content + delta };
-              return next;
-            });
-          },
-          onReasoningDelta: (delta) => {
-            if (!ownsVisibleConversation()) return;
-            setMessages((prev) => {
-              const next = [...prev];
-              const last = next[next.length - 1];
-              next[next.length - 1] = {
-                ...last,
-                reasoning_content: (last.reasoning_content ?? "") + delta,
-              };
-              return next;
-            });
-          },
-          onRoutingReasoning: (text, model) => {
-            if (!ownsVisibleConversation()) return;
-            setMessages((prev) => {
-              const next = [...prev];
-              const last = next[next.length - 1];
-              next[next.length - 1] = {
-                ...last,
-                routing_reasoning_content: text,
-                router_model_name: model || null,
-              };
-              return next;
-            });
-          },
-          onError: (detail) => {
-            if (ownsVisibleConversation()) setError(detail);
+          onDelta: delta => updateAssistant(message => ({ ...message, content: message.content + delta })),
+          onReasoningDelta: delta => updateAssistant(message => ({
+            ...message, reasoning_content: (message.reasoning_content ?? "") + delta,
+          })),
+          onRoutingReasoning: (text, model) => updateAssistant(message => ({
+            ...message, routing_reasoning_content: text, router_model_name: model || null,
+          })),
+          onError: detail => {
+            if (!ownsTask()) return;
+            turn.error = detail;
+            publishTurn(turn);
           },
         },
         controller.signal,
       );
     } catch (err) {
-      if (!recovered && ownsVisibleConversation()) setError(controller.signal.aborted
-        ? "等待回复超时，已停止转圈并继续同步记录。请稍后查看，避免重复发送。"
-        : err instanceof Error ? err.message : String(err));
+      if (!recovered && !turn.cancelled && ownsTask()) {
+        turn.error = controller.signal.aborted
+          ? "等待回复超时，已停止转圈并继续同步记录。请稍后查看，避免重复发送。"
+          : err instanceof Error ? err.message : String(err);
+      }
     } finally {
       window.clearInterval(recovery);
       window.clearTimeout(deadline);
       recoveryRequest.current?.abort();
-      activeSend.current = null;
-      setBusy(false);
-      busyRef.current = false;
-      // Replace optimistic/local-only messages with the complete durable
-      // transcript. This is the crucial equal-length case: another device's
-      // two messages and this device's two local messages can have the same
-      // count while being entirely different content.
-      if (resolvedSessionId && ownsVisibleConversation()) {
-        try {
-          const detail = await fetchConversation(resolvedSessionId, AbortSignal.timeout(10000));
-          applyRemoteSnapshot(detail);
-          if (detail.messages[baseline]?.content === text && detail.messages[baseline + 1]?.content) setError(null);
-        } catch {
-          // The live stream will retry with a full snapshot. Chat completion
-          // itself succeeded, so a transient sync read is not a user-facing
-          // send failure.
-        }
+      if (!ownsTask()) return; // deleted room / unmounted workspace
+      if (turn.cancelled) {
+        pendingFloors.current.delete(sourceId);
+        turn.error = null;
+        turn.routing = { ...turn.routing, routing_pending: false };
+        turn.notice = "已停止生成，未完成的回复未保存。你可以继续发送消息。";
+        if (turn.messages.at(-1)?.role === "assistant") turn.messages = turn.messages.slice(0, -1);
       }
-      refreshConversations();
+      let detail: ConversationDetail | null = recoveredDetail;
+      if (!detail) {
+        try { detail = await fetchConversation(sourceId, AbortSignal.timeout(10000)); }
+        catch { /* Live sync retries, without changing a different chat. */ }
+      }
+      // Recheck ownership AFTER awaiting: navigation or deletion can happen
+      // during the final fetch, not just before it.
+      if (!ownsTask()) return;
+      if (detail && hasDurableReply(detail)) {
+        turn.error = null;
+        pendingFloors.current.delete(sourceId);
+      }
+      publishTurn(turn);
+      turns.current.delete(sourceId);
+      if (activeSessionIdRef.current === sourceId) {
+        busyRef.current = false;
+        setBusy(false);
+        setStopping(false);
+        if (!turn.cancelled) setGenerationNotice(null);
+      }
+      if (detail) applyRemoteSnapshot(detail);
+      void refreshConversations();
     }
   }
 
   async function handleNew() {
+    setSidebarOpen(false);
     // Reuse an untouched server-created draft instead of filling the sidebar
     // with duplicate "新对话" rows when the button is clicked repeatedly.
     if (
@@ -565,15 +660,62 @@ export default function ConversationWorkspace({
       messages.length === 1 &&
       messages[0].role === "assistant"
     ) {
-      setSidebarOpen(false);
-      return;
+      try {
+        const p = await fetchProgram(sessionId);
+        if (!p.runtime?.active_goal_id) {
+          if (p.enabled && p.m1_reusable) setGoalStartOpen(true);
+          return;
+        }
+      } catch {
+        // If the current blank chat cannot be classified safely, keep it
+        // instead of creating duplicates during a transient network failure.
+        return;
+      }
     }
-    await beginConversation();
+    const detail = await beginConversation();
+    if (detail) { try { const p = await fetchProgram(detail.session_id); if (p.enabled && p.m1_reusable && !p.runtime?.active_goal_id) setGoalStartOpen(true); } catch { /* chat remains usable */ } }
+  }
+
+  async function handleChooseGoal(selection: GoalSelection) {
+    if (busyRef.current || loadingConversation || goalSelectingRef.current) {
+      throw new Error("请等当前回复或加载完成，再选择目标。");
+    }
+    goalSelectingRef.current = true;
+    setGoalSelecting(true);
+    try {
+      let target = activeSessionIdRef.current;
+      let program = target ? await fetchProgram(target) : null;
+      if (program && (!program.enabled || !program.runtime || !program.m1_reusable)) {
+        throw new Error(program.enabled ? "请先完成并确认问题理解，再开始目标设定。" : "当前环境尚未启用 V2 目标功能。");
+      }
+      if (selection.goal_id && program?.runtime?.active_goal_id === selection.goal_id) return;
+      // A chat keeps its chosen goal. A different choice gets a new chat,
+      // while an unbound draft is reused (including after a failed request).
+      if (!target || program?.runtime?.active_goal_id) {
+        const detail = await beginConversation();
+        if (!detail) throw new Error("新对话创建失败，请重试。");
+        target = detail.session_id;
+        program = await fetchProgram(target);
+      }
+      if (!program?.enabled || !program.runtime || !program.m1_reusable) {
+        throw new Error("请先完成并确认问题理解，再开始目标设定。");
+      }
+      await chooseProgramGoal(target, selection, program.runtime.row_version);
+      // The selection has committed. A transient refresh failure must not
+      // invite a second creation; live sync will catch up the transcript.
+      try { applyRemoteSnapshot(await fetchConversation(target, AbortSignal.timeout(10000))); }
+      catch { setError("目标已选择，聊天刷新暂时失败，请刷新页面查看。"); }
+      void refreshConversations();
+    } finally {
+      setProgramRefreshKey((value) => value + 1);
+      goalSelectingRef.current = false;
+      setGoalSelecting(false);
+    }
   }
 
   async function handleSelect(targetSessionId: string) {
     setSidebarOpen(false);
-    if (targetSessionId === sessionId) return;
+    if (targetSessionId === activeSessionIdRef.current) return;
     await loadConversation(targetSessionId);
   }
 
@@ -630,14 +772,19 @@ export default function ConversationWorkspace({
     // Optimistic: the sidebar is the source of truth for "did this work"
     // for the user, and a failed delete is rare enough that re-fetching to
     // roll back is simpler than holding the row hostage to the request.
-    const deletingCurrent = targetSessionId === sessionId;
     deletingSessionIdsRef.current.add(targetSessionId);
     setConversations((prev) =>
       prev.filter((c) => c.session_id !== targetSessionId),
     );
     try {
       await deleteConversation(targetSessionId);
-      if (deletingCurrent) {
+      const deletedTurn = turns.current.get(targetSessionId);
+      turns.current.delete(targetSessionId);
+      pendingFloors.current.delete(targetSessionId);
+      deletedTurn?.controller.abort();
+      setProgramRefreshKey((value) => value + 1);
+      if (activeSessionIdRef.current === targetSessionId) {
+        activeSessionIdRef.current = null;
         setMessages([]);
         setSessionId(null);
         setRouting({});
@@ -660,14 +807,15 @@ export default function ConversationWorkspace({
 
   async function handleStartSandbox(module: SandboxModule) {
     if (busy || sandboxStarting) return;
+    const generation = ++viewGenerationRef.current;
     setSandboxStarting(true);
     setLoadingConversation(true);
     setError(null);
     setSidebarOpen(false);
     try {
       const detail = await startAdminSandbox(module);
-      setMessages(detail.messages);
-      setSessionId(detail.session_id);
+      if (generation !== viewGenerationRef.current) return;
+      showConversation(detail);
       setRouting({
         next_module: detail.next_module,
         routing_pending: false,
@@ -685,10 +833,11 @@ export default function ConversationWorkspace({
         ]),
       );
     } catch (err) {
+      if (generation !== viewGenerationRef.current) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSandboxStarting(false);
-      setLoadingConversation(false);
+      if (generation === viewGenerationRef.current) setLoadingConversation(false);
     }
   }
 
@@ -720,14 +869,8 @@ export default function ConversationWorkspace({
   }
 
   return (
-    // No outer max-width: the sidebar should reach the actual left edge of
-    // the viewport (modulo <main>'s own padding), not the left edge of some
-    // artificially capped block floating in the middle of the screen. Only
-    // the chat card itself is width-capped (inside the flex-1 wrapper below),
-    // so it stays a comfortable reading width instead of stretching edge to
-    // edge on a wide monitor — the sidebar reclaims the left margin, the chat
-    // card's own max-width still bounds the right.
-    <div className="zen-page-enter flex h-full w-full gap-4">
+    // Edge-to-edge shell with a narrow rail and independently capped text.
+    <div className="zen-page-enter flex h-full w-full">
       <ConversationSidebar
         conversations={conversations}
         activeSessionId={sessionId}
@@ -743,16 +886,17 @@ export default function ConversationWorkspace({
         }
         sandboxBusy={busy || sandboxStarting}
         onOpenTestWorkbench={accountRole === "admin" ? () => setTestWorkbenchOpen(true) : undefined}
-        onOpenDailyRecords={() => { setAssessmentView("history"); setAssessmentOpen(true); setSidebarOpen(false); }}
+        onOpenAssessment={() => { setAssessmentView("record"); setAssessmentOpen(true); setSidebarOpen(false); }}
+        onOpenGoals={() => { setGoalsOpen(true); setSidebarOpen(false); }}
         open={sidebarOpen}
+        collapsed={sidebarCollapsed}
+        onReportIssue={() => { setSidebarOpen(false); void openIssueReport(); }}
+        reportPreparing={reportPreparing}
         onClose={() => setSidebarOpen(false)}
       />
 
-      <div className="flex h-full min-w-0 flex-1 flex-col items-center">
-        <ProgramPanel sessionId={sessionId} busy={busy} onChanged={async () => {
-          if (sessionId) applyRemoteSnapshot(await fetchConversation(sessionId));
-        }} />
-        <div className="flex min-h-0 w-full flex-1 justify-center">
+      <div className="flex h-full min-w-0 flex-1 flex-col" inert={sidebarOpen && !desktopLayout}>
+        <div className="flex min-h-0 w-full flex-1">
         {/* `key` forces a full remount on conversation switch, so Chat's own
             local state (the draft input, composer height, scroll position)
             resets the same way a fresh page load would rather than carrying
@@ -761,12 +905,18 @@ export default function ConversationWorkspace({
           key={sessionId ?? "draft"}
           messages={messages}
           routing={routing}
-          busy={busy}
+          busy={busy || goalSelecting}
+          generationStartedAt={sessionId ? turns.current.get(sessionId)?.startedAt : undefined}
           loading={loadingConversation}
           error={error}
           onSend={handleSend}
-          onOpenSidebar={() => setSidebarOpen(true)}
+          onStop={busy ? handleStop : undefined}
+          stopping={stopping}
+          generationNotice={generationNotice}
+          onOpenSidebar={() => { if (window.matchMedia("(min-width: 768px)").matches) setSidebarCollapsed(value => !value); else setSidebarOpen(value => !value); }}
+          sidebarExpanded={desktopLayout ? !sidebarCollapsed : sidebarOpen}
           onOpenAssessment={() => { setAssessmentView("record"); setAssessmentOpen(true); }}
+          onOpenPushSettings={() => setPushSettingsOpen(true)}
           displayName={displayName}
           accountUsername={accountUsername}
           displayIdentity={displayIdentity}
@@ -778,29 +928,17 @@ export default function ConversationWorkspace({
           onOpenPromptManager={() => setPromptManagerOpen(true)}
           onOpenAccountManager={() => setAccountManagerOpen(true)}
           onOpenIssueManager={() => setIssueManagerOpen(true)}
+          onOpenAdminDailyRecords={accountRole === "admin" ? () => setAdminDailyOpen(true) : undefined}
         />
         </div>
       </div>
 
-      {/* Keep support reachable without crowding the conversation header.
-          It floats above the composer rather than over the send control; the
-          whole control opts out of the automatic evidence screenshot. */}
-      <button
-        type="button"
-        onClick={() => void openIssueReport()}
-        disabled={reportPreparing}
-        aria-label={reportPreparing ? "正在准备问题截图" : "我遇到问题"}
-        title="我遇到问题"
-        data-screenshot-exclude="true"
-        className="fixed bottom-4 right-4 z-40 flex h-11 items-center gap-2 rounded-full border border-accent-edge bg-panel/90 px-3.5 text-xs font-medium text-accent-ink depth-composer backdrop-blur-xl transition-all duration-300 hover:-translate-y-0.5 hover:bg-raised disabled:cursor-wait disabled:opacity-60 disabled:hover:translate-y-0 sm:bottom-6 sm:right-6 sm:px-4"
-      >
-        {reportPreparing ? (
-          <span className="h-4 w-4 animate-spin rounded-full border-2 border-line-strong border-t-accent motion-reduce:animate-none" />
-        ) : (
-          <ReportMark className="h-4 w-4" />
-        )}
-        <span className="hidden sm:inline">我遇到问题</span>
-      </button>
+      <GoalOverview open={goalsOpen} sessionId={sessionId} busy={busy || loadingConversation || goalSelecting}
+        onOpenReminders={() => setPushSettingsOpen(true)}
+        refreshKey={programRefreshKey} onClose={() => setGoalsOpen(false)} />
+      {pushSettingsOpen && <PushReminderModal onClose={() => setPushSettingsOpen(false)} />}
+      <GoalStartChooser open={goalStartOpen} sessionId={sessionId} busy={busy || loadingConversation || goalSelecting} refreshKey={programRefreshKey}
+        onClose={() => setGoalStartOpen(false)} onDiscussNew={() => setGoalStartOpen(false)} onSelectExisting={async (goalId, resume) => { await handleChooseGoal({ goal_id: goalId, resume }); setGoalStartOpen(false); }} />
 
       {passwordOpen && (
         <ChangePasswordModal onClose={() => setPasswordOpen(false)} />
@@ -838,6 +976,7 @@ export default function ConversationWorkspace({
         <AdminIssueReportModal onClose={() => setIssueManagerOpen(false)} />
       )}
       {accountRole === "admin" && testWorkbenchOpen && <TestWorkbench onClose={() => setTestWorkbenchOpen(false)} />}
+      {accountRole === "admin" && adminDailyOpen && <AdminDailyRecords onClose={() => setAdminDailyOpen(false)} />}
 
       {issueReportOpen && (
         <IssueReportModal

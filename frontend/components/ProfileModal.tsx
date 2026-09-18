@@ -194,7 +194,7 @@ export default function ProfileModal({
 
         <h2 className="text-[0.95rem] text-ink">我的档案</h2>
         <p className="mt-1.5 mb-5 text-[0.72rem] leading-relaxed text-ink-faint">
-          这些内容每一轮对话都会告诉教练。改完点保存，下一句话就会按新的来。
+              教练会参考这些资料。出生日期仅用于计算年龄，不会发送完整生日。改完点保存，下一句话就会按新的来。
         </p>
 
         {loading ? (
@@ -254,17 +254,17 @@ export default function ProfileModal({
                   对外显示：{profile.display_id ?? "尚未设置标签"}
                 </p>
               </div>
-              <Field label="年龄">
+              <Field label="出生日期">
                 <input
-                  type="number"
-                  min={10}
-                  max={120}
-                  value={(value("age") as number) ?? ""}
+                  type="date"
+                  autoComplete="bday"
+                  value={(value("birth_date") as string) ?? ""}
                   onChange={(e) =>
-                    set("age", e.target.value === "" ? null : Number(e.target.value))
+                    set("birth_date", e.target.value || null)
                   }
                   className={inputClass}
                 />
+                <p className="mt-2 text-xs text-ink-faint">{profile.birth_date ? `当前 ${profile.age} 岁，年龄由生日自动计算。` : `尚未填写生日${profile.age != null ? `，旧年龄记录为 ${profile.age} 岁` : ""}。不会推测出生日期。`}</p>
               </Field>
               <Field label="居住状况">
                 <Choices

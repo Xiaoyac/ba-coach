@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { MoonMark, SunMark } from "@/components/icons";
-import { THEME_KEY, THEME_META_COLOR, type Theme } from "@/lib/theme";
+import { DEFAULT_THEME, THEME_KEY, THEME_META_COLOR, type Theme } from "@/lib/theme";
 
 function applyTheme(theme: Theme) {
   document.documentElement.classList.toggle("theme-warm", theme === "warm");
@@ -11,12 +11,12 @@ function applyTheme(theme: Theme) {
     ?.setAttribute("content", THEME_META_COLOR[theme]);
 }
 
-export default function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>("dark");
+export default function ThemeToggle({ inline = false }: { inline?: boolean }) {
+  const [theme, setTheme] = useState<Theme>(DEFAULT_THEME);
 
   // The blocking script in <body> has already set the class before paint, so
   // read the answer back off the DOM rather than off localStorage again. This
-  // is also why the initial state is a hard-coded "dark" — it has to match
+  // is also why the initial state uses the shared default — it has to match
   // what the server rendered or React complains about the mismatch.
   useEffect(() => {
     const active: Theme = document.documentElement.classList.contains(
@@ -25,9 +25,7 @@ export default function ThemeToggle() {
       ? "warm"
       : "dark";
     setTheme(active);
-    // Re-apply rather than just record: the inline script sets the class but
-    // not <meta name="theme-color">, which is still rendered with the dark
-    // default, so a warm-theme reload would leave the browser chrome charcoal.
+    // Keep the browser chrome synchronized with the restored theme.
     applyTheme(active);
   }, []);
 
@@ -50,8 +48,8 @@ export default function ThemeToggle() {
       type="button"
       onClick={toggle}
       aria-label={isWarm ? "切换到暗色主题" : "切换到暖色主题"}
-      title={isWarm ? "Dark Zen" : "Warm Therapeutic"}
-      className="group fixed bottom-4 left-4 z-50 flex h-10 w-10 items-center justify-center rounded-full border border-line bg-panel text-ink-muted depth-float backdrop-blur-xl transition-colors duration-500 hover:border-accent-edge hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent sm:bottom-6 sm:left-6"
+      title={isWarm ? "切换到黑金夜色" : "切换到温暖浅色"}
+      className={`surface-button group flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-ink-muted transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${inline ? "" : "fixed bottom-4 left-4 z-50 bg-panel/90 depth-float sm:bottom-6 sm:left-6"}`}
     >
       {/* Both glyphs stay mounted and cross-fade, so the switch is a dissolve
           rather than a swap between two different shapes. */}

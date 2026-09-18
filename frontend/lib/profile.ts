@@ -78,6 +78,7 @@ export interface Profile {
   tag: string | null;
   display_id: string | null;
   age: number | null;
+  birth_date: string | null;
   living_status: string | null;
 
   has_supporter: boolean;

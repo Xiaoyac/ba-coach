@@ -22,6 +22,19 @@ from .base import (
 logger = logging.getLogger(__name__)
 
 
+def _api_error_message(exc: openai.APIStatusError) -> str:
+    body = exc.body if isinstance(exc.body, dict) else {}
+    error = body.get("error", body)
+    code = error.get("code") if isinstance(error, dict) else None
+    if exc.status_code == 429 and code == "SetLimitExceeded":
+        return (
+            "豆包模型已达到安全体验模式的推理额度上限，服务已暂停。"
+            "请联系管理员在火山方舟“模型开通”页面检查并调整安全体验额度，"
+            "或切换其他可用模型。调整额度可能产生额外费用。"
+        )
+    return f"Doubao API error {exc.status_code}: {exc.message}"
+
+
 class DoubaoProvider(LLMProvider):
     name = "doubao"
 
@@ -57,9 +70,7 @@ class DoubaoProvider(LLMProvider):
                 },
             )
         except openai.APIStatusError as exc:
-            raise ProviderError(
-                f"Doubao API error {exc.status_code}: {exc.message}"
-            ) from exc
+            raise ProviderError(_api_error_message(exc)) from exc
         except openai.APIConnectionError as exc:
             raise ProviderError("Could not reach the Doubao API") from exc
 
@@ -88,6 +99,7 @@ class DoubaoProvider(LLMProvider):
     async def stream(
         self, *, system: SystemPrompt, messages: list[Message]
     ) -> AsyncIterator[StreamDelta]:
+        stream = None
         try:
             stream = await self._client.chat.completions.create(
                 model=self.model,
@@ -133,11 +145,13 @@ class DoubaoProvider(LLMProvider):
                 request_id=getattr(stream, "_request_id", None),
             )
         except openai.APIStatusError as exc:
-            raise ProviderError(
-                f"Doubao API error {exc.status_code}: {exc.message}"
-            ) from exc
+            raise ProviderError(_api_error_message(exc)) from exc
         except openai.APIConnectionError as exc:
             raise ProviderError("Could not reach the Doubao API") from exc
+
+        finally:
+            if stream is not None and callable(getattr(stream, "close", None)):
+                await stream.close()
 
     async def _router_completion(
         self, *, system: str, user: str, max_tokens: int | None = None
@@ -182,19 +196,26 @@ class DoubaoProvider(LLMProvider):
         return (await self._router_completion(system=system, user=user, max_tokens=max_tokens)).text
 
     async def route_detailed(
-        self, *, system: str, user: str, max_tokens: int | None = None
+        self, *, system: str, user: str, max_tokens: int | None = None,
+        include_reasoning: bool = False,
+        reasoning_effort: str | None = None,
     ) -> Completion:
+        if include_reasoning:
+            return await self.route_with_reasoning(system=system, user=user, max_tokens=max_tokens, reasoning_effort=reasoning_effort)
         return await self._router_completion(system=system, user=user, max_tokens=max_tokens)
 
     async def route_with_reasoning(
-        self, *, system: str, user: str, max_tokens: int | None = None
+        self, *, system: str, user: str, max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> Completion:
         """Thinking-enabled call used only by the post-hoc module router."""
         model = self._settings.doubao_router_model or self.model
         try:
-            response = await self._client.chat.completions.create(
+            client = self._client.with_options(max_retries=0) if reasoning_effort is not None else self._client
+            response = await client.chat.completions.create(
                 model=model,
                 max_tokens=max_tokens or self._settings.router_reasoning_max_tokens,
+                **({"reasoning_effort": reasoning_effort} if reasoning_effort else {}),
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},

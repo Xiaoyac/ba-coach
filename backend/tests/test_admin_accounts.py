@@ -55,6 +55,7 @@ def test_admin_can_search_the_account_directory(
             "email": "quietriver@example.com",
             "nickname": "小河",
             "tag": "24680",
+            "birth_date": "1998-01-01",
         },
     ).json()["account"]
 
@@ -82,6 +83,7 @@ def test_admin_grants_role_and_existing_session_observes_it(
             "email": "newmoderator@example.com",
             "nickname": "New Moderator",
             "tag": "13579",
+            "birth_date": "1998-01-01",
         },
     )
     target_headers = {
@@ -147,6 +149,7 @@ def test_same_nickname_can_use_distinct_user_chosen_tags(
                 "email": f"{username}@example.com",
                 "nickname": "Shared Name",
                 "tag": tag,
+                "birth_date": "1998-01-01",
             },
         )
         assert response.status_code == 201, response.text

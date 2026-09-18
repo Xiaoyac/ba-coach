@@ -50,7 +50,7 @@ export default function AuthScreen({
   const [email, setEmail] = useState("");
   const [nickname, setNickname] = useState("");
   const [tag, setTag] = useState("");
-  const [age, setAge] = useState("");
+  const [birthDate, setBirthDate] = useState("");
   const [living, setLiving] = useState<string | null>(null);
   const [communication, setCommunication] = useState<string | null>(null);
   const [conditions, setConditions] = useState<string[]>([]);
@@ -79,6 +79,10 @@ export default function AuthScreen({
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (busy) return;
+    if (mode === "register" && !birthDate) {
+      setError("请填写出生日期，不能留空。");
+      return;
+    }
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -98,9 +102,8 @@ export default function AuthScreen({
               email,
               nickname: nickname.trim(),
               tag,
-              // Empty stays empty rather than becoming 0 — the column is
-              // nullable and "not answered" is a real answer here.
-              age: age.trim() === "" ? null : Number(age),
+              // Only the user's explicit answer is sent, with no fallback.
+              birth_date: birthDate,
               living_status: living,
               communication_preference: communication,
               physical_condition: conditions,
@@ -125,7 +128,7 @@ export default function AuthScreen({
     // nesting landmarks makes the page ambiguous to a screen reader.
     // `overflow-y-auto` because the register form is taller than a short
     // viewport once the preference chips are showing.
-    <div className="zen-page-enter relative z-10 flex w-full justify-center overflow-y-auto p-4">
+    <div className="zen-page-enter relative z-10 flex w-full justify-center overflow-y-auto p-1 sm:p-3">
       {/* Centered with `m-auto`, deliberately NOT the parent's
           `items-center`. When a flex child is taller than its scrolling
           container, `align-items: center` overflows it equally in both
@@ -135,31 +138,81 @@ export default function AuthScreen({
           margins only take the space that is actually free, so the child
           pins to the top once it no longer fits and the whole card stays
           reachable. */}
-      <div className="m-auto w-full max-w-md py-4">
-        <div className="mb-7 flex flex-col items-center gap-3 text-center">
-          <EnsoMark className="h-9 w-9 text-accent" />
+      <div className="auth-shell m-auto grid w-full max-w-6xl overflow-hidden rounded-[32px] border border-line-strong backdrop-blur-2xl lg:min-h-[min(720px,calc(100dvh-5rem))] lg:grid-cols-[1.08fr_0.92fr]">
+        <section className="auth-story hidden flex-col justify-between overflow-hidden border-r border-line p-10 lg:flex xl:p-14">
           <div>
-            <h1 className="text-[1.05rem] text-ink">BA行为激活教练</h1>
-            <p className="mt-1 text-[0.78rem] text-ink-faint">
-              A quiet space to think out loud.
-            </p>
+            <div className="flex items-center gap-3">
+              <span className="grid h-11 w-11 place-items-center rounded-2xl border border-accent-edge bg-accent-wash text-accent depth-float">
+                <EnsoMark className="h-6 w-6" />
+              </span>
+              <div>
+                <p className="text-sm font-medium tracking-[0.08em] text-ink">BA COACH</p>
+                <p className="mt-0.5 text-xs text-ink-faint">行为激活 · 从很小的一步开始</p>
+              </div>
+            </div>
+
+            <div className="mt-20 max-w-[34rem]">
+              <p className="eyebrow">YOUR NEXT SMALL STEP</p>
+              <h1 className="display-title mt-5 text-[clamp(2.8rem,4.6vw,4.7rem)] leading-[1.03] text-ink">
+                把很难的一天，<br />拆成下一小步。
+              </h1>
+              <p className="mt-6 max-w-md text-[1rem] leading-8 text-ink-muted">
+                不急着要求自己变好。我们先一起看清发生了什么，再找到今天真正做得到的行动。
+              </p>
+            </div>
           </div>
-        </div>
+
+          <div className="grid gap-3 xl:grid-cols-3">
+            {[
+              ["01", "说出现在", "从你的真实感受开始"],
+              ["02", "看见循环", "理解情绪与行动的联系"],
+              ["03", "迈出一步", "留下可完成的小目标"],
+            ].map(([step, title, copy]) => (
+              <div key={step} className="rounded-2xl border border-line bg-panel/55 p-4 backdrop-blur-xl">
+                <span className="number-chip">{step}</span>
+                <p className="mt-4 text-sm font-medium text-ink">{title}</p>
+                <p className="mt-1 text-xs leading-5 text-ink-faint">{copy}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <div className="auth-form-panel flex min-w-0 items-center px-5 py-7 sm:px-9 lg:px-12 xl:px-16">
+          <div className="w-full">
+            <div className="mb-7 flex items-center gap-3 lg:hidden">
+              <span className="grid h-10 w-10 place-items-center rounded-2xl border border-accent-edge bg-accent-wash text-accent">
+                <EnsoMark className="h-5 w-5" />
+              </span>
+              <div>
+                <h1 className="text-[0.95rem] font-medium tracking-wide text-ink">BA行为激活教练</h1>
+                <p className="mt-0.5 text-[0.72rem] text-ink-faint">从很小的一步开始</p>
+              </div>
+            </div>
+
+            <div className="mb-6">
+              <p className="eyebrow">{forgot ? "ACCOUNT RECOVERY" : registering ? "CREATE YOUR SPACE" : "WELCOME BACK"}</p>
+              <h2 className="display-title mt-2 text-2xl text-ink sm:text-[1.75rem]">
+                {forgot ? "找回你的账号" : registering ? "建立属于你的空间" : "欢迎回来"}
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-ink-faint">
+                {forgot ? "输入已验证邮箱，我们会发送安全的重置入口。" : registering ? "先填写必要信息，其他内容可以之后慢慢补充。" : "继续上一次对话，或者从今天重新开始。"}
+              </p>
+            </div>
 
         <form
           onSubmit={handleSubmit}
-          className="rounded-[28px] border border-line bg-panel p-6 depth-panel backdrop-blur-2xl"
+          className="w-full"
         >
           {/* Mode switch */}
-          {!forgot && <div className="mb-5 flex gap-1 rounded-2xl bg-raised p-1">
+          {!forgot && <div className="mb-6 flex gap-1 rounded-2xl border border-line bg-raised/80 p-1.5">
             {(["login", "register"] as const).map((m) => (
               <button
                 key={m}
                 type="button"
                 onClick={() => switchMode(m)}
-                className={`flex-1 rounded-xl py-2 text-[0.82rem] transition-colors duration-300 ${
+                className={`flex-1 rounded-xl py-2.5 text-[0.82rem] font-medium transition-colors duration-300 ${
                   mode === m
-                    ? "bg-panel text-ink depth-panel"
+                    ? "bg-panel text-ink depth-float"
                     : "text-ink-faint hover:text-ink-muted"
                 }`}
               >
@@ -177,9 +230,8 @@ export default function AuthScreen({
               >
                 ← 返回登录
               </button>
-              <h2 className="text-[1rem] text-ink">找回密码</h2>
-              <p className="mt-1 text-[0.72rem] leading-relaxed text-ink-faint">
-                输入已验证的邮箱。为保护账号隐私，无论邮箱是否存在，页面都会显示相同结果。
+              <p className="text-[0.72rem] leading-relaxed text-ink-faint">
+                为保护账号隐私，无论邮箱是否存在，页面都会显示相同结果。
               </p>
             </div>
           )}
@@ -265,13 +317,13 @@ export default function AuthScreen({
                 </div>
               </Field>
 
-              <Field label="年龄" optional>
+              <Field label="出生日期" hint="必填，用于计算年龄；当前支持 10–120 岁，不会自动填写">
                 <input
-                  type="number"
-                  min={10}
-                  max={120}
-                  value={age}
-                  onChange={(e) => setAge(e.target.value)}
+                  required
+                  type="date"
+                  autoComplete="bday"
+                  value={birthDate}
+                  onChange={(e) => setBirthDate(e.target.value)}
                   className={inputClass}
                 />
               </Field>
@@ -357,7 +409,7 @@ export default function AuthScreen({
           <button
             type="submit"
             disabled={busy}
-            className="w-full rounded-2xl border border-accent-edge bg-accent-wash py-2.5 text-[0.85rem] text-accent-ink transition-opacity duration-300 hover:opacity-85 disabled:opacity-50"
+            className="primary-action w-full rounded-2xl px-4 text-[0.88rem] font-semibold transition-all duration-300 disabled:opacity-50"
           >
             {busy
               ? "请稍候…"
@@ -401,13 +453,21 @@ export default function AuthScreen({
             </>
           )}
         </form>
+
+            <div className="mt-6 flex items-center gap-2 text-[0.68rem] leading-5 text-ink-faint">
+              <span className="h-px flex-1 bg-line" />
+              <span className="text-center">你的记录仅用于提供更贴合的支持</span>
+              <span className="h-px flex-1 bg-line" />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
 const inputClass =
-  "w-full rounded-xl border border-line bg-raised px-3 py-2.5 text-[0.85rem] text-ink outline-none transition-colors duration-300 focus:border-accent-edge";
+  "premium-control w-full rounded-2xl border border-line bg-raised/80 px-4 py-3 text-[0.88rem] text-ink outline-none transition-all duration-300 placeholder:text-ink-faint focus:border-accent-edge focus:bg-raised focus:ring-4 focus:ring-accent-wash";
 
 function Field({
   label,
@@ -421,9 +481,9 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <label className="mb-4 block">
+    <label className="mb-5 block">
       <span className="mb-1.5 flex items-baseline gap-1.5">
-        <span className="text-[0.78rem] text-ink-muted">{label}</span>
+        <span className="text-[0.78rem] font-medium text-ink-muted">{label}</span>
         {optional && <span className="text-[0.68rem] text-ink-faint">选填</span>}
       </span>
       {hint && (
@@ -448,7 +508,7 @@ function Chip({
       type="button"
       onClick={onClick}
       aria-pressed={selected}
-      className={`rounded-full border px-2.5 py-1 text-[0.72rem] transition-colors duration-300 ${
+      className={`min-h-9 rounded-xl border px-3 py-1.5 text-[0.72rem] transition-all duration-300 ${
         selected
           ? "border-accent-edge bg-accent-wash text-accent-ink"
           : "border-line text-ink-faint hover:text-ink-muted"

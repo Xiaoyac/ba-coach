@@ -24,16 +24,36 @@ class Settings(BaseSettings):
     # Disable for code-only releases that must not create tables or backfill data.
     startup_db_maintenance: bool = True
     database_schema_version: Literal["legacy", "v2"] = "legacy"
+    # Explicit rollout switch. Catalog performs two grounded router-model
+    # decisions and is only constructed when explicitly selected.
+    knowledge_retrieval_mode: Literal["p0", "enhanced", "catalog"] = "p0"
+    # BM25F has its own score scale. Never silently reuse P0 thresholds.
+    knowledge_enhanced_min_score: float = Field(default=0.1, ge=0, allow_inf_nan=False)
+    knowledge_enhanced_min_coverage: float = Field(default=0.25, ge=0, le=1)
+    knowledge_enhanced_relative_score: float = Field(default=0.55, ge=0, le=1)
     # Lexical retrieval gates. Restart workers after changing these settings.
     knowledge_min_score: float = Field(default=0.1, ge=0, allow_inf_nan=False)
     knowledge_min_coverage: float = Field(default=0.12, ge=0, le=1)
     knowledge_relative_score: float = Field(default=0.2, ge=0, le=1)
     knowledge_max_per_source: int = Field(default=2, ge=1)
+    # Exact retrieval only; never caches mediation or personalized replies.
+    knowledge_result_cache_enabled: bool = True
+    knowledge_result_cache_ttl_seconds: float = Field(default=900, ge=1, le=3600, allow_inf_nan=False)
+    knowledge_result_cache_empty_ttl_seconds: float = Field(default=45, ge=1, le=300, allow_inf_nan=False)
+    knowledge_result_cache_max_entries: int = Field(default=256, ge=1, le=10000)
+    knowledge_result_cache_max_bytes: int = Field(default=8388608, ge=1024, le=134217728)
     knowledge_intent_gate_enabled: bool = True
     knowledge_mediator_enabled: bool = True
     answer_validator_enabled: bool = True
-    knowledge_mediator_timeout_seconds: float = Field(default=12, ge=1, le=60)
+    knowledge_mediator_timeout_seconds: float = Field(default=20, ge=1, le=60)
+    knowledge_mediator_reasoning_effort: Literal["low", "medium", "high"] | None = "low"
     api_prefix: str = "/api"
+
+    # Opt-in rollout. New tables are created only by the explicit migration.
+    pa_push_enabled: bool = False
+    pa_push_vapid_public_key: str | None = None
+    pa_push_vapid_private_key_path: str | None = None
+    pa_push_vapid_subject: str | None = None
 
     # Comma-separated in .env, e.g. "http://localhost:3000,https://app.example.com".
     # NoDecode stops pydantic-settings from trying to JSON-parse it first, which

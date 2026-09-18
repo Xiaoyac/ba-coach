@@ -53,7 +53,7 @@ async def create_conversation_with_opening(
         from .v2_repository import initial_module
         initial = await initial_module(db, user_id=subject_id)
         if initial == "module_2":
-            opening_text = "欢迎回来。之前的问题理解进度会保留；请在上方目标面板选择要继续的目标，或创建一个新目标。"
+            opening_text = "欢迎回来。之前的问题理解进度会保留；你可以继续一个已有目标，或直接告诉我想讨论的新方向，我们一起把它具体化。"
     db.add(
         ConversationMessage(
             conversation_id=conversation.id,
@@ -344,6 +344,10 @@ async def finish_turn(
             "risk_gate_duration_ms": metrics.get("risk_gate_duration_ms"),
             "time_to_first_reasoning_token_ms": metrics.get("time_to_first_reasoning_token_ms"),
             "time_to_first_content_token_ms": metrics.get("time_to_first_content_token_ms"),
+            "knowledge_references": ({
+                **metrics["knowledge_references"],
+                "validator_status": (metrics.get("answer_validator") or {}).get("status"),
+            } if metrics.get("knowledge_references") else None),
         },
     )
     conversation.updated_at = datetime.now(timezone.utc)

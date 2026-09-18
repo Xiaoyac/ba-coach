@@ -1,0 +1,23 @@
+[Unit]
+Description=BA Coach opt-in PA Web Push worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bacoach
+Group=bacoach
+WorkingDirectory=/opt/bacoach/current/backend
+Environment=PYTHONPATH=.
+EnvironmentFile=/etc/bacoach/backend.env
+EnvironmentFile=/etc/bacoach/workbench-safety.env
+EnvironmentFile=/etc/bacoach/pa-push.env
+ExecStart=/opt/bacoach/current/backend/.venv/bin/python scripts/pa_push_worker.py
+Restart=on-failure
+RestartSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

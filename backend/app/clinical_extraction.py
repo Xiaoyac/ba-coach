@@ -164,11 +164,21 @@ async def _extract_detailed(
     specs: tuple[Spec, ...],
     transcript: str,
     max_tokens: int,
+    strict: bool = False,
 ) -> tuple[dict[str, Any], Completion]:
     rendered = system.format(fields=prompt_for(specs))
     completion = await provider.route_detailed(
         system=rendered, user=transcript, max_tokens=max_tokens
     )
+    if strict:
+        candidate = completion.text.strip()
+        fenced = _FENCE_RE.match(candidate)
+        if fenced:
+            candidate = fenced.group(1).strip()
+        try:
+            return _as_dict(json.loads(candidate)), completion
+        except (ValueError, TypeError):
+            return {}, completion
     return _parse_json_object(completion.text), completion
 
 
@@ -198,12 +208,22 @@ async def extract_module_record_detailed(
     specs = MODULE_SPECS.get(module)
     if specs is None:
         return {}, Completion(text="", model=provider.model)
+    if module == "module_1":
+        from .m1_contract import SPEC
+        specs = specs + (SPEC,)
+    if module == "module_4":
+        from .m4_contract import SPEC
+        specs = specs + (SPEC,)
+    if module in {"module_2", "module_4"}:
+        from .goal_contract import GOAL_SPEC, PLAN_SPEC, ACTIVITY_SPEC, REVIEW_SPEC, CORRECTION_SPEC
+        specs = specs + ((GOAL_SPEC, PLAN_SPEC, ACTIVITY_SPEC, CORRECTION_SPEC) if module == "module_2" else (ACTIVITY_SPEC, REVIEW_SPEC, CORRECTION_SPEC))
     return await _extract_detailed(
         provider,
         system=_EXTRACTION_PROMPT,
         specs=specs,
         transcript=transcript,
-        max_tokens=max_tokens,
+        max_tokens=max(max_tokens, 4800) if module in {"module_1", "module_2", "module_4"} else max_tokens,
+        strict=module in {"module_1", "module_2", "module_4"},
     )
 
 

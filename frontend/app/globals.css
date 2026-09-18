@@ -8,7 +8,7 @@
  * would be a lie in a light theme, but `bg-panel` is true in both, so the
  * markup never has to know which theme is active.
  *
- * `@theme` carries the Dark Zen values, because that is the default. The warm
+ * `@theme` carries the Dark Zen values as the base palette. The default warm
  * theme re-declares the same variables under `.theme-warm` on <html>; Tailwind
  * utilities compile to `var(--color-…)`, so swapping one class re-skins the
  * whole app with no per-component conditionals.
@@ -21,39 +21,36 @@
  */
 @theme {
   /* ---------------------------------------------------------------- *
-   * Dark Zen — the default.
-   *
-   * No pure black: the deepest surface is #151618, a warm charcoal, so it
-   * reads as a dim room rather than a switched-off screen. No pure white
-   * either: #fff on charcoal haloes and tires the eye over a long session.
-   *
-   * Accents are desaturated champagne. Low chroma is the whole point — the
-   * same hue at full saturation is what makes an interface read "luxury"
-   * or "esports", which is exactly what this must not be.
+   * League-inspired midnight: deep blue-black, antique gold and ivory.
+   * Keep the game-client color character without adding decorative game UI
+   * to a coaching conversation. Body copy remains softer than pure white.
    * ---------------------------------------------------------------- */
 
   /* Surfaces. */
-  --color-canvas: #151618;
-  --color-panel: #1b1d20b3;
-  --color-raised: #242629;
-  --color-line: #ffffff0f;
-  --color-line-strong: #bba88840;
+  --color-canvas: #010a13;
+  --color-panel: #071522f5;
+  --color-sheet: #071522;
+  --color-raised: #0b1e2d;
+  --color-agent-bubble: #102635;
+  --color-line: #c8aa6e2e;
+  --color-line-strong: #c8aa6e80;
 
   /* Text, brightest to faintest. */
-  --color-ink: #e8e5df;
-  --color-ink-muted: #b8b4ac;
-  --color-ink-faint: #8a867e;
+  --color-ink: #f0e6d2;
+  --color-ink-muted: #c8bea9;
+  --color-ink-faint: #a99b81;
 
   /* Accent — icons, active states, focus. */
-  --color-accent: #bba888;
-  --color-accent-ink: #e2d7c3;
-  --color-accent-wash: #bba88814;
-  --color-accent-edge: #bba88833;
+  --color-accent: #c8aa6e;
+  --color-accent-ink: #e8cf96;
+  --color-on-accent: #010a13;
+  --color-accent-wash: #c8aa6e1c;
+  --color-accent-edge: #c8aa6e85;
 
   /* The user's own turns. */
-  --color-mine: #bba88817;
-  --color-mine-edge: #bba88826;
-  --color-mine-ink: #f2ece1;
+  --color-mine: #c8aa6e20;
+  --color-mine-edge: #c8aa6e70;
+  --color-mine-ink: #f0e6d2;
 
   /* Errors. Muted on purpose — a loud red is the wrong register here. */
   --color-alert-ink: #fecdd3d9;
@@ -61,8 +58,9 @@
   --color-alert-edge: #fda4af26;
 
   /* Ambient washes behind the glass. */
-  --color-wash-a: #bba8880e;
-  --color-wash-b: #7d6e550d;
+  --color-wash-a: #174c7429;
+  --color-wash-b: #c89b3c12;
+  --color-wash-c: #0a60852b;
 
   --font-sans:
     system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei",
@@ -93,54 +91,48 @@
 }
 
 /* ------------------------------------------------------------------ *
- * Warm Therapeutic.
- *
- * Not "the dark theme inverted" — light themes fail differently. The canvas
- * is a warm off-white (#f7f5f0, never #fff, which glares), bot bubbles are
- * clean white so they lift *off* the canvas instead of sinking into it, and
- * shadows are short and warm-grey rather than long and black.
- *
- * Dusty rose carries the accent role that champagne holds in the dark theme:
- * same job, same low chroma. Kept muted rather than bright/candy pink for the
- * same reason gold is kept muted in the dark theme — full saturation reads as
- * a consumer/lifestyle app, not a counselling one.
+ * Daylight living room: cream plaster, oatmeal linen, pale oak and walnut.
+ * Soft surfaces and diffused shadows carry the atmosphere; text and focus
+ * indicators stay dark enough to read. No pink or green brand accents.
  * ------------------------------------------------------------------ */
 .theme-warm {
-  --color-canvas: #f7f5f0;
-  --color-panel: #ffffffb8;
-  --color-raised: #ffffff;
-  --color-line: #40382c1a;
-  --color-line-strong: #b17e8d73;
+  --color-canvas: #f2eee5;
+  --color-panel: #fffdf8;
+  --color-sheet: #fffdf8;
+  --color-raised: #f7f3ea;
+  --color-agent-bubble: #f4eee3;
+  --color-line: #ded5c5;
+  --color-line-strong: #c5b69e;
 
-  /* Measured against the panel (white at 72% over the canvas), not the canvas:
-     that is the lighter of the two backgrounds text actually sits on, so it is
-     the worse case. All three clear AA at normal text size. */
-  --color-ink: #33302b;
-  --color-ink-muted: #655e54;
-  --color-ink-faint: #6f6759;
+  /* Text contrast is checked on both cream panels and oat selected surfaces. */
+  --color-ink: #352f27;
+  --color-ink-muted: #62594b;
+  --color-ink-faint: #6d604f;
 
-  --color-accent: #a56a7a;
-  --color-accent-ink: #7a4a58;
-  --color-accent-wash: #b17e8d1f;
-  --color-accent-edge: #b17e8d47;
+  --color-accent: #80613e;
+  --color-accent-ink: #664b2e;
+  --color-on-accent: #fffdf8;
+  --color-accent-wash: #ece3d3;
+  --color-accent-edge: #98805b;
 
-  --color-mine: #d9a8b62e;
-  --color-mine-edge: #d9a8b647;
-  --color-mine-ink: #6b3c48;
+  --color-mine: #e9dfcc;
+  --color-mine-edge: #b5a17d;
+  --color-mine-ink: #493923;
 
   --color-alert-ink: #9b4a4a;
   --color-alert-wash: #c0656514;
   --color-alert-edge: #c065653d;
 
-  --color-wash-a: #b17e8d14;
-  --color-wash-b: #c9a97714;
+  --color-wash-a: #e3d1aa38;
+  --color-wash-b: #ba98602b;
+  --color-wash-c: #fffdf8a0;
 
   /* Short and warm-grey. A light theme cannot use the dark theme's long black
      shadows — on a near-white canvas they read as dirt rather than depth. */
-  --shadow-panel: 0 24px 60px -34px rgb(64 56 44 / 0.4);
-  --shadow-bubble: 0 10px 26px -18px rgb(64 56 44 / 0.45);
-  --shadow-composer: 0 14px 34px -22px rgb(64 56 44 / 0.42);
-  --shadow-float: 0 10px 24px -14px rgb(64 56 44 / 0.35);
+  --shadow-panel: 0 24px 70px -36px rgb(94 73 42 / 0.25);
+  --shadow-bubble: 0 8px 28px -18px rgb(94 73 42 / 0.24);
+  --shadow-composer: 0 12px 32px -22px rgb(94 73 42 / 0.26);
+  --shadow-float: 0 8px 24px -14px rgb(94 73 42 / 0.24);
 }
 
 /*
@@ -217,6 +209,291 @@
 }
 
 @layer components {
+  /* Keep ambient decoration behind every control, including the desktop rail.
+     A positioned ::after painted last otherwise veils text with canvas color. */
+  .app-canvas {
+    isolation: isolate;
+  }
+
+  .app-canvas::before,
+  .app-canvas::after {
+    z-index: -1;
+  }
+
+  .app-canvas::before {
+    position: absolute;
+    inset: 0;
+    content: "";
+    pointer-events: none;
+    opacity: 0.42;
+    background-image:
+      linear-gradient(to right, var(--color-line) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--color-line) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: linear-gradient(to bottom, black, transparent 82%);
+  }
+
+  .app-canvas::after {
+    position: absolute;
+    inset: 0;
+    content: "";
+    pointer-events: none;
+    background: radial-gradient(circle at 50% 42%, transparent 28%, var(--color-canvas) 92%);
+  }
+
+  .ambient-orb {
+    position: absolute;
+    border-radius: 999px;
+    filter: blur(100px);
+    opacity: 0.9;
+  }
+
+  .ambient-orb-a {
+    left: 10%;
+    top: -18rem;
+    width: 38rem;
+    height: 38rem;
+    background: var(--color-wash-a);
+  }
+
+  .ambient-orb-b {
+    right: 7%;
+    bottom: -20rem;
+    width: 34rem;
+    height: 34rem;
+    background: var(--color-wash-b);
+  }
+
+  .ambient-orb-c {
+    right: 18%;
+    top: 18%;
+    width: 24rem;
+    height: 24rem;
+    background: var(--color-wash-c);
+  }
+
+  .auth-shell {
+    background:
+      linear-gradient(145deg, color-mix(in srgb, var(--color-panel) 92%, transparent), color-mix(in srgb, var(--color-raised) 76%, transparent));
+    box-shadow: var(--shadow-panel);
+  }
+
+  .auth-story {
+    position: relative;
+    isolation: isolate;
+    background:
+      radial-gradient(circle at 82% 12%, var(--color-accent-wash), transparent 36%),
+      linear-gradient(155deg, color-mix(in srgb, var(--color-raised) 82%, transparent), color-mix(in srgb, var(--color-panel) 58%, transparent));
+  }
+
+  .auth-story::after {
+    position: absolute;
+    z-index: -1;
+    right: -5rem;
+    bottom: -8rem;
+    width: 22rem;
+    height: 22rem;
+    border: 1px solid var(--color-accent-edge);
+    border-radius: 999px;
+    content: "";
+    box-shadow:
+      0 0 0 4rem color-mix(in srgb, var(--color-accent) 3%, transparent),
+      0 0 0 8rem color-mix(in srgb, var(--color-accent) 2%, transparent);
+  }
+
+  .auth-form-panel {
+    background: color-mix(in srgb, var(--color-panel) 88%, transparent);
+  }
+
+  .eyebrow {
+    font-size: 0.68rem;
+    font-weight: 650;
+    letter-spacing: 0.19em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+  }
+
+  .display-title {
+    font-weight: 520;
+    letter-spacing: -0.035em;
+    text-wrap: balance;
+  }
+
+  .number-chip {
+    display: grid;
+    width: 2rem;
+    height: 2rem;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 1px solid var(--color-accent-edge);
+    border-radius: 0.75rem;
+    background: var(--color-accent-wash);
+    color: var(--color-accent-ink);
+    font-size: 0.68rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .premium-control {
+    min-height: 3rem;
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-ink) 5%, transparent);
+  }
+
+  .primary-action {
+    min-height: 3rem;
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+    box-shadow: 0 14px 34px -20px var(--color-accent);
+  }
+
+  .primary-action:hover:not(:disabled) {
+    filter: brightness(1.08);
+    box-shadow: 0 18px 40px -18px var(--color-accent);
+    transform: translateY(-1px);
+  }
+
+  .surface-button {
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-ink) 5%, transparent);
+  }
+
+  .surface-button:hover:not(:disabled) {
+    border-color: var(--color-accent-edge);
+    background: var(--color-accent-wash);
+    color: var(--color-accent-ink);
+    transform: translateY(-1px);
+  }
+
+  .workspace-rail {
+    background: color-mix(in srgb, var(--color-panel) 94%, transparent);
+  }
+
+  .workspace-rail .surface-button { box-shadow: none; }
+  .workspace-rail .conversation-row-active::before { content: none; }
+  .archive-input {
+    min-height: 2.75rem;
+    border: 1px solid var(--color-line);
+    border-radius: 0.8rem;
+    padding: 0.6rem 0.9rem;
+    background: var(--color-raised);
+    color: var(--color-ink);
+    font-size: 0.875rem;
+  }
+  .archive-action {
+    min-height: 2.75rem;
+    border-radius: 0.75rem;
+    padding: 0.6rem 0.9rem;
+    background: var(--color-accent-wash);
+    color: var(--color-accent-ink);
+    font-size: 0.8125rem;
+  }
+  .archive-action:disabled { opacity: 0.4; cursor: not-allowed; }
+  .archive-action:hover:not(:disabled) { background: var(--color-raised); }
+  .goal-timeline-entry {
+    position: relative;
+    padding: 0 0 1.75rem 1.75rem;
+  }
+  .goal-timeline-entry::before {
+    content: "";
+    position: absolute;
+    left: 0.35rem;
+    top: 0.65rem;
+    bottom: -0.65rem;
+    width: 2px;
+    background: var(--color-accent-edge);
+  }
+  .goal-timeline-entry:last-child::before { bottom: 1.75rem; }
+  .goal-timeline-dot {
+    position: absolute;
+    left: 0;
+    top: 0.35rem;
+    width: 0.85rem;
+    height: 0.85rem;
+    border: 2px solid var(--color-accent);
+    border-radius: 50%;
+  }
+  .goal-timeline-date { padding-bottom: 0.75rem; }
+  @media (min-width: 640px) {
+    .goal-timeline-entry {
+      display: grid;
+      grid-template-columns: 8.5rem minmax(0, 1fr);
+      gap: 2.5rem;
+      padding-left: 0;
+    }
+    .goal-timeline-date { padding-top: 1.5rem; text-align: right; }
+    .goal-timeline-dot { left: 9.35rem; top: 1.7rem; }
+    .goal-timeline-entry::before { left: 9.7rem; top: 2rem; bottom: -2rem; }
+  }
+  .archive-input:focus-visible, .archive-action:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  .workspace-card {
+    background: color-mix(in srgb, var(--color-panel) 78%, transparent);
+  }
+
+  .workspace-card-header {
+    background: color-mix(in srgb, var(--color-panel) 72%, transparent);
+  }
+
+  /* Broad daylight replaces the technical grid in the light theme. */
+  .theme-warm .app-canvas::before {
+    opacity: 0.7;
+    background-image: linear-gradient(120deg, transparent 24%, #fffdf8b8 25%, #fffdf8b8 44%, transparent 45%, transparent 59%, #fffdf870 60%, #fffdf870 76%, transparent 77%);
+    background-size: 100% 100%;
+    mask-image: linear-gradient(to bottom, black, transparent 90%);
+  }
+
+  .theme-warm .workspace-rail {
+    background: #f8f4ec;
+    border-color: var(--color-line);
+  }
+
+  .theme-warm .workspace-card {
+    background: #fffdf8b8;
+  }
+
+  .theme-warm .auth-shell {
+    border-color: var(--color-line);
+    background: linear-gradient(145deg, #fffdf8, #faf7f0);
+  }
+
+  .theme-warm .workspace-card-header {
+    background: #fffdf8a8;
+  }
+
+  .theme-warm .conversation-row-active::before {
+    box-shadow: none;
+  }
+
+  .theme-warm .composer-shell {
+    background: var(--color-panel);
+    border-color: var(--color-line-strong);
+  }
+
+  .composer-shell {
+    background: color-mix(in srgb, var(--color-raised) 92%, transparent);
+    box-shadow: 0 8px 32px -18px color-mix(in srgb, var(--color-ink) 24%, transparent);
+  }
+
+  .conversation-row-active::before {
+    position: absolute;
+    left: 0.3rem;
+    top: 50%;
+    width: 0.18rem;
+    height: 1.5rem;
+    border-radius: 999px;
+    content: "";
+    background: var(--color-accent);
+    transform: translateY(-50%);
+    box-shadow: none;
+  }
+
+  .workbench-shell {
+    background:
+      linear-gradient(150deg, color-mix(in srgb, var(--color-panel) 98%, transparent), color-mix(in srgb, var(--color-canvas) 96%, transparent));
+    box-shadow: var(--shadow-panel);
+  }
+
   /* A thin, low-contrast scrollbar. The default chrome is visually loud and
      pulls attention to the edge of the transcript. */
   .zen-scroll {
@@ -239,6 +516,17 @@
 
   .zen-scroll::-webkit-scrollbar-thumb:hover {
     background-color: var(--color-accent);
+  }
+}
+
+@media (max-width: 767px) {
+  .app-canvas::before {
+    background-size: 40px 40px;
+    opacity: 0.28;
+  }
+
+  .ambient-orb {
+    filter: blur(78px);
   }
 }
 

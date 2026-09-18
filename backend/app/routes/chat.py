@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -31,7 +32,8 @@ from ..graph import (
     schedule_background_routing,
     wait_for_pending_routing,
 )
-from ..identity import optional_subject_id
+from ..identity import optional_subject_id, require_subject_id
+from ..generation_control import GenerationControl, GenerationStopped, generations
 from ..models import (
     AccountSettings,
     Conversation,
@@ -44,7 +46,7 @@ from ..prompts import MODULE_PROMPTS
 from ..providers import LLMProvider, ProviderError, get_provider
 from ..reasoning import normalize_reasoning_channels
 from ..retrieval import get_knowledge_base
-from ..schemas import ChatRequest, ChatResponse, Message, SessionInfo
+from ..schemas import CancelGenerationRequest, ChatRequest, ChatResponse, Message, SessionInfo
 from ..session import SessionStore, get_session_store
 
 logger = logging.getLogger(__name__)
@@ -403,6 +405,50 @@ async def chat_stream(
     db: AsyncSession = Depends(get_db),
     subject_id: str | None = Depends(optional_subject_id),
 ) -> StreamingResponse:
+    try:
+        control = generations.begin(subject_id, str(request.generation_id or uuid4()))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        response = await control.run(_prepare_chat_stream(request, store, db, subject_id, control))
+    except GenerationStopped:
+        generations.finish(control)
+        async def stopped():
+            yield _sse("cancelled", {"cancelled": True})
+        return StreamingResponse(stopped(), media_type="text/event-stream")
+    except BaseException:
+        generations.finish(control)
+        raise
+
+    async def tracked_body():
+        try:
+            async for frame in response.body_iterator:
+                yield frame
+        finally:
+            try:
+                await response.body_iterator.aclose()
+            finally:
+                generations.finish(control)
+    return StreamingResponse(tracked_body(), media_type="text/event-stream", headers=dict(response.headers))
+
+
+@router.post("/chat/cancel")
+async def cancel_generation(
+    request: CancelGenerationRequest,
+    subject_id: str = Depends(require_subject_id),
+) -> dict:
+    # Owner + random per-turn id, not a client-provided user/session identity.
+    # A delayed stop cannot cancel the next turn or another user's request.
+    try:
+        return {"status": await generations.cancel(subject_id, str(request.generation_id))}
+    except ValueError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+
+
+async def _prepare_chat_stream(
+    request: ChatRequest, store: SessionStore, db: AsyncSession,
+    subject_id: str | None, control: GenerationControl,
+) -> StreamingResponse:
     await wait_for_pending_routing(request.session_id)
     provider = await _resolve_provider(request, db, subject_id=subject_id)
     router_prompt = await effective_router_prompt(db)
@@ -416,6 +462,7 @@ async def chat_stream(
     context = _context(
         provider, store, stream=True, router_prompt=router_prompt
     )
+    context.generation = control
     # The request-scoped dependency survives as long as StreamingResponse, but
     # the model may think for minutes. End the setup transaction now so that
     # idle time does not pin a MySQL connection; final writes use a fresh,
@@ -451,9 +498,9 @@ async def chat_stream(
                 # stream is therefore the durable fallback: it guarantees a
                 # completed model reply is still sent and persisted instead
                 # of silently disappearing after the initial meta event.
-                async for item in get_graph().astream(
+                async for item in control.iterate(get_graph().astream(
                     state, context=context, stream_mode=["custom", "values"]
-                ):
+                )):
                     if (
                         isinstance(item, tuple)
                         and len(item) == 2
@@ -489,6 +536,12 @@ async def chat_stream(
                     if kind in CLIENT_EVENTS:
                         payload = {k: v for k, v in event.items() if k != "type"}
                         yield _sse(kind, payload)
+            except GenerationStopped:
+                # The user row is already durable. Do not save unvalidated
+                # partial output, advance memory, or start the background router.
+                await store.append(session_id, Message(role="user", content=request.message))
+                yield _sse("cancelled", {"cancelled": True, "session_id": session_id})
+                return
             except Exception as exc:  # noqa: BLE001
                 # Headers are already sent, so a raised exception would just
                 # sever the connection. Report it in-band instead.

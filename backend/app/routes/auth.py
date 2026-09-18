@@ -58,6 +58,7 @@ from ..schemas import (
     AccountInfo,
     AdminResetRequest,
     AuthResponse,
+    BirthDateRequest,
     ChangePasswordRequest,
     EmailAddressRequest,
     EmailTokenRequest,
@@ -187,6 +188,7 @@ async def _issue_session(db: AsyncSession, account: UserAccount) -> tuple[str, A
 
 
 async def _account_info(db: AsyncSession, account: UserAccount) -> AccountInfo:
+    from ..birth_dates import needs_birth_date
     from .. import v2_profile
     if v2_profile.enabled():
         from ..database_v2_schema import user_profile
@@ -211,6 +213,7 @@ async def _account_info(db: AsyncSession, account: UserAccount) -> AccountInfo:
         )
     ).scalar_one_or_none()
     return AccountInfo(
+        birth_date_required=await needs_birth_date(db, account.profile_uuid),
         username=account.username,
         nickname=profile.nickname if profile else None,
         tag=handle.tag if handle else None,
@@ -272,6 +275,7 @@ async def register(
     profile = UserProfile(
         nickname=nickname,
         age=payload.age,
+        birth_date=payload.birth_date,
         living_status=payload.living_status,
         communication_preference=payload.communication_preference,
         physical_condition=_set_value(payload.physical_condition),
@@ -382,6 +386,23 @@ async def login(
         expires_at=session.expires_at,
         account=await _account_info(db, account),
     )
+
+
+@router.put("/birth-date", response_model=AccountInfo)
+async def set_birth_date(payload: BirthDateRequest,
+                         caller: CallerIdentity = Depends(require_caller),
+                         db: AsyncSession = Depends(get_db)) -> AccountInfo:
+    from .. import v2_profile
+    from ..birth_dates import age_on
+    from ..schemas import ProfileUpdate
+    if v2_profile.enabled():
+        await v2_profile.patch(db, caller.subject_id, ProfileUpdate(birth_date=payload.birth_date))
+    else:
+        profile = (await db.execute(select(UserProfile).where(UserProfile.uuid == caller.subject_id))).scalar_one()
+        profile.birth_date = payload.birth_date
+        profile.age = age_on(payload.birth_date)
+        await db.commit()
+    return await _account_info(db, caller.account)
 
 
 @router.put("/email", response_model=AccountInfo, status_code=status.HTTP_202_ACCEPTED)

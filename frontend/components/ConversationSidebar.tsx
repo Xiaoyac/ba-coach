@@ -4,10 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import type { ConversationSummary } from "@/lib/conversations";
 import type { SandboxModule } from "@/lib/adminSandbox";
 import AdminSandboxControl from "@/components/AdminSandboxControl";
+import ThemeToggle from "@/components/ThemeToggle";
+import KnowledgeCacheMetric from "@/components/KnowledgeCacheMetric";
 import {
   ChatBubbleMark,
   CloseMark,
   EllipsisMark,
+  EnsoMark,
+  NotebookMark,
   PencilMark,
   PinMark,
   PlusMark,
@@ -47,7 +51,11 @@ export default function ConversationSidebar({
   onTogglePin,
   onStartSandbox,
   onOpenTestWorkbench,
-  onOpenDailyRecords,
+  onOpenAssessment,
+  onOpenGoals,
+  onReportIssue,
+  reportPreparing = false,
+  collapsed = false,
   sandboxBusy = false,
   open,
   onClose,
@@ -64,7 +72,11 @@ export default function ConversationSidebar({
   /** Present only for administrators; absence removes the control entirely. */
   onStartSandbox?: (module: SandboxModule) => void;
   onOpenTestWorkbench?: () => void;
-  onOpenDailyRecords?: () => void;
+  onOpenAssessment?: () => void;
+  onOpenGoals?: () => void;
+  onReportIssue?: () => void;
+  reportPreparing?: boolean;
+  collapsed?: boolean;
   sandboxBusy?: boolean;
   /** Mobile-drawer state. Ignored at `md:` and up, where the rail is static. */
   open: boolean;
@@ -77,6 +89,27 @@ export default function ConversationSidebar({
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
+  const [adminToolsOpen, setAdminToolsOpen] = useState(false);
+  const railRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!open || window.matchMedia("(min-width: 768px)").matches) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const rail = railRef.current;
+    const controls = () => Array.from(rail?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), [tabindex="0"]') ?? []).filter(el => el.getClientRects().length > 0);
+    controls()[0]?.focus();
+    const trap = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); onClose(); }
+      if (event.key !== "Tab") return;
+      const items = controls();
+      const first = items[0], last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    rail?.addEventListener("keydown", trap);
+    return () => { rail?.removeEventListener("keydown", trap); previous?.focus(); };
+    // The parent closes the same drawer; don't reset focus on every rerender.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // Close the action menu on any outside click. Registered only while a menu
   // is actually open, so the app isn't carrying a document-level listener
@@ -127,6 +160,7 @@ export default function ConversationSidebar({
       />
 
       <aside
+        ref={railRef}
         role="navigation"
         aria-label="对话历史"
         // The mobile slide is inline, not a `translate-x-*` utility class: some
@@ -137,25 +171,40 @@ export default function ConversationSidebar({
         // always wins the cascade, sidestepping that entirely. `md:` clears it
         // back to static positioning, where this value is simply unused.
         style={{ translate: open ? "0" : "-100%" }}
-        className="fixed inset-y-0 left-0 z-30 flex w-72 flex-col overflow-clip rounded-r-[28px] border border-line bg-panel depth-panel backdrop-blur-2xl transition-transform duration-300 ease-out md:static md:z-auto md:h-full md:w-64 md:shrink-0 md:!translate-x-0 md:rounded-[28px]"
+        className={`workspace-rail fixed inset-y-0 left-0 z-30 flex w-[14.5rem] flex-col overflow-clip rounded-r-3xl transition-transform duration-300 ease-out md:static md:z-auto md:h-full md:shrink-0 md:!translate-x-0 md:rounded-none ${open ? "visible" : "invisible"} ${collapsed ? "md:hidden" : "md:visible"}`}
       >
-        <div className="shrink-0 space-y-2 p-3">
-          {onOpenDailyRecords && <button type="button" onClick={onOpenDailyRecords}
-            className="w-full rounded-2xl border border-line px-3.5 py-2.5 text-left text-sm text-ink">我的每日记录</button>}
-          {onOpenTestWorkbench && <button type="button" onClick={onOpenTestWorkbench}
-            className="w-full rounded-2xl border border-accent-edge bg-accent-wash px-3.5 py-2.5 text-left text-sm text-accent-ink">测试工作台</button>}
-          {onStartSandbox && (
-            <AdminSandboxControl busy={sandboxBusy} onStart={onStartSandbox} />
-          )}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onNew}
-              className="flex flex-1 items-center gap-2 rounded-2xl border border-line px-3.5 py-2.5 text-[0.82rem] text-ink-muted transition-colors duration-300 hover:border-accent-edge hover:text-accent-ink"
-            >
-              <PlusMark className="h-4 w-4" />
-              新对话
+        <div className="shrink-0 px-3 pb-2 pt-5">
+          <div className="mb-3 flex items-center gap-2 px-1">
+            <span className="grid h-8 w-8 place-items-center rounded-xl bg-accent-wash text-accent">
+              <EnsoMark className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[0.75rem] font-semibold tracking-[0.08em] text-ink">BA COACH</p>
+              <p className="text-[0.63rem] text-ink-faint">行动练习空间</p>
+            </div>
+          </div>
+          <div className="space-y-1">
+          <button type="button" onClick={onNew} className="surface-button mb-3 flex min-h-11 w-full items-center gap-2.5 rounded-xl bg-accent-wash px-3 text-left text-sm font-medium text-accent-ink"><PlusMark className="h-4 w-4" />开启新对话</button>
+          {onOpenGoals && <button type="button" onClick={onOpenGoals}
+            className="surface-button flex min-h-11 w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-ink-muted">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true" className="h-4 w-4"><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="4.5" /><circle cx="12" cy="12" r="1" /></svg>
+            我的目标</button>}
+          {onOpenAssessment && <button type="button" onClick={onOpenAssessment}
+            className="surface-button flex min-h-11 w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-ink-muted">
+            <NotebookMark className="h-4 w-4" />记录今日</button>}
+          {(onOpenTestWorkbench || onStartSandbox) && <div className="pt-1">
+            <button type="button" onClick={() => setAdminToolsOpen((value) => !value)} aria-expanded={adminToolsOpen}
+              className="surface-button flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-[0.75rem] text-ink-muted">
+              管理工具 <span aria-hidden="true" className="text-ink-faint">{adminToolsOpen ? "−" : "+"}</span>
             </button>
+            {adminToolsOpen && <div className="mt-1 space-y-1 border-l border-line pl-2">
+              {onOpenTestWorkbench && <button type="button" onClick={onOpenTestWorkbench}
+                className="surface-button w-full rounded-xl px-3 py-2 text-left text-[0.78rem] text-accent-ink">测试工作台</button>}
+              {onStartSandbox && <AdminSandboxControl busy={sandboxBusy} onStart={onStartSandbox} />}
+              <KnowledgeCacheMetric />
+            </div>}
+          </div>}
+          <div className="absolute right-2 top-3 md:hidden">
             <button
               type="button"
               onClick={onClose}
@@ -165,12 +214,14 @@ export default function ConversationSidebar({
               <CloseMark className="h-4 w-4" />
             </button>
           </div>
+          </div>
         </div>
 
         {/* overflow-y-auto would clip the absolutely-positioned action menu,
             so the menu is rendered inside the scroller and the list simply
             scrolls with it — see the row menu below. */}
-        <div className="zen-scroll min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-3">
+        <div className="zen-scroll min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pb-3 pt-3">
+          <p className="mb-2 px-2 text-xs text-ink-faint">最近的对话</p>
           {loading ? (
             <div className="space-y-1.5 px-1.5 pt-1">
               {[0, 1, 2].map((i) => (
@@ -199,8 +250,8 @@ export default function ConversationSidebar({
                     key={c.session_id}
                     className="flex items-center gap-1.5 rounded-xl bg-alert-wash px-3 py-2.5"
                   >
-                    <span className="flex-1 truncate text-[0.78rem] text-alert-ink">
-                      删除这条对话？
+                    <span className="flex-1 text-[0.78rem] leading-relaxed text-alert-ink">
+                      删除对话及其专属记忆、目标？其他对话共用的目标会保留。
                     </span>
                     <button
                       type="button"
@@ -255,9 +306,9 @@ export default function ConversationSidebar({
                 <div
                   key={c.session_id}
                   data-row-menu={menuOpen ? "" : undefined}
-                  className={`group relative flex items-center rounded-xl transition-colors duration-300 ${
+                  className={`group relative flex items-center rounded-xl transition-all duration-300 ${
                     active
-                      ? "bg-accent-wash text-accent-ink"
+                      ? "conversation-row-active bg-accent-wash pl-1 text-accent-ink"
                       : "text-ink-muted hover:bg-raised hover:text-ink"
                   }`}
                 >
@@ -290,7 +341,7 @@ export default function ConversationSidebar({
                     // from under the cursor on a touch device where there is
                     // no hover to keep `group-hover` alive.
                     className={`mr-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ink-faint transition-opacity duration-200 hover:bg-raised hover:text-ink focus-visible:opacity-100 ${
-                      menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                      menuOpen ? "opacity-100" : "opacity-100 md:opacity-0 md:group-hover:opacity-100"
                     }`}
                   >
                     <EllipsisMark className="h-3.5 w-3.5" />
@@ -337,6 +388,10 @@ export default function ConversationSidebar({
               );
             })
           )}
+        </div>
+        <div className="flex shrink-0 items-center justify-between gap-2 px-3 pb-3 pt-2">
+          {onReportIssue && <button type="button" onClick={onReportIssue} disabled={reportPreparing} data-screenshot-exclude="true" className="surface-button min-h-11 rounded-xl px-3 text-xs text-ink-muted disabled:opacity-50">{reportPreparing ? "正在准备截图…" : "帮助与反馈"}</button>}
+          <ThemeToggle inline />
         </div>
       </aside>
     </>

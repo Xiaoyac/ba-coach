@@ -34,6 +34,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..clinical_store import set_values
+from ..birth_dates import age_on
 from ..db import get_db
 from ..identity import require_subject_id
 from ..account_identity import normalize_display_name
@@ -140,7 +141,8 @@ def _to_out(
         nickname=profile.nickname,
         tag=handle.tag if handle else None,
         display_id=handle.full_username if handle else None,
-        age=profile.age,
+        age=age_on(profile.birth_date) if profile.birth_date else profile.age,
+        birth_date=profile.birth_date,
         living_status=profile.living_status,
         has_supporter=bool(supporters),
         supporter1_relation=profile.supporter1_relation,
@@ -272,6 +274,11 @@ async def update_profile(
     # column keeps its value. Sending an explicit null still clears a field —
     # that is how "actually, I have no restrictions any more" is expressed.
     changes = payload.model_dump(exclude_unset=True)
+    if "age" in changes and (profile.birth_date or "birth_date" in changes):
+        raise HTTPException(422, "年龄由出生日期计算，请修改出生日期")
+    if "birth_date" in changes:
+        from ..birth_dates import age_on
+        changes["age"] = age_on(payload.birth_date)
     legacy_edits = LEGACY_SUPPORTER_FIELDS.intersection(changes)
     if "supporters" in changes and legacy_edits:
         raise HTTPException(status_code=422, detail="请只提交 supporters 列表，不要同时修改旧支持者槽位")

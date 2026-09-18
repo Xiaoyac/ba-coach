@@ -2,7 +2,7 @@
 import re
 from time import perf_counter
 
-VERSION = "answer-rules-v2"
+VERSION = "answer-rules-v3-dialogue"
 SAFE_REPLY = "刚才的回复未通过完整性检查，暂时无法展示。你可以补充一下最希望讨论的具体问题，我们再继续。"
 MODULE_RULES = {
     "module_1": ("premature_plan", r"(?:从明天开始|你必须|你应该每天).{0,24}(?:跑步|散步|运动|锻炼)"),
@@ -32,6 +32,12 @@ def validate_answer(*, reply: str, module: str, evidence_ids: list[str], workflo
     if re.search(r"(?:你患有|你被诊断为|你需要服用)", reply):
         flag("clinical_claim_needs_review", "review")
     if workflow is not None:
+        for sentence in re.split(r'[。！？\\n]', reply):
+            if re.search(r'无需|不需要|不用|不必|不能|不要|不应|禁止|只读|仅供|不对|有误|错误', sentence):
+                continue
+            if re.search(r'(?:目标面板|网页.{0,8}(?:确认|核对)|记录面板|确认按钮|面板).{0,32}(?:核对|确认|保存|提交)|(?:去|前往|打开).{0,8}目标面板', sentence):
+                flag('panel_confirmation_instruction', 'block')
+                break
         # Check declarations, not conditional explanations or explicit denials.
         for sentence in re.split(r'[。！？\n]', reply):
             if re.search(r'尚未|还未|未曾|没有|不能|不得|并未|确认.{0,4}后|如果|待.{0,8}确认|确认成功后', sentence):

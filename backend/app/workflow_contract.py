@@ -1,10 +1,10 @@
 """Versioned registry shared by routing, persistence, DMS and documentation."""
-VERSION = "workflow-20260910-v1"
+VERSION = "workflow-20260917-m4-v1"
 STEP_REGISTRY = {
  "module_1": (
-  ("core_problem_example", "具体困扰事例", "已获得至少一个足以理解行为与情绪关联的具体事例；不是必须穷尽背景。"),
-  ("depression_cycle_formulated", "循环理解", "结合该事例形成触发、行为及后果之间的理解，并与用户核对；不能只输出术语。"),
-  ("ba_education_completed", "BA 教育", "已结合用户经历解释 BA 的活动与情绪关系，用户表达理解；不能仅凭教练说过。"),
+  ("core_problem_example", "具体经历或低披露选择", "milestone_1：同一事件的情境、主要体验、实际行为、实际结果齐全；用户明确不愿披露/分析可选择低披露，不用虚构补齐。"),
+  ("depression_cycle_formulated", "行为与状态关系", "milestone_2：当前事实关系基本获认可，缓解方法已知有/无；不强求抑郁循环。低披露可跳过个人分析。更正使旧认可失效。"),
+  ("ba_education_completed", "BA 教育与理解", "milestone_3 的理解门：五项 BA 教育完成，用户基本理解且无未解决核心疑问；低披露用一般解释也须确认理解。"),
   ("goal_setting_consent", "目标设定意愿", "用户明确愿意开始目标设定；沉默、模糊附和或对其他问题说继续不算。")),
  "module_2": (
   ("pa_concept_understood", "PA 理解", "用户理解 PA 是具体行动任务，与 BA 方法区分。"),
@@ -16,11 +16,11 @@ STEP_REGISTRY = {
   ("recording_plan_agreed", "记录计划", "用户同意实际可行的记录办法，未同意的建议不算。"),
   ("execution_contract_reached", "执行契约", "用户同意执行本轮目标及记录安排；进入 M4 还须真实执行反馈。")),
  "module_4": (
-  ("execution_reviewed", "执行复盘", "已有用户报告的实际执行或未执行情况，不从沉默推断。"),
-  ("abc_chain_completed", "ABC 分析", "以实际事件核对前因、行为、后果，未知感受不编造。"),
-  ("barriers_identified", "障碍识别", "讨论并确认本次障碍；确无障碍可以明确记录，不强行编造。"),
-  ("coping_strategy_selected", "应对选择", "用户参与选择下一次可行策略或明确无需改变。"),
-  ("review_decision_made", "复盘决定", "用户明确继续、调整、更换或结束的意向；当前旧流程仅支持既有循环转换。")),
+  ("execution_reviewed", "执行与情境", "milestone_1：焦点PA实际开始、完成程度/时长明确，A实际PA且情绪改善，B未开始且明确障碍，C窗口已过排除A/B。未知不分类。"),
+  ("abc_chain_completed", "ABC 核对", "milestone_2：当前事件ABC简洁总结获用户明确确认；纠正后旧确认失效，未知不编造。"),
+  ("barriers_identified", "BA 教育与理解", "milestone_3（保留旧步骤键兼容）：ABC确认后完成情境化BA教育，用户基本理解且无未答核心疑问。不能提前给策略。"),
+  ("coping_strategy_selected", "困难处理与应对", "milestone_4：只处理真实困难，继续时共同形成原目标策略；无需处理或明确调整可跳过具体策略，不改内容/时长。"),
+  ("review_decision_made", "复盘决定", "用户明确继续、调整、更换或结束；普通日常活动反馈不等于决定结束复盘。继续同一目标沿用计划进入下一周期M4，调整才回M2新版本；后台核验对话中的明确用户决定后执行，不要求网页按钮。")),
 }
 MODULE_STEP_KEYS = {module: tuple(row[0] for row in rows) for module, rows in STEP_REGISTRY.items()}
 

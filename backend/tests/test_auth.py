@@ -19,6 +19,7 @@ def _register(client: TestClient, **overrides) -> dict:
         "password": "correct-horse-battery",
         "nickname": "南瓜",
         "tag": "12345",
+        "birth_date": "1998-01-01",
     }
     payload.update(overrides)
     payload.setdefault("email", f"{payload['username'].lower()}@example.com")

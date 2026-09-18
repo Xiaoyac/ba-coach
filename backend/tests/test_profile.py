@@ -186,11 +186,12 @@ def test_a_healed_injury_can_be_removed(client: TestClient, register) -> None:
 
 
 def test_every_editable_section_round_trips(client: TestClient, headers) -> None:
+    from app.birth_dates import today
     body = _patch(
         client,
         headers,
         nickname="小林",
-        age=31,
+        birth_date=today().replace(year=today().year - 31, month=1, day=1).isoformat(),
         living_status="和家人",
         has_supporter=True,
         supporter1_relation="朋友",

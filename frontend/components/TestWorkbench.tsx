@@ -14,9 +14,9 @@ const columns = [
 ] as const;
 const emptyCase = (): TestCaseInput => ({ case_code: "", module: "module_1", user_type: "", scenario: "",
   user_input: "", expected_behavior: "", extra_columns: {} });
-const inputClass = "w-full rounded-xl border border-line-strong bg-canvas px-3 py-2 text-sm text-ink outline-none focus:border-accent";
-const buttonClass = "min-h-10 rounded-xl border border-line-strong bg-panel px-3.5 py-2 text-xs font-medium text-ink-muted shadow-sm hover:border-accent-edge hover:bg-raised disabled:opacity-40 disabled:cursor-not-allowed";
-const primaryClass = `${buttonClass} !border-accent-edge !bg-accent-wash !text-accent-ink`;
+const inputClass = "premium-control w-full rounded-xl border border-line-strong bg-raised/70 px-3 py-2 text-sm text-ink outline-none focus:border-accent-edge focus:ring-4 focus:ring-accent-wash";
+const buttonClass = "surface-button min-h-10 rounded-xl border border-line-strong bg-panel px-3.5 py-2 text-xs font-medium text-ink-muted disabled:cursor-not-allowed disabled:opacity-40";
+const primaryClass = "primary-action min-h-10 rounded-xl border border-accent px-4 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40";
 const labels: Record<string, string> = { queued: "排队中", running: "运行中", completed: "运行完成", failed: "执行失败", interrupted: "已中断" };
 const errorText = (e: unknown) => e instanceof Error ? e.message : String(e);
 
@@ -143,7 +143,7 @@ export default function TestWorkbench({ onClose }: { onClose: () => void }) {
     (runFilter === "all" || (runFilter === "unreviewed" ? r.status === "completed" && (!r.latest_verdict || r.latest_verdict === "unreviewed") : r.status === runFilter)) &&
     `${r.case_snapshot.case_code} ${r.input_text}`.toLowerCase().includes(query.toLowerCase()));
 
-  return <div className="fixed inset-0 z-[75] bg-canvas/95 p-2 backdrop-blur-md sm:p-5">
+  return <div className="fixed inset-0 z-[75] bg-canvas/90 p-2 backdrop-blur-xl sm:p-5">
     <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="test-workbench-title"
       onKeyDown={e => {
         if (e.key === "Escape") { if (editing) setEditing(null); else if (preview) setPreview(null); else if (detail) setDetail(null); else close(); }
@@ -155,8 +155,8 @@ export default function TestWorkbench({ onClose }: { onClose: () => void }) {
           else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
         }
       }}
-      className={`${styles.workbench} relative mx-auto flex h-full max-w-[1800px] flex-col overflow-hidden rounded-[24px] border border-line-strong bg-canvas text-ink shadow-2xl outline-none`}>
-      <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-4">
+      className={`${styles.workbench} workbench-shell relative mx-auto flex h-full max-w-[1800px] flex-col overflow-hidden rounded-[30px] border border-line-strong text-ink outline-none`}>
+      <header className="workspace-card-header flex flex-wrap items-center gap-3 border-b border-line px-5 py-5 sm:px-6">
         <div className="mr-auto"><p className="mb-1 text-[10px] font-medium uppercase tracking-[.24em] text-accent-ink">BA COACH / EVALUATION</p><h2 id="test-workbench-title" className="text-xl font-semibold tracking-tight">测试工作台</h2>
           <p className="mt-1 text-xs text-ink-faint">让每一次对话测试，都有迹可循。</p></div>
         <button className={buttonClass} disabled={busy} onClick={() => void action(() => load())}>刷新</button>
@@ -169,7 +169,7 @@ export default function TestWorkbench({ onClose }: { onClose: () => void }) {
         }}/>
       </header>
       <div className="hidden grid-cols-4 gap-3 px-5 pt-4 sm:grid">
-        {[["用例总数", cases.length, "按模块维护与复用"], ["已选用例", selected.length, "每批最多 20 条"], ["运行中", runs.filter(r => ["queued","running"].includes(r.status)).length, "当前已加载记录"], ["待评审", runs.filter(r => r.status === "completed" && (!r.latest_verdict || r.latest_verdict === "unreviewed")).length, "当前已加载记录"]].map(([label,count,hint]) => <div key={label} className="rounded-2xl border border-line bg-panel px-4 py-3"><p className="text-xs text-ink-faint">{label}</p><p className="mt-1 text-2xl font-semibold tabular-nums">{loading ? "—" : count}</p><p className="mt-1 hidden text-[11px] text-ink-faint sm:block">{hint}</p></div>)}
+        {[["用例总数", cases.length, "按模块维护与复用"], ["已选用例", selected.length, "每批最多 20 条"], ["运行中", runs.filter(r => ["queued","running"].includes(r.status)).length, "当前已加载记录"], ["待评审", runs.filter(r => r.status === "completed" && (!r.latest_verdict || r.latest_verdict === "unreviewed")).length, "当前已加载记录"]].map(([label,count,hint]) => <div key={label} className="rounded-2xl border border-line bg-raised/45 px-4 py-3 depth-float"><p className="text-xs font-medium text-ink-muted">{label}</p><p className="mt-2 text-2xl font-semibold tabular-nums text-ink">{loading ? "—" : count}</p><p className="mt-1 hidden text-[11px] text-ink-faint sm:block">{hint}</p></div>)}
       </div>
       <div className="flex flex-wrap items-center gap-2 px-5 pt-4 pb-3">
         <div className="flex gap-1 rounded-xl border border-line bg-raised p-1" role="group" aria-label="工作台视图">

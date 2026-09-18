@@ -1,4 +1,5 @@
 from .assessment import router as assessment_router
+from .admin_assessments import router as admin_assessments_router
 from .admin_accounts import router as admin_accounts_router
 from .admin_knowledge import router as admin_knowledge_router
 from .admin_prompts import router as admin_prompts_router
@@ -12,6 +13,7 @@ from .profile import router as profile_router
 
 __all__ = [
     "assessment_router",
+    "admin_assessments_router",
     "admin_accounts_router",
     "admin_knowledge_router",
     "admin_prompts_router",

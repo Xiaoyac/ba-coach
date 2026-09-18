@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,7 +11,8 @@ from ..db import get_db
 from ..identity import CallerIdentity, require_admin
 from ..knowledge_store import KNOWLEDGE_CATEGORY_MODULES, import_knowledge_source
 from ..models import KnowledgeChunkRecord, KnowledgeSourceRecord
-from ..retrieval import invalidate_knowledge_cache
+from ..retrieval import DatabaseKnowledgeBase, get_knowledge_base, invalidate_knowledge_cache
+from ..providers.base import ProviderError
 from ..schemas import (
     AdminKnowledgeBundle,
     AdminKnowledgeImport,
@@ -19,6 +20,18 @@ from ..schemas import (
 )
 
 router = APIRouter(prefix="/admin/knowledge", tags=["admin-knowledge"])
+
+
+@router.get("/cache-stats")
+async def cache_stats(response: Response, _caller: CallerIdentity = Depends(require_admin)) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        knowledge = get_knowledge_base()
+    except ProviderError as exc:
+        raise HTTPException(status_code=503, detail="检索缓存统计暂不可用") from exc
+    if not isinstance(knowledge, DatabaseKnowledgeBase):
+        raise HTTPException(status_code=503, detail="当前检索器不支持缓存统计")
+    return knowledge.cache_monitoring_stats()
 
 
 def _item(
@@ -80,6 +93,9 @@ async def import_knowledge(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     await db.commit()
+    # Only committed changes invalidate. Other workers observe the source
+    # manifest on their next retrieval; an identical import keeps warm caches.
+    if not result.unchanged:
+        invalidate_knowledge_cache()
     await db.refresh(result.source)
-    invalidate_knowledge_cache()
     return _item(result.source, result.chunk_count, unchanged=result.unchanged)

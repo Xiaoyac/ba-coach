@@ -108,6 +108,8 @@ def _to_out(entry: AssessmentEntry) -> AssessmentOut:
         local_date=entry.recorded_on,
         timezone=entry.timezone,
         status=entry.status,  # type: ignore[arg-type]
+        scale_version=entry.scale_version,
+        completion_not_applicable=entry.scale_version == 2 and entry.status == STATUS_COMPLETED and entry.completion_rate is None,
         completion_rate=entry.completion_rate,
         activity_level=entry.activity_level,
         social_connection=entry.social_connection,
@@ -220,10 +222,11 @@ async def submit_assessment(
 
     entry.timezone = tz_name
     entry.status = STATUS_COMPLETED
+    entry.scale_version = 2
     entry.completion_rate = payload.summary.completion_rate
     entry.activity_level = payload.summary.activity_level
-    entry.social_connection = payload.summary.social_connection
-    entry.approach_vs_avoidance = payload.summary.approach_vs_avoidance
+    entry.social_connection = None
+    entry.approach_vs_avoidance = None
     entry.overall_mood = payload.summary.overall_mood
     entry.reflection_note = payload.summary.reflection_note
 

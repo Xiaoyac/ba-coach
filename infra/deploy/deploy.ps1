@@ -1,7 +1,8 @@
 param(
     [string]$Server = "root@8.134.178.40",
-    [string]$IdentityFile = "C:\Users\20640\.ssh\bacoach_deploy_ed25519",
-    [switch]$SkipChecks
+    [string]$IdentityFile = "$HOME\.ssh\bacoach_deploy_20260907_ed25519",
+    [switch]$SkipChecks,
+    [switch]$SkipDatabaseTasks
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,6 +16,7 @@ if (-not $SkipChecks) {
     Push-Location (Join-Path $ProjectRoot "frontend")
     try {
         npm run typecheck
+        if ($LASTEXITCODE -ne 0) { throw "frontend typecheck failed" }
     }
     finally {
         Pop-Location
@@ -22,7 +24,8 @@ if (-not $SkipChecks) {
 
     Push-Location (Join-Path $ProjectRoot "backend")
     try {
-        & ".\.venv\Scripts\python.exe" -m pytest -q
+        & ".\.venv\Scripts\python.exe" -m pytest -q "--basetemp=../.test-tmp/deploy-$ReleaseId" -p no:cacheprovider
+        if ($LASTEXITCODE -ne 0) { throw "backend tests failed" }
     }
     finally {
         Pop-Location
@@ -38,7 +41,6 @@ try {
             "backend/app",
             "backend/scripts",
             "backend/requirements.txt",
-            "KnowledgeBase",
             "frontend/app",
             "frontend/components",
             "frontend/lib",
@@ -49,15 +51,18 @@ try {
             "frontend/postcss.config.mjs",
             "frontend/tsconfig.json"
         )
+        if (-not $SkipDatabaseTasks) {
+            $PackageItems += "KnowledgeBase"
+        }
         if (Test-Path "frontend/public") {
             $PackageItems += "frontend/public"
         }
 
-        tar -czf $Archive $PackageItems
+        tar --exclude=__pycache__ --exclude=*.pyc --exclude=*.db --exclude=*.sqlite --exclude=*.sqlite3 -czf $Archive $PackageItems
         if ($LASTEXITCODE -ne 0) { throw "tar failed" }
 
         $Forbidden = tar -tf $Archive | Select-String `
-            '(^|/)(\.env$|\.venv/|node_modules/|\.next/|runtime-logs/|\.pytest_cache/)'
+            '(^|/)(\.env$|\.venv/|node_modules/|\.next/|runtime-logs/|\.pytest_cache/|__pycache__/)|\.(db|sqlite|sqlite3|pyc)$'
         if ($Forbidden) {
             throw "archive contains a forbidden secret or generated path"
         }
@@ -95,8 +100,9 @@ try {
         "install -m 0755 '$RemoteDeployScript' /usr/local/sbin/bacoach-deploy-release && rm -f '$RemoteDeployScript'"
     if ($LASTEXITCODE -ne 0) { throw "deploy-script install failed" }
 
+    $DatabaseTaskFlag = if ($SkipDatabaseTasks) { " '--skip-database-tasks'" } else { "" }
     ssh -i $IdentityFile -o BatchMode=yes $Server `
-        "sudo /usr/local/sbin/bacoach-deploy-release '$ReleaseId' '$RemoteArchive'"
+        "sudo /usr/local/sbin/bacoach-deploy-release '$ReleaseId' '$RemoteArchive'$DatabaseTaskFlag"
     if ($LASTEXITCODE -ne 0) { throw "remote deployment failed" }
 
     curl.exe --fail --silent --show-error https://bacoach.xyz/ --output NUL

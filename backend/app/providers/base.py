@@ -122,9 +122,13 @@ class LLMProvider(ABC):
         return Completion(text=text, model=self.model)
 
     async def route_detailed(
-        self, *, system: str, user: str, max_tokens: int | None = None
+        self, *, system: str, user: str, max_tokens: int | None = None,
+        include_reasoning: bool = False,
+        reasoning_effort: str | None = None,
     ) -> Completion:
-        """Non-thinking router call with usage/request metadata when available."""
+        """Router metadata, with optional native reasoning on the same call."""
+        if include_reasoning:
+            return await self.route_with_reasoning(system=system, user=user, max_tokens=max_tokens)
         text = await self.route(system=system, user=user, max_tokens=max_tokens)
         return Completion(text=text, model=self.model)
 

@@ -134,6 +134,17 @@ async def init_db() -> None:
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        if engine.url.get_backend_name() == "sqlite":
+            # The legacy clinical tables are externally managed in production,
+            # so they must never be emitted against MySQL/Postgres.  SQLite is
+            # the dependency-free local-development database, though, and an
+            # empty file is otherwise unusable: registration/bootstrap inserts
+            # a user_profile row immediately.  Creating the portable mappings
+            # here keeps the documented fresh-clone workflow working while the
+            # backend-name guard preserves the production ownership boundary.
+            from .models_business import BizBase
+
+            await conn.run_sync(BizBase.metadata.create_all)
     logger.info("database ready at %s", engine.url.render_as_string(hide_password=True))
 
 

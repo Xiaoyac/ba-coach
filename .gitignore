@@ -12,6 +12,9 @@ venv/
 .pytest_cache/
 .test-tmp/
 .test-tmp*/
+_pytest_*/
+backend/.pytest_tmp/
+backend/evals/
 .mypy_cache/
 .ruff_cache/
 .coverage
@@ -31,6 +34,7 @@ pnpm-debug.log*
 
 # Runtime output and machine-local tools
 *.log
+*.bak
 runtime-logs/
 .tools/
 .rag-local/

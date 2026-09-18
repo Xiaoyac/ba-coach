@@ -720,6 +720,41 @@ async def test_module_checklist_is_specific_to_its_module(context, provider) -> 
     assert "ABC 功能分析" not in system  # module_4's checklist, not module_2's
 
 
+async def test_module_two_can_discuss_a_new_goal_before_one_is_bound(
+    context, provider, monkeypatch
+) -> None:
+    """An unbound M2 chat is the Agent-led goal-clarification surface."""
+    from app import v2_workflow
+
+    class DummySession:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *_args):
+            return None
+
+    class DummyMaker:
+        def __call__(self):
+            return DummySession()
+
+    async def unbound_runtime(_db, _session_id):
+        return object(), {"active_goal_id": None, "flow_status": "active"}
+
+    monkeypatch.setattr(v2_workflow, "runtime_for", unbound_runtime)
+    context = dataclasses.replace(
+        context,
+        sessionmaker=DummyMaker(),
+        settings=context.settings.model_copy(update={"database_schema_version": "v2"}),
+    )
+    final = await run(
+        {"session_id": "new-goal-chat", "user_input": "我想找一个适合的新目标",
+         "forced_module": "module_2", "metadata": {}},
+        context,
+    )
+    assert final["final_response"] == "saw 1 messages"
+    assert "请先" not in final["final_response"]
+
+
 async def test_module_knowledge_rules_match_the_curated_source_map(
     context, provider
 ) -> None:

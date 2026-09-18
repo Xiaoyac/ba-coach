@@ -44,3 +44,6 @@ openpyxl>=3.1.5
 
 # Optional: swap the in-memory session store for Redis in production
 redis>=5.2.0
+
+# Standards-based, encrypted opt-in browser notifications (separate worker).
+pywebpush>=2.0.0,<3

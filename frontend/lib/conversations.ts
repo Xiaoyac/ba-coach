@@ -16,6 +16,37 @@ export interface ConversationDetail extends ConversationSummary {
   next_module: string | null;
 }
 
+export interface ReferenceChunk {
+  id: string;
+  source: string;
+  text: string;
+  score: number | null;
+  score_type?: string | null;
+}
+
+export interface KnowledgeReferences {
+  available: boolean;
+  module: string | null;
+  retrieval_outcome: string | null;
+  gate_reason: string | null;
+  mediator_status: string | null;
+  mediator_reason: string | null;
+  mediator_reasoning_content: string | null;
+  mediator_model: string | null;
+  mediator_duration_ms: number | null;
+  context_withheld: boolean;
+  validator_status: string | null;
+  recalled: ReferenceChunk[];
+  provided: ReferenceChunk[];
+}
+
+export async function fetchKnowledgeReferences(messageId: number, signal?: AbortSignal): Promise<KnowledgeReferences> {
+  const response = await fetch(`${API_BASE}/api/conversations/messages/${messageId}/knowledge`, {
+    headers: apiHeaders(), signal, cache: "no-store",
+  });
+  return parse(response, "Loading knowledge references");
+}
+
 /**
  * Carries the HTTP status alongside the message so callers can react to a
  * specific failure — chiefly 404, which for these endpoints always means "this

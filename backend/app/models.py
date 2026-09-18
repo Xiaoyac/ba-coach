@@ -78,7 +78,8 @@ class AssessmentEntry(Base):
         String(16), nullable=False, default=STATUS_COMPLETED
     )
 
-    # ---- Daily summary, 0–10. Null on a skipped entry. -------------------
+    # Version 1 retains historical 0–10 scores; version 2 writes 0–5.
+    scale_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     completion_rate: Mapped[int | None] = mapped_column(Integer)
     activity_level: Mapped[int | None] = mapped_column(Integer)
     social_connection: Mapped[int | None] = mapped_column(Integer)
@@ -154,10 +155,10 @@ class ActivityLog(Base):
 
     # ---- Per-activity ratings, 0–5. -------------------------------------
     emotion: Mapped[int] = mapped_column(Integer, nullable=False)
-    achievement: Mapped[int] = mapped_column(Integer, nullable=False)
-    connection: Mapped[int] = mapped_column(Integer, nullable=False)
-    enjoyment: Mapped[int] = mapped_column(Integer, nullable=False)
-    importance: Mapped[int] = mapped_column(Integer, nullable=False)
+    achievement: Mapped[int | None] = mapped_column(Integer)
+    connection: Mapped[int | None] = mapped_column(Integer)
+    enjoyment: Mapped[int | None] = mapped_column(Integer)
+    importance: Mapped[int | None] = mapped_column(Integer)
 
     note: Mapped[str | None] = mapped_column(Text)
 

@@ -23,11 +23,27 @@ FastAPI
 
 ## 日常更新：只需要这一条命令
 
-在 `D:\心理学项目` 打开 PowerShell：
+在当前电脑打开 PowerShell，进入项目目录：
+
+```powershell
+cd C:\Users\admin\Documents\Codex\2026-09-06\new-chat\ba-coach
+```
+
+然后执行：
 
 ```powershell
 .\infra\deploy\deploy.ps1
 ```
+
+如果只发布代码、明确不运行任何数据库任务（不执行结构迁移，也不导入知识库），使用：
+
+```powershell
+.\infra\deploy\deploy.ps1 -SkipDatabaseTasks
+```
+
+`-SkipDatabaseTasks` 发布包不会包含 `KnowledgeBase/`，仍然会排除 `.test-tmp`、
+SQLite `.db`、`.env`、虚拟环境、缓存和构建产物。本机测试账号、对话、目标与记忆
+不会上传。只有确认本次版本确实不需要新增生产字段时才能使用这个开关。
 
 脚本会依次：
 
@@ -42,6 +58,12 @@ FastAPI
 第一次部署已把生产密钥放在服务器 `/etc/bacoach/backend.env`。日常发布不会
 重新上传 `.env`，也不会覆盖数据库或用户对话。
 
+PA活动后提醒启用后，生产配置另存于`/etc/bacoach/pa-push.env`，私钥位于
+`/opt/bacoach/secrets/pa-vapid-private.pem`，都不随发布包替换。后端drop-in与
+`bacoach-pa-push.service`共用这份配置。发布脚本会重启此前正在运行的提醒worker，
+失败回退时也恢复其代码版本；不会自动启用未配置或已停止的worker。
+首次安装、送达限制和停用方法见[PA_WEB_PUSH_20260917.md](PA_WEB_PUSH_20260917.md)。
+
 `KnowledgeBase/` 是部署包允许上传的非秘密配置。每次发布会运行
 `scripts/import_project_knowledge.py`，按内容哈希幂等更新
 `knowledge_sources` / `knowledge_chunks`；未变化的文献不会重复插入。该过程只写
@@ -53,7 +75,7 @@ FastAPI
 ## 查看状态与日志
 
 ```powershell
-ssh -i C:\Users\20640\.ssh\bacoach_deploy_ed25519 root@8.134.178.40
+ssh -i $HOME\.ssh\bacoach_deploy_20260907_ed25519 root@8.134.178.40
 ```
 
 进入服务器后：
@@ -84,6 +106,11 @@ readlink -f /opt/bacoach/current
 ln -sfn /opt/bacoach/releases/<上一个版本号> /opt/bacoach/current
 systemctl restart bacoach-backend bacoach-frontend
 ```
+
+若已启用PA提醒，手动回滚前先`systemctl stop bacoach-pa-push`，切换完成后，
+只有目标版本含`backend/scripts/pa_push_worker.py`且配置仍有效时才重新启动。
+回滚到没有推送功能的版本应`systemctl disable bacoach-pa-push`，保留密钥和表。
+前端补丁版本可能通过软链接引用其他版本的backend，清理旧版本前务必核对引用。
 
 部署脚本在新版本健康检查失败时也会自动执行同样的回滚。数据库 schema 变化
 不在代码回滚范围内，因此增加 Alembic 后，涉及数据库迁移的版本必须另外准备

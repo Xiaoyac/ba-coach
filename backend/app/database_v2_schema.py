@@ -10,7 +10,7 @@ from sqlalchemy import (Boolean, CheckConstraint, Column, ForeignKey, Index,
                         Integer, JSON, MetaData, SmallInteger, String, Table,
                         Text, UniqueConstraint, func)
 from sqlalchemy.dialects.mysql import DATETIME
-from sqlalchemy import DateTime
+from sqlalchemy import Date, DateTime
 
 metadata = MetaData()
 timestamp = DateTime().with_variant(DATETIME(fsp=6), "mysql")
@@ -47,7 +47,7 @@ def table(name, *columns):
 
 
 user_profile = table("user_profile", ident("uuid", primary=True),
-    col("nickname", String(64)), col("birth_year", SmallInteger),
+    col("nickname", String(64)), col("birth_year", SmallInteger), col("birth_date", Date),
     col("reported_age", SmallInteger), col("age_reported_at", timestamp),
     col("gender", String(32)), col("occupation_status", String(32)),
     col("living_status", String(32)),
@@ -205,6 +205,34 @@ ai_decision_logs = table("ai_decision_logs", col("id", Integer, primary=True),
     col("decision_value", JSON, required=True), col("reason_summary", String(1000)),
     col("evidence_message_ids", JSON), col("schema_version", SmallInteger, required=True, default="1"),
     col("created_at", timestamp, required=True, default=func.now()))
+
+# Additive goal-model tables: historic goals stay unclassified until evidence
+# exists. No parent-goal foreign key: secondary goals are independent.
+pa_goal_details = table("pa_goal_details", ident("goal_id", primary=True, ref="pa_goals.id"),
+    *status(["unclassified", "primary", "secondary"], name="goal_kind"),
+    col("long_term_direction", String(1000)), col("source_conversation_id", Integer),
+    col("source_message_id", Integer), col("evidence", JSON), *times(),
+    CheckConstraint("goal_kind != 'primary' OR long_term_direction IS NOT NULL"))
+
+pa_plan_details = table("pa_plan_details", ident("plan_id", primary=True, ref="module_two_record.id"),
+    *status(["unspecified", "recurring", "one_off"], name="schedule_kind"),
+    col("review_cadence", String(255)), col("difficulty", String(255)),
+    col("resources", JSON), *times())
+
+pa_activity_events = table("pa_activity_events", ident(primary=True), user_key(),
+    ident("goal_id", ref="pa_goals.id"), ident("cycle_id", ref="pa_cycles.id"),
+    col("source_conversation_id", Integer, required=True), col("source_message_id", Integer, required=True),
+    col("event_index", SmallInteger, required=True),
+    *status(["performed", "not_performed", "idea"], name="event_kind"),
+    *status(["active", "superseded"]), col("superseded_by_message_id", Integer),
+    col("activity_content", String(255), required=True), col("occurred_at_text", String(255)),
+    col("effect", String(1000)), col("source_quote", String(2000), required=True), *times(),
+    UniqueConstraint("source_message_id", "event_index"),
+    Index("ix_activity_user_goal", "user_id", "goal_id", "created_at"))
+
+pa_review_details = table("pa_review_details", ident("review_id", primary=True, ref="module_four_record.id"),
+    *status(["end", "pause", "replace_keep", "replace_pause", "continue", "adjust"], name="action"),
+    col("source_message_id", Integer, required=True), col("source_quote", String(2000), required=True), *times())
 
 # Migration reconciliation is explicit, never an implicit latest-row guess.
 v2_migration_issues = table("v2_migration_issues", col("id", Integer, primary=True),

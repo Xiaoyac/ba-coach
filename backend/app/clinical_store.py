@@ -326,7 +326,7 @@ async def load_profile_context(
         async with sessionmaker() as db:
             profile = await read(db, user_id)
             return ["用户档案（用户填写的限制和话题边界必须尊重，未知值不要推断）：" +
-                    json.dumps(profile.model_dump(exclude={"available_providers", "preferred_provider", "tag", "display_id"}), ensure_ascii=False)]
+                    json.dumps(profile.model_dump(exclude={"available_providers", "preferred_provider", "tag", "display_id", "birth_date"}), ensure_ascii=False)]
     lines: list[str] = []
     async with sessionmaker() as db:
         profile = (
@@ -358,8 +358,10 @@ async def load_profile_context(
         if content_taboos:
             lines.append(f"不愿谈的话题：{'、'.join(content_taboos)}（不要主动提起）")
 
-        if profile.age:
-            lines.append(f"年龄：{profile.age}")
+        from .birth_dates import age_on
+        current_age = age_on(profile.birth_date) if profile.birth_date else profile.age
+        if current_age:
+            lines.append(f"年龄：{current_age}")
         if profile.living_status:
             lines.append(f"居住状况：{profile.living_status}")
 

@@ -9,12 +9,15 @@ keeping retrieval deterministic and auditable.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import math
 import re
-from time import monotonic
+from time import monotonic, perf_counter
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from typing import Callable, Protocol
 
 from sqlalchemy import select
@@ -25,12 +28,18 @@ from .db import get_sessionmaker
 from .knowledge_store import (
     IGNORED_KNOWLEDGE_SOURCE_NAMES,
     KNOWLEDGE_CATEGORY_MODULES,
+    knowledge_revision,
 )
 from .models import KnowledgeChunkRecord, KnowledgeSourceRecord
+from .retrieval_cache import ExactRetrievalCache, SearchResult
 
 logger = logging.getLogger(__name__)
 
 _INDEX_TTL_SECONDS = 300.0
+
+
+class KnowledgeRevisionChanged(RuntimeError):
+    """The corpus changed repeatedly while building a snapshot."""
 
 
 @dataclass(frozen=True)
@@ -38,7 +47,8 @@ class KnowledgeChunk:
     id: str
     text: str
     source: str
-    score: float = 0.0
+    score: float | None = None
+    score_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -298,7 +308,7 @@ class StubKnowledgeBase:
             overlap = query_tokens & _tokenize(text)
             score = len(overlap) / len(query_tokens) if query_tokens else 0.0
             scored.append(
-                KnowledgeChunk(id=doc_id, text=text, source=module, score=round(score, 4))
+                KnowledgeChunk(id=doc_id, text=text, source=module, score=round(score, 4), score_type="token_overlap")
             )
 
         scored.sort(key=lambda chunk: (-chunk.score, chunk.id))
@@ -362,6 +372,7 @@ def rank_candidates(
                 source=(f"{document.source_name} · {document.heading}"
                         if document.heading else document.source_name),
                 score=round(score, 4),
+                score_type="lexical",
             ),
             category=document.category, source_id=document.source_id, coverage=support,
         ))
@@ -406,8 +417,11 @@ class DatabaseKnowledgeBase:
     """
 
     def __init__(self, sessionmaker_provider: Callable = get_sessionmaker,
-                 *, policy: RetrievalPolicy | None = None):
+                 *, policy: RetrievalPolicy | None = None, ranking_mode: str | None = None):
         self._sessionmaker_provider = sessionmaker_provider
+        self.ranking_mode = ranking_mode or get_settings().knowledge_retrieval_mode
+        if self.ranking_mode not in {"p0", "enhanced"}:
+            raise ValueError("Unknown knowledge retrieval mode")
         if policy is None:
             settings = get_settings()
             policy = RetrievalPolicy(
@@ -419,84 +433,214 @@ class DatabaseKnowledgeBase:
         self.policy = policy
         self._index: tuple[_IndexedKnowledgeChunk, ...] | None = None
         self._index_loaded_at = 0.0
+        self._index_revision: str | None = None
+        self._index_fingerprint: str | None = None
+        self._index_epoch = 0
         self._index_lock = asyncio.Lock()
+        settings = get_settings()
+        self._result_cache_enabled = getattr(settings, "knowledge_result_cache_enabled", True)
+        self._cache_started_at = datetime.now(timezone.utc).isoformat()
+        self._cache_diagnostics = Counter()
+        self._result_cache = ExactRetrievalCache(
+            ttl_seconds=getattr(settings, "knowledge_result_cache_ttl_seconds", 900),
+            empty_ttl_seconds=getattr(settings, "knowledge_result_cache_empty_ttl_seconds", 45),
+            max_entries=getattr(settings, "knowledge_result_cache_max_entries", 256),
+            max_bytes=getattr(settings, "knowledge_result_cache_max_bytes", 8388608),
+        )
+        self._enhanced_ranker = None
+        self._enhanced_index = None
+        self.enhanced_policy = None
+        if self.ranking_mode == "enhanced":
+            from .retrieval_enhanced import EnhancedPolicy
+            settings = get_settings()
+            self.enhanced_policy = EnhancedPolicy(
+                min_score=settings.knowledge_enhanced_min_score,
+                min_coverage=settings.knowledge_enhanced_min_coverage,
+                relative_score=settings.knowledge_enhanced_relative_score,
+                max_per_source=settings.knowledge_max_per_source,
+            )
 
-    def invalidate(self) -> None:
+    def invalidate(self, reason="manual") -> None:
         """Make the next search observe newly imported administrator content."""
         self._index = None
         self._index_loaded_at = 0.0
+        self._index_revision = None
+        self._index_fingerprint = None
+        self._index_epoch += 1
+        self._enhanced_ranker = None
+        self._enhanced_index = None
+        self._result_cache.clear(reason)
 
     async def warmup(self) -> int:
         """Build the in-process lexical index before the first user turn."""
         index = await self._load_index(force=True)
         return len(index)
 
+    async def _read_revision(self) -> str:
+        # A fresh transaction avoids a previous MySQL repeatable-read snapshot.
+        async with self._sessionmaker_provider()() as db:
+            return await knowledge_revision(db)
+
     async def _load_index(
         self, *, force: bool = False
     ) -> tuple[_IndexedKnowledgeChunk, ...]:
-        now = monotonic()
-        if (
-            not force
-            and self._index is not None
-            and now - self._index_loaded_at < _INDEX_TTL_SECONDS
-        ):
-            return self._index
+        # Check the small source manifest on EVERY retrieval, including cache
+        # hits. Thus all workers see committed admin updates without Redis.
         async with self._index_lock:
-            now = monotonic()
-            if (
-                not force
-                and self._index is not None
-                and now - self._index_loaded_at < _INDEX_TTL_SECONDS
-            ):
-                return self._index
-            async with self._sessionmaker_provider()() as db:
-                rows = (
-                    await db.execute(
-                        select(KnowledgeChunkRecord, KnowledgeSourceRecord)
-                        .join(
-                            KnowledgeSourceRecord,
-                            KnowledgeSourceRecord.id == KnowledgeChunkRecord.source_id,
+            for _attempt in range(2):
+                revision = await self._read_revision()
+                if (not force and self._index is not None
+                        and revision == self._index_revision
+                        and monotonic() - self._index_loaded_at < _INDEX_TTL_SECONDS):
+                    return self._index
+                if self._index is not None and revision != self._index_revision:
+                    self.invalidate("corpus_changed")
+                epoch = self._index_epoch
+                async with self._sessionmaker_provider()() as db:
+                    rows = (await db.execute(
+                        select(KnowledgeChunkRecord, KnowledgeSourceRecord).join(
+                            KnowledgeSourceRecord, KnowledgeSourceRecord.id == KnowledgeChunkRecord.source_id
                         )
-                        .where(
-                            KnowledgeSourceRecord.name.notin_(
-                                IGNORED_KNOWLEDGE_SOURCE_NAMES
-                            )
-                        )
-                    )
-                ).all()
-            self._index = tuple(
-                index_chunk(
-                    id=row.id,
-                    source_id=source.id,
-                    source_name=source.name,
-                    category=source.category,
-                    heading=row.heading,
-                    content=row.content,
+                        .where(KnowledgeSourceRecord.name.notin_(IGNORED_KNOWLEDGE_SOURCE_NAMES))
+                        .order_by(KnowledgeChunkRecord.id)
+                    )).all()
+                confirmed = await self._read_revision()
+                if revision != confirmed or epoch != self._index_epoch:
+                    if epoch == self._index_epoch:
+                        self.invalidate("corpus_changed")
+                    continue  # Never publish an index built across an import.
+                # Periodically audit the actual rows as well as the manifest:
+                # catches direct DMS edits without discarding identical content.
+                fingerprint = hashlib.sha256(json.dumps([
+                    [row.id, source.id, source.name, source.category, row.heading, row.content]
+                    for row, source in rows
+                ], ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+                if (self._index is not None and revision == self._index_revision
+                        and fingerprint == self._index_fingerprint):
+                    self._index_loaded_at = monotonic()
+                    self._cache_diagnostics["unchanged_index_refreshes"] += 1
+                    return self._index
+                if self._index is not None:
+                    self.invalidate("content_changed")
+                self._index = tuple(
+                    index_chunk(id=row.id, source_id=source.id, source_name=source.name,
+                                category=source.category, heading=row.heading, content=row.content)
+                    for row, source in rows
                 )
-                for row, source in rows
-            )
-            self._index_loaded_at = monotonic()
-            logger.info("knowledge index loaded: %d chunks", len(self._index))
-            return self._index
+                self._index_revision = revision
+                self._index_fingerprint = fingerprint
+                self._index_loaded_at = monotonic()
+                logger.info("knowledge index loaded: %d chunks", len(self._index))
+                return self._index
+            raise KnowledgeRevisionChanged("Knowledge changed during index load")
 
     async def search(
         self, *, module: str, query: str, top_k: int = 3
     ) -> list[KnowledgeChunk]:
-        allowed = [
-            category
-            for category, modules in KNOWLEDGE_CATEGORY_MODULES.items()
-            if module in modules
-        ]
-        if not allowed or not query.strip() or top_k <= 0:
-            return []
-        try:
-            index = await self._load_index()
-        except SQLAlchemyError:
-            logger.exception("knowledge retrieval failed for %s", module)
-            return []
+        # Compatibility for scripts/custom callers. No identity means no
+        # result-cache reuse; never infer a global sharing scope.
+        hits, _metrics = await self.search_with_diagnostics(module=module, query=query, top_k=top_k)
+        return hits
 
+    def _cache_namespace(self) -> dict:
+        return {"version": "exact-retrieval-v2-score-metadata", "ranking_mode": self.ranking_mode,
+                "policy": asdict(self.policy),
+                "enhanced_policy": asdict(self.enhanced_policy) if self.enhanced_policy else None,
+                "module_categories": KNOWLEDGE_CATEGORY_MODULES}
+
+    def cache_monitoring_stats(self) -> dict:
+        stats = self._result_cache.stats()
+        requests = sum(stats.get(key, 0) for key in ("hits", "misses", "coalesced"))
+        hits = stats.get("served_hits", 0)
+        return {"enabled": self._result_cache_enabled, "scope": "process",
+                "started_at": self._cache_started_at, "requests": requests, "hits": hits,
+                "hit_rate": hits / requests if requests else None,
+                "coalesced": stats.get("coalesced", 0), "entries": stats["entries"],
+                "ttl_seconds": self._result_cache.ttl_seconds,
+                "empty_ttl_seconds": self._result_cache.empty_ttl_seconds,
+                "misses": stats.get("misses", 0), "miss_reasons": stats["miss_reasons"],
+                "invalidations": stats.get("invalidations", 0),
+                "invalidation_reasons": stats["invalidation_reasons"],
+                "expired_entries": stats.get("expired", 0), "evicted_entries": stats.get("evictions", 0),
+                "uncacheable": stats.get("uncacheable", 0),
+                "saved_model_calls": stats.get("saved_model_calls", 0),
+                "coalesced_saved_model_calls": stats.get("coalesced_saved_model_calls", 0),
+                "diagnostics": dict(self._cache_diagnostics)}
+
+    async def search_with_diagnostics(self, *, module: str, query: str, top_k: int = 3,
+                                      cache_scope: tuple[str, ...] | None = None) -> tuple[list[KnowledgeChunk], dict]:
+        started = perf_counter()
+        metrics = {"cache": "bypass_invalid", "status": "empty_input", "model_calls": 0,
+                   "saved_model_calls": 0, "returned": 0}
+        try:
+            if (not any(module in modules for modules in KNOWLEDGE_CATEGORY_MODULES.values())
+                    or not query.strip() or top_k <= 0):
+                return [], metrics
+            metrics.update(cache="bypass_no_scope", status="error")
+            index = await self._load_index()
+            revision, epoch = self._index_revision, self._index_epoch
+
+            async def compute():
+                return await self._search_index(index, module=module, query=query, top_k=top_k)
+
+            if self._result_cache_enabled and cache_scope and all(cache_scope):
+                identity = self._result_cache.key({"scope": cache_scope,
+                    "module": module, "query": query, "top_k": top_k})
+                key = self._result_cache.key({"corpus": revision, "epoch": epoch,
+                    "index": id(index), "config": self._cache_namespace(),
+                    "scope": cache_scope, "module": module, "query": query, "top_k": top_k})
+                result, access = await self._result_cache.get_or_compute(
+                    key, compute, identity=identity, diagnostics=metrics)
+            else:
+                result = await compute()
+                access = "bypass_no_scope" if self._result_cache_enabled else "bypass_disabled"
+            reused = access in {"hit", "coalesced"}
+            metrics.update(cache=access, status=result.status,
+                           model_calls=0 if reused else result.model_calls,
+                           saved_model_calls=result.model_calls if reused else 0)
+            # Includes long-running catalog calls and hits from another worker's
+            # old cache. If an import committed during retrieval, withhold this
+            # snapshot; the next request will use the new corpus.
+            current = await self._load_index()
+            if (current is not index or self._index_epoch != epoch
+                    or self._index_revision != revision):
+                metrics.update(status="withheld_corpus_changed", saved_model_calls=0)
+                return [], metrics
+            metrics["returned"] = len(result.hits)
+            if access == "hit" and result.cacheable:
+                self._result_cache.record_served_hit(result.model_calls)
+            elif access == "coalesced" and result.cacheable:
+                self._result_cache.record_served_coalesced(result.model_calls)
+            return list(result.hits), metrics
+        except (SQLAlchemyError, KnowledgeRevisionChanged) as exc:
+            # A failed version check must not fall back to stale cached data.
+            self.invalidate("revision_error")
+            metrics.update(status="withheld_revision_error", error_type=type(exc).__name__, saved_model_calls=0)
+            return [], metrics
+        except asyncio.CancelledError:
+            metrics["status"] = "cancelled"
+            raise
+        finally:
+            if metrics["cache"].startswith("bypass_"):
+                self._cache_diagnostics[metrics["cache"]] += 1
+            if metrics["status"].startswith("withheld_"):
+                self._cache_diagnostics[metrics["status"]] += 1
+            metrics["duration_ms"] = round((perf_counter() - started) * 1000, 3)
+            metrics["cache_stats"] = self._result_cache.stats()
+            logger.info("retrieval_cache %s", json.dumps({"module": module, "method": self.ranking_mode, **metrics}))
+
+    async def _search_index(self, index, *, module: str, query: str, top_k: int) -> SearchResult:
+        if self.ranking_mode == "enhanced":
+            # Uses current database IDs/content, never offline evaluation IDs.
+            # Rebuild after imports or TTL refresh; do not serve a stale snapshot.
+            from .retrieval_enhanced import EnhancedKnowledgeRanker
+            if self._enhanced_ranker is None or self._enhanced_index is not index:
+                self._enhanced_ranker = EnhancedKnowledgeRanker(index, policy=self.enhanced_policy)
+                self._enhanced_index = index
+                logger.info("knowledge ranker selected: enhanced (%d chunks)", len(index))
+            return SearchResult(tuple(self._enhanced_ranker.search(module=module, query=query, top_k=top_k)))
         ranked = rank_candidates(index, module=module, query=query)
-        return select_candidates(ranked, top_k=top_k, policy=self.policy)
+        return SearchResult(tuple(select_candidates(ranked, top_k=top_k, policy=self.policy)))
 
 
 _knowledge_base: KnowledgeBase | None = None
@@ -505,7 +649,17 @@ _knowledge_base: KnowledgeBase | None = None
 def get_knowledge_base() -> KnowledgeBase:
     global _knowledge_base
     if _knowledge_base is None:
-        _knowledge_base = DatabaseKnowledgeBase()
+        mode = get_settings().knowledge_retrieval_mode
+        if mode == "catalog":
+            # Keep this import and provider acquisition inside the explicit
+            # rollout branch: p0/enhanced must neither construct a provider
+            # nor require optional local semantic-retrieval dependencies.
+            from .catalog_knowledge_base import CatalogDatabaseKnowledgeBase
+            from .providers import get_provider
+
+            _knowledge_base = CatalogDatabaseKnowledgeBase(get_provider())
+        else:
+            _knowledge_base = DatabaseKnowledgeBase(ranking_mode=mode)
     return _knowledge_base
 
 

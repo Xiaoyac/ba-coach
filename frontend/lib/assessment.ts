@@ -14,20 +14,19 @@ export type Score = number;
 export interface ActivityLog {
   time_slot: string;
   activity: string;
-  emotion: Score;
-  achievement: Score;
-  connection: Score;
-  enjoyment: Score;
-  importance: Score;
+  emotion: Score | null;
+  achievement: Score | null;
+  connection: Score | null;
+  enjoyment: Score | null;
+  importance: Score | null;
   note: string | null;
 }
 
 export interface DailySummary {
-  completion_rate: Score;
-  activity_level: Score;
-  social_connection: Score;
-  approach_vs_avoidance: Score;
-  overall_mood: Score;
+  completion_rate: Score | null;
+  completion_not_applicable: boolean;
+  activity_level: Score | null;
+  overall_mood: Score | null;
   reflection_note: string | null;
 }
 
@@ -36,6 +35,8 @@ export interface StoredActivityLog extends ActivityLog {
 }
 
 export interface AssessmentRecord {
+  scale_version?: number;
+  completion_not_applicable?: boolean;
   id: number;
   local_date: string;
   timezone: string;

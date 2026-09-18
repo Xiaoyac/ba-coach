@@ -7,6 +7,7 @@ from .database_v2_schema import metadata as schema
 from .models import UserAccount, AccountHandle, AccountSettings
 from .providers import configured_providers
 from .schemas import ProfileOut
+from .birth_dates import age_on
 
 
 def enabled():
@@ -29,7 +30,8 @@ async def read(db, user_id):
     handle = await db.get(AccountHandle, account) if account else None
     settings = await db.get(AccountSettings, account) if account else None
     from .workflow_state import derived_current_module
-    return ProfileOut(nickname=profile["nickname"], age=profile["reported_age"],
+    return ProfileOut(nickname=profile["nickname"], birth_date=profile["birth_date"],
+        age=age_on(profile["birth_date"]) if profile["birth_date"] else profile["reported_age"],
         living_status=profile["living_status"], tag=handle.tag if handle else None,
         display_id=handle.full_username if handle else None,
         communication_preference=preference.get("communication_style"),
@@ -50,7 +52,8 @@ async def read(db, user_id):
 
 async def create(db, user_id, payload):
     await db.execute(insert(schema.tables["user_profile"]), {"uuid": user_id, "nickname": payload.nickname,
-        "reported_age": payload.age, "age_reported_at": datetime.now(timezone.utc).replace(tzinfo=None) if payload.age else None,
+        "birth_date": payload.birth_date, "birth_year": payload.birth_date.year,
+        "reported_age": payload.age, "age_reported_at": datetime.now(timezone.utc).replace(tzinfo=None),
         "living_status": payload.living_status})
     await db.execute(insert(schema.tables["user_preferences"]), {"user_id": user_id,
         "communication_style": payload.communication_preference})
@@ -82,7 +85,13 @@ async def patch(db, user_id, payload):
         raise HTTPException(422, "支持者标记由支持者列表决定")
     updates = {k: changes[k] for k in ("nickname", "living_status") if k in changes}
     if "age" in changes:
+        if current.birth_date or "birth_date" in changes:
+            raise HTTPException(422, "年龄由出生日期计算，请修改出生日期")
         updates.update(reported_age=changes["age"], age_reported_at=datetime.now(timezone.utc).replace(tzinfo=None))
+    if "birth_date" in changes:
+        birthday = payload.birth_date
+        updates.update(birth_date=birthday, birth_year=birthday.year, reported_age=age_on(birthday),
+            age_reported_at=datetime.now(timezone.utc).replace(tzinfo=None))
     if updates:
         updates["updated_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
         await db.execute(update(profile).where(profile.c.uuid == user_id).values(**updates))

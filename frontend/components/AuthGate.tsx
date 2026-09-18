@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import AuthScreen from "@/components/AuthScreen";
+import ThemeToggle from "@/components/ThemeToggle";
 import ConversationWorkspace from "@/components/ConversationWorkspace";
 import RequiredEmailModal from "@/components/RequiredEmailModal";
+import RequiredBirthDateModal from "@/components/RequiredBirthDateModal";
 import { clearToken, fetchMe, getToken, logout, type Account } from "@/lib/auth";
 
 interface AuthState {
@@ -32,6 +34,7 @@ export default function AuthGate() {
   const [expired, setExpired] = useState(false);
   useEffect(() => {
     const expire = () => {
+      void import('@/lib/push').then(m=>m.clearLocalPush()).catch(()=>{});
       clearToken();
       setExpired(true);
       setState({ account: null, checking: false });
@@ -98,8 +101,13 @@ export default function AuthGate() {
       <>
         {expired && <p role="alert" className="fixed top-3 left-4 right-4 z-50 rounded-xl bg-panel p-3 text-center text-sm text-alert-ink">登录已失效，请重新登录。已保存的记录不会丢失。</p>}
         <AuthScreen onAuthenticated={(account) => { setExpired(false); setState({ account, checking: false }); }} />
+        <ThemeToggle />
       </>
     );
+  }
+
+  if (state.account.birth_date_required) {
+    return <RequiredBirthDateModal onSaved={(account) => setState({ account, checking: false })} onLogout={handleLogout} />;
   }
 
   return (

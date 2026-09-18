@@ -54,14 +54,17 @@ def test_create_conversation_persists_opening_and_seeds_agent_history(
     detail = created.json()
     assert detail["title"] == "新对话"
     assert detail["next_module"] is None
+    assert isinstance(detail["messages"][0]["id"], int)
     assert detail["messages"] == [
         {
+            "id": detail["messages"][0]["id"],
             "role": "assistant",
             "content": OPENING_MESSAGE_TEXT,
             "reasoning_content": None,
             "model_name": None,
             "routing_reasoning_content": None,
             "router_model_name": None,
+            "timing": None,
         }
     ]
 
@@ -81,12 +84,14 @@ def test_create_conversation_persists_opening_and_seeds_agent_history(
     ).json()
     assert refreshed["next_module"] in {"module_1", "module_2", "module_3", "module_4"}
     assert refreshed["messages"][0] == {
+        "id": detail["messages"][0]["id"],
         "role": "assistant",
         "content": OPENING_MESSAGE_TEXT,
         "reasoning_content": None,
         "model_name": None,
         "routing_reasoning_content": None,
         "router_model_name": None,
+        "timing": None,
     }
     assert len(refreshed["messages"]) == 3
 
@@ -751,3 +756,35 @@ def test_a_deleted_conversation_does_not_resume_from_the_database(
         "/api/chat", json={"message": "再来一句", "session_id": session_id}, headers=headers
     ).json()
     assert body["session_id"] != session_id
+
+
+def test_delete_removes_linked_legacy_goal_and_history_only(client, headers, db_sessionmaker):
+    import asyncio
+    from sqlalchemy import select
+    from app.models import Conversation, PACycle, ClinicalRecordCycleLink
+    from app.models_business import ModuleTwoRecord, InteractionStatus
+    session_id = _start(client, "delete linked goal", headers)
+
+    async def seed():
+        async with db_sessionmaker() as db:
+            conv = (await db.execute(select(Conversation).where(Conversation.session_id == session_id))).scalar_one()
+            db.add(PACycle(id="delete-cycle",conversation_id=conv.id,subject_id=conv.subject_id,ordinal=999))
+            db.add_all([ModuleTwoRecord(id="delete-plan",user_id=conv.subject_id,target_activity_content="delete me"),
+                        ModuleTwoRecord(id="unlinked-plan",user_id=conv.subject_id,target_activity_content="keep me")])
+            await db.flush()
+            db.add(ClinicalRecordCycleLink(cycle_id="delete-cycle",module="module_2",record_id="delete-plan"))
+            interaction=(await db.execute(select(InteractionStatus).where(InteractionStatus.user_id==conv.subject_id))).scalar_one_or_none()
+            if interaction is None:
+                interaction=InteractionStatus(user_id=conv.subject_id)
+                db.add(interaction)
+            interaction.goal_history=[{"cycle_id":"delete-cycle","activity":"delete me"},{"cycle_id":"other-cycle","activity":"keep me"}]
+            await db.commit()
+    asyncio.get_event_loop().run_until_complete(seed())
+    assert client.delete(f"/api/conversations/{session_id}",headers=headers).status_code==204
+    async def check():
+        async with db_sessionmaker() as db:
+            assert await db.get(ModuleTwoRecord,"delete-plan") is None
+            assert await db.get(ModuleTwoRecord,"unlinked-plan") is not None
+            history=(await db.execute(select(InteractionStatus.goal_history))).scalar_one()
+            assert history==[{"cycle_id":"other-cycle","activity":"keep me"}]
+    asyncio.get_event_loop().run_until_complete(check())

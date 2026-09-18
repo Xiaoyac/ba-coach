@@ -112,16 +112,96 @@ async def start_cycle(db: AsyncSession, *, user_id: str, goal_id: str,
     return cycle_id
 
 
+async def continue_reviewed_cycle(db: AsyncSession, *, user_id: str, goal_id: str,
+                                  cycle_id: str, conversation_id: int | None = None):
+    """Continue the latest reviewed goal without re-planning or inventing evidence.
+
+    The caller confirms/closes the review in the same transaction. Locking the
+    goal serializes all cycle creation; the latest-ordinal check also prevents
+    replay after a successor has itself finished.
+    """
+    await owned_goal(db, user_id, goal_id, lock=True)
+    cycles = metadata.tables["pa_cycles"]
+    source = (await db.execute(select(cycles).where(
+        cycles.c.id == cycle_id, cycles.c.goal_id == goal_id))).mappings().one_or_none()
+    if not source:
+        raise V2NotFound("周期不存在")
+    latest = (await db.execute(select(func.max(cycles.c.ordinal)).where(
+        cycles.c.goal_id == goal_id))).scalar_one()
+    if source["status"] != "completed" or source["ordinal"] != latest:
+        raise V2Conflict("只能继续刚刚完成复盘的最新周期")
+    reviews = metadata.tables["module_four_record"]
+    review = (await db.execute(select(reviews.c.id).where(
+        reviews.c.cycle_id == cycle_id, reviews.c.record_status == "confirmed",
+        reviews.c.review_decision == 1))).scalar_one_or_none()
+    if not review:
+        raise V2Conflict("继续原计划需要已确认的继续决定")
+    plans, contracts = metadata.tables["module_two_record"], metadata.tables["module_three_record"]
+    plan = (await db.execute(select(plans.c.id).where(
+        plans.c.id == source["module_two_record_id"], plans.c.goal_id == goal_id,
+        plans.c.record_status == "confirmed"))).scalar_one_or_none()
+    contract = (await db.execute(select(contracts.c.id).where(
+        contracts.c.id == source["module_three_record_id"], contracts.c.goal_id == goal_id,
+        contracts.c.module_two_record_id == plan, contracts.c.record_status == "confirmed"
+    ))).scalar_one_or_none() if plan else None
+    if not plan or not contract:
+        raise V2Conflict("继续前需要同一目标下已确认的计划及对应记录约定")
+    progress = metadata.tables["pa_cycle_progress"]
+    prior = (await db.execute(select(progress).where(progress.c.cycle_id == cycle_id))).mappings().one_or_none()
+    successor = await start_cycle(db, user_id=user_id, goal_id=goal_id, conversation_id=conversation_id)
+    await db.execute(update(cycles).where(cycles.c.id == successor).values(
+        module_two_record_id=plan, module_three_record_id=contract,
+        status="waiting_execution", started_at=now(), updated_at=now()))
+    await db.execute(update(progress).where(progress.c.cycle_id == successor).values(
+        module_2_steps=list(prior["module_2_steps"] or []) if prior else [],
+        module_3_steps=list(prior["module_3_steps"] or []) if prior else [],
+        module_4_steps=[], module_4_scenario=None))
+    return successor
+
+
+PLAN_WRITABLE_FIELDS = {"pa_understanding_status", "pa_willingness_status", "core_values",
+    "core_values_impact", "activity_content", "schedule_text", "scheduled_start_at",
+    "timezone", "location", "duration_minutes", "frequency_rule", "companion",
+    "potential_barriers", "barrier_coping_plan"}
+
+
+async def resume_paused_goal(db, *, user_id, goal_id, conversation_id, retained=False):
+    """Explicit new-chat action resumes the last confirmed plan, never a draft."""
+    goal = await owned_goal(db, user_id, goal_id, lock=True)
+    if goal["status"] != ("active" if retained else "paused"):
+        raise V2Conflict("目标状态已更新，请重新选择")
+    cycles, plans, contracts = (metadata.tables[n] for n in ("pa_cycles", "module_two_record", "module_three_record"))
+    source = (await db.execute(select(cycles).where(cycles.c.goal_id == goal_id)
+        .order_by(cycles.c.ordinal.desc()).limit(1))).mappings().one_or_none()
+    if not source or source["status"] != "completed":
+        raise V2Conflict("暂停目标缺少已结束的复盘周期，请先核对历史")
+    valid = (await db.execute(select(plans.c.id).join(contracts,
+        (contracts.c.module_two_record_id == plans.c.id) & (contracts.c.goal_id == plans.c.goal_id)).where(
+        plans.c.id == source["module_two_record_id"], plans.c.goal_id == goal_id,
+        plans.c.record_status == "confirmed", contracts.c.id == source["module_three_record_id"],
+        contracts.c.record_status == "confirmed"))).scalar_one_or_none()
+    if not valid:
+        raise V2Conflict("恢复需要已确认的计划和记录约定")
+    await db.execute(update(metadata.tables["pa_goals"]).where(metadata.tables["pa_goals"].c.id == goal_id).values(
+        status="active", status_reason="user_explicitly_resumed", closed_at=None, row_version=goal["row_version"] + 1))
+    new_cycle = await start_cycle(db, user_id=user_id, goal_id=goal_id, conversation_id=conversation_id)
+    await db.execute(update(cycles).where(cycles.c.id == new_cycle).values(
+        module_two_record_id=source["module_two_record_id"], module_three_record_id=source["module_three_record_id"],
+        status="waiting_execution", started_at=now()))
+    progress = metadata.tables["pa_cycle_progress"]
+    old = (await db.execute(select(progress).where(progress.c.cycle_id == source["id"]))).mappings().one_or_none()
+    if old:
+        await db.execute(update(progress).where(progress.c.cycle_id == new_cycle).values(
+            module_2_steps=old["module_2_steps"], module_3_steps=old["module_3_steps"]))
+    return new_cycle
+
+
 async def append_plan_draft(db: AsyncSession, *, user_id: str, goal_id: str, fields: dict):
     goal = await owned_goal(db, user_id, goal_id, lock=True)
     if goal["status"] not in {"draft", "active"}:
         raise V2Conflict("目标已暂停或结束，不能自动创建计划版本")
     plans = metadata.tables["module_two_record"]
-    writable = {"pa_understanding_status", "pa_willingness_status", "core_values",
-        "core_values_impact", "activity_content", "schedule_text", "scheduled_start_at",
-        "timezone", "location", "duration_minutes", "frequency_rule", "companion",
-        "potential_barriers", "barrier_coping_plan"}
-    if fields.keys() - writable:
+    if fields.keys() - PLAN_WRITABLE_FIELDS:
         raise V2Conflict("不允许通过计划内容修改归属、确认状态或版本")
     version = int((await db.execute(select(func.max(plans.c.version_no)).where(
         plans.c.goal_id == goal_id))).scalar_one() or 0) + 1

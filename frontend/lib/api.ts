@@ -21,6 +21,7 @@ export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 export type Role = "user" | "assistant";
 
 export interface ChatMessage {
+  id?: number | null;
   role: Role;
   content: string;
   /** Provider-supplied thinking, disclosed separately from the final answer. */
@@ -28,10 +29,16 @@ export interface ChatMessage {
   model_name?: string | null;
   routing_reasoning_content?: string | null;
   router_model_name?: string | null;
+  timing?: {
+    reply_thinking_ms: number | null;
+    reply_generation_ms: number | null;
+    router_processing_ms: number | null;
+  } | null;
 }
 
 export interface ChatRequest {
   message: string;
+  generation_id?: string;
   session_id?: string | null;
   provider?: "claude" | "deepseek" | "doubao";
   /** Pin a module and skip the router, e.g. "module_3". */
@@ -88,6 +95,7 @@ export interface RoutingMeta {
 }
 
 export interface StreamHandlers {
+  onCancelled?: () => void;
   /**
    * Fired one or more times before the deltas start. The stream emits meta in
    * two parts: the route sends `session_id`/`provider` immediately, then the
@@ -129,10 +137,12 @@ export async function streamChat(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let replyReceived = false;
+  let generationError: string | null = null;
 
   try { while (true) {
     const { done, value } = await reader.read();
-    if (done) throw new Error("连接已中断，正在同步已保存的回复；请勿重复发送。");
+    if (done) throw new Error(generationError ?? "连接已中断，正在同步已保存的回复；请勿重复发送。");
     buffer += decoder.decode(value, { stream: true });
     buffer = buffer.replace(/\r\n/g, "\n");
 
@@ -155,6 +165,7 @@ export async function streamChat(
           handlers.onMeta?.(payload as Partial<RoutingMeta>);
           break;
         case "delta":
+          if (typeof payload.text === "string" && payload.text.trim()) replyReceived = true;
           handlers.onDelta?.(payload.text);
           break;
         case "reasoning_delta":
@@ -164,13 +175,48 @@ export async function streamChat(
           handlers.onRoutingReasoning?.(payload.text, payload.model ?? "");
           break;
         case "error":
-          handlers.onError?.(payload.detail);
+          generationError = typeof payload.detail === "string" && payload.detail.trim()
+            ? payload.detail as string : "模型生成失败，请稍后重试或切换模型。";
+          handlers.onError?.(generationError);
           break;
         case "persisted":
           handlers.onDone?.();
-          if (payload.saved === false) handlers.onError?.("回复已生成，但保存失败，请先复制回复后再刷新。");
+          if (payload.saved === false) {
+            if (replyReceived) {
+              const saveError = "回复已生成，但保存失败，请先复制回复后再刷新。";
+              handlers.onError?.(generationError ? `${generationError}\n${saveError}` : saveError);
+            } else if (!generationError) {
+              handlers.onError?.("模型未返回回复正文，请稍后重试或切换模型。");
+            }
+          }
+          return;
+        case "cancelled":
+          handlers.onCancelled?.();
+          handlers.onDone?.();
           return;
       }
     }
-  } } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+  } } catch (error) {
+    // A later EOF/network error must not hide the upstream failure already shown.
+    if (generationError && !signal?.aborted) throw new Error(generationError);
+    throw error;
+  } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+}
+
+export async function cancelGeneration(generationId: string): Promise<{ status: "cancelled" | "stopping" | "finalizing" | "finished" }> {
+  const res = await fetch(`${API_BASE}/api/chat/cancel`, {
+    method: "POST", headers: apiHeaders({ json: true }),
+    body: JSON.stringify({ generation_id: generationId }), signal: AbortSignal.timeout(12000),
+  });
+  checkAuthentication(res);
+  if (!res.ok) throw new Error("停止请求未确认，请重试。当前回复可能仍在生成。");
+  return res.json();
+}
+
+/** Timing can arrive after identical streamed text; don't drop that enrichment. */
+export function sameMessageTiming(a: ChatMessage, b: ChatMessage): boolean {
+  return (a.id ?? null) === (b.id ?? null)
+    && (a.timing?.reply_thinking_ms ?? null) === (b.timing?.reply_thinking_ms ?? null)
+    && (a.timing?.reply_generation_ms ?? null) === (b.timing?.reply_generation_ms ?? null)
+    && (a.timing?.router_processing_ms ?? null) === (b.timing?.router_processing_ms ?? null);
 }

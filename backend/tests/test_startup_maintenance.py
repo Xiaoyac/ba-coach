@@ -26,3 +26,20 @@ async def test_startup_maintenance_switch(monkeypatch, enabled):
         assert session.call_count == int(enabled)
         warm.assert_awaited_once()
     dispose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_init_db_makes_fresh_local_sqlite_usable():
+    """Default local startup must create the profile table auth writes first."""
+    from sqlalchemy import inspect
+
+    from app import db as db_module
+
+    await db_module.init_db()
+    async with db_module.get_engine().connect() as connection:
+        table_names = await connection.run_sync(
+            lambda sync_connection: inspect(sync_connection).get_table_names()
+        )
+
+    assert "user_accounts" in table_names
+    assert "user_profile" in table_names

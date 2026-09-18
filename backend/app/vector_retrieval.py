@@ -219,7 +219,7 @@ class LocalVectorKnowledgeBase:
                 continue
             counts[document.source_id] += 1
             hits.append(KnowledgeChunk(identifier, document.content,
-                f"{document.source_name} · {document.heading}", score))
+                f"{document.source_name} · {document.heading}", score, score_type="rrf"))
             if len(hits) >= top_k:
                 break
         return hits

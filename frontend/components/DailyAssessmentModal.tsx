@@ -28,14 +28,13 @@ import {
 type ActivityField = Exclude<keyof ActivityLog, "time_slot" | "activity" | "note">;
 
 const ACTIVITY_SCALES: { key: ActivityField; label: string; hint: string }[] = [
-  { key: "emotion", label: "情绪", hint: "当时的心情" },
   { key: "achievement", label: "成就", hint: "做成了什么" },
   { key: "connection", label: "联结", hint: "与人的靠近" },
   { key: "enjoyment", label: "愉悦", hint: "享受的程度" },
   { key: "importance", label: "重要", hint: "对你的意义" },
 ];
 
-type SummaryField = Exclude<keyof DailySummary, "reflection_note">;
+type SummaryField = "completion_rate" | "activity_level" | "overall_mood";
 
 const SUMMARY_SCALES: {
   key: SummaryField;
@@ -43,37 +42,33 @@ const SUMMARY_SCALES: {
   low: string;
   high: string;
 }[] = [
-  { key: "completion_rate", label: "完成度", low: "几乎没做", high: "都完成了" },
-  { key: "activity_level", label: "活动量", low: "整天静止", high: "非常活跃" },
-  { key: "social_connection", label: "social 联结", low: "完全独处", high: "紧密相连" },
-  {
-    key: "approach_vs_avoidance",
-    label: "面对 / 回避",
-    low: "完全回避",
-    high: "主动面对",
-  },
-  { key: "overall_mood", label: "整体心情", low: "很低落", high: "很平静愉快" },
+  { key: "completion_rate", label: "想做的事情完成程度", low: "几乎没完成", high: "都完成了" },
+  { key: "activity_level", label: "今天总体身体活动程度", low: "几乎没有活动", high: "活动很多" },
+  { key: "overall_mood", label: "回顾今天，你今天整体心情如何？", low: "很低落", high: "很愉快" },
 ];
 
 const emptyActivity = (): ActivityLog => ({
   time_slot: "",
   activity: "",
-  emotion: 3,
-  achievement: 3,
-  connection: 3,
-  enjoyment: 3,
-  importance: 3,
+  emotion: null,
+  achievement: null,
+  connection: null,
+  enjoyment: null,
+  importance: null,
   note: "",
 });
 
 const defaultSummary = (): DailySummary => ({
-  completion_rate: 5,
-  activity_level: 5,
-  social_connection: 5,
-  approach_vs_avoidance: 5,
-  overall_mood: 5,
+  completion_rate: null,
+  completion_not_applicable: false,
+  activity_level: null,
+  overall_mood: null,
   reflection_note: "",
 });
+
+// One visual grammar for required fields, even when their input types differ.
+const FIELD_LABEL = "flex items-center gap-2 text-sm font-medium leading-5 text-ink";
+const FIELD_CONTROL = "rounded-xl border bg-sheet text-sm text-ink transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
 
 export default function DailyAssessmentModal({
   onClose,
@@ -88,7 +83,6 @@ export default function DailyAssessmentModal({
 }) {
   const [view, setView] = useState<"record" | "history">(initialView);
   useEffect(() => { if (initialView === "history") void loadHistory(0, false); }, [initialView]);
-  const [step, setStep] = useState<1 | 2>(1);
   const [activities, setActivities] = useState<ActivityLog[]>([emptyActivity()]);
   const [summary, setSummary] = useState<DailySummary>(defaultSummary);
   const [busy, setBusy] = useState(false);
@@ -101,17 +95,21 @@ export default function DailyAssessmentModal({
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const [historyNextOffset, setHistoryNextOffset] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const submittingRef = useRef(false);
   const titleId = useId();
 
-  // A new step is a new page of content; leaving it scrolled halfway down
-  // hides the heading that explains what changed.
+  // Native modal semantics keep focus in the form and restore it on close.
+  useEffect(() => { dialogRef.current?.showModal(); }, []);
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-  }, [step, view]);
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [view]);
 
-  const filled = activities.filter((a) => a.activity.trim().length > 0);
-  const missingTimeSlot = filled.some((a) => a.time_slot.trim().length === 0);
-  const canAdvance = filled.length > 0 && !missingTimeSlot;
+  const filled = activities.filter((a) => a.activity.trim() || a.time_slot || a.emotion !== null || a.note?.trim() || ACTIVITY_SCALES.some(s => a[s.key] !== null));
+  const missingTimeSlot = filled.some((a) => !validTimeRange(a.time_slot));
+  const missingRequired = filled.some(a => !a.activity.trim() || a.emotion === null);
+  const missingSummary = summary.activity_level === null || summary.overall_mood === null || summary.completion_rate === null;
+  const canSubmit = filled.length > 0 && !missingTimeSlot && !missingRequired && !missingSummary;
 
   function patchActivity(index: number, patch: Partial<ActivityLog>) {
     setActivities((prev) =>
@@ -124,8 +122,7 @@ export default function DailyAssessmentModal({
   }
 
   function removeActivity(index: number) {
-    // Never leave the step with zero cards — an empty step 1 gives the user
-    // nothing to act on and no obvious way back.
+    // Keep one editable activity even after the last row is removed.
     setActivities((prev) =>
       prev.length === 1 ? [emptyActivity()] : prev.filter((_, i) => i !== index),
     );
@@ -156,7 +153,8 @@ export default function DailyAssessmentModal({
   }
 
   async function handleSubmit() {
-    if (busy) return;
+    if (!canSubmit || submittingRef.current) return;
+    submittingRef.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -171,6 +169,8 @@ export default function DailyAssessmentModal({
         })),
         summary: {
           ...summary,
+          // New entries always rate completion; historical N/A remains readable.
+          completion_not_applicable: false,
           reflection_note: summary.reflection_note?.trim()
             ? summary.reflection_note.trim()
             : null,
@@ -180,6 +180,7 @@ export default function DailyAssessmentModal({
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      submittingRef.current = false;
       setBusy(false);
     }
   }
@@ -193,19 +194,25 @@ export default function DailyAssessmentModal({
   }
 
   return (
-    <div
-      className="zen-overlay-enter fixed inset-0 z-40 flex items-center justify-center overflow-clip bg-canvas/70 px-4 py-5 backdrop-blur-md sm:py-8"
-      role="dialog"
-      aria-modal="true"
+    <dialog
+      ref={dialogRef}
+      className="m-auto max-h-[calc(100dvh-40px)] w-[min(1040px,calc(100vw-40px))] max-w-none overflow-hidden rounded-3xl border-0 bg-sheet p-0 text-ink shadow-2xl backdrop:bg-black/40 max-sm:h-[100dvh] max-sm:max-h-[100dvh] max-sm:w-screen max-sm:rounded-none"
       aria-labelledby={titleId}
-      onClick={handleDismiss}
+      onCancel={(event) => { if (busy) event.preventDefault(); }}
+      onClose={handleDismiss}
+      onClick={(event) => {
+        if (event.target !== event.currentTarget) return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) handleDismiss();
+      }}
     >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="flex h-full min-h-0 w-full max-w-2xl flex-col overflow-clip rounded-[28px] border border-line bg-panel depth-panel backdrop-blur-2xl"
+      <form
+        onSubmit={(event) => { event.preventDefault(); void handleSubmit(); }}
+        aria-busy={busy}
+        className="flex max-h-[calc(100dvh-40px)] min-h-0 flex-col max-sm:h-full max-sm:max-h-[100dvh]"
       >
         {/* ---- header ---- */}
-        <header className="shrink-0 border-b border-line px-5 py-4 sm:px-7">
+        <header className="shrink-0 px-5 pb-4 pt-5 sm:px-7">
           <div className="flex items-center gap-3">
             <div className="min-w-0">
               <h2
@@ -217,42 +224,27 @@ export default function DailyAssessmentModal({
               <p className="mt-0.5 truncate text-xs leading-relaxed text-ink-faint">
                 {view === "history"
                   ? "看看过去的行动，也看看自己走过的路"
-                  : step === 1
-                    ? "记下今天做过的事 · 不需要写得完整"
-                    : "回看这一天 · 凭感觉就好"}
+                  : "记下一点行动，也照顾一下今天的感受。"}
               </p>
             </div>
-            <span className="ml-auto shrink-0 rounded-full border border-accent-edge bg-accent-wash px-3 py-1 text-[0.7rem] text-accent-ink">
-              {view === "history" ? "历史" : `${step} / 2`}
-            </span>
             <button
               type="button"
               onClick={handleDismiss}
+              disabled={busy}
               aria-label="关闭"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ink-faint transition-colors duration-300 hover:bg-raised hover:text-ink"
+              className="ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-muted transition-colors hover:bg-raised hover:text-ink disabled:opacity-40"
             >
               <CloseMark className="h-3.5 w-3.5" />
             </button>
           </div>
 
-          {view === "record" && (
-            <div className="mt-3 flex gap-1.5" aria-hidden>
-              {[1, 2].map((s) => (
-                <span
-                  key={s}
-                  className={`h-1 flex-1 rounded-full transition-colors duration-500 ${
-                    s <= step ? "bg-accent" : "bg-line"
-                  }`}
-                />
-              ))}
-            </div>
-          )}
         </header>
 
         {/* ---- body: the only scrolling region ---- */}
         <div
           ref={scrollRef}
-          className="zen-scroll min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-7"
+          data-daily-scroll
+          className="zen-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-5 sm:px-7"
         >
           {view === "history" ? (
             <AssessmentHistory
@@ -268,8 +260,10 @@ export default function DailyAssessmentModal({
               }}
               onRetry={() => void loadHistory(0, false)}
             />
-          ) : step === 1 ? (
-            <div className="space-y-4">
+          ) : (
+            <fieldset disabled={busy} className="grid min-w-0 items-start gap-6 lg:grid-cols-2 lg:gap-6">
+            <section aria-labelledby={`${titleId}-activities`} className="min-w-0 space-y-3">
+              <div className="flex items-baseline justify-between gap-3"><h3 id={`${titleId}-activities`} className="text-base font-semibold">今天做了什么</h3><span className="text-xs text-ink-muted">按活动记录</span></div>
               {activities.map((a, i) => (
                 <ActivityCard
                   key={i}
@@ -281,30 +275,26 @@ export default function DailyAssessmentModal({
                 />
               ))}
 
-              {/* Solid `bg-accent` + `text-canvas` rather than the translucent
-                  `accent-edge`/`accent-wash` pill used everywhere else — this
-                  is the one control in the step that should out-rank the
-                  cards above it, not blend into their register. */}
               <button
                 type="button"
                 onClick={addActivity}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-accent px-6 py-4 text-[0.9rem] font-medium text-canvas depth-float transition-all duration-300 hover:-translate-y-0.5 hover:brightness-110 active:translate-y-0"
+                className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-accent-wash px-4 py-2 text-sm font-medium text-accent-ink transition-colors hover:bg-raised"
               >
                 <PlusMark className="h-4 w-4" />
                 添加一项活动
               </button>
-            </div>
-          ) : (
-            <div className="space-y-7">
+            </section>
+            <section aria-labelledby={`${titleId}-summary`} className="min-w-0 space-y-3">
+              <div className="flex items-baseline justify-between gap-3"><h3 id={`${titleId}-summary`} className="text-base font-semibold">回看这一天</h3><span className="text-xs text-ink-muted">按天记录</span></div>
+              <div data-daily-summary-panel className="space-y-5 rounded-2xl bg-raised p-4 sm:p-5">
+              <div className="flex min-h-7 items-center justify-between gap-3"><h4 className="text-sm font-semibold">整体感受</h4><span className="text-xs text-ink-muted">3 项评分 · 0–5 分</span></div>
               {SUMMARY_SCALES.map((s) => (
-                <SliderRow
-                  key={s.key}
-                  label={s.label}
-                  low={s.low}
-                  high={s.high}
-                  value={summary[s.key]}
-                  onChange={(v) => setSummary((prev) => ({ ...prev, [s.key]: v }))}
-                />
+                <div key={s.key}>
+                  <SegmentedScore
+                    label={s.label} hint={`0 · ${s.low}　—　5 · ${s.high}`} value={summary[s.key]} required
+                    onChange={v => setSummary(prev => ({ ...prev, [s.key]: v }))}
+                  />
+                </div>
               ))}
 
               <label className="block">
@@ -319,19 +309,21 @@ export default function DailyAssessmentModal({
                       reflection_note: e.target.value,
                     }))
                   }
-                  rows={3}
+                  rows={2}
                   placeholder="今天有什么想记下来的…"
-                  className="zen-scroll w-full resize-none rounded-2xl border border-line bg-raised px-4 py-3 text-[0.9rem] leading-[1.8] text-ink placeholder:text-ink-faint transition-colors duration-300 focus:border-accent-edge focus:outline-none"
+                  className={`zen-scroll block min-h-16 w-full resize-y border-line px-3 py-2 leading-6 placeholder:text-ink-muted ${FIELD_CONTROL}`}
                 />
               </label>
-            </div>
+              </div>
+            </section>
+            </fieldset>
           )}
         </div>
 
         {/* ---- footer ---- */}
-        <div className="shrink-0 border-t border-line px-5 py-4 sm:px-7">
+        <div className="shrink-0 bg-raised/50 px-5 py-3 sm:px-7">
           {view === "record" && error && (
-            <p className="mb-3 rounded-2xl border border-alert-edge bg-alert-wash px-4 py-2.5 text-[0.82rem] leading-relaxed text-alert-ink">
+            <p role="alert" className="mb-3 rounded-2xl bg-alert-wash px-4 py-2.5 text-sm leading-relaxed text-alert-ink">
               {error}
             </p>
           )}
@@ -346,64 +338,34 @@ export default function DailyAssessmentModal({
               返回今日记录
             </button>
           ) : (
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 sm:flex-nowrap">
             <button
               type="button"
               onClick={showHistory}
               disabled={busy}
-              className="flex items-center gap-2 rounded-full px-2 py-2 text-[0.8rem] text-ink-faint transition-colors duration-300 hover:bg-accent-wash hover:text-accent-ink disabled:opacity-40 sm:px-3"
+              className="flex shrink-0 items-center gap-2 rounded-full px-2 py-2 text-[0.8rem] text-ink-faint transition-colors duration-300 hover:bg-accent-wash hover:text-accent-ink disabled:opacity-40 sm:px-3"
             >
               <HistoryMark className="h-4 w-4" />
               查看历史
             </button>
 
-            <div className="flex items-center justify-end gap-2">
-              {step === 2 && (
+            <p id={`${titleId}-validation`} className="order-first basis-full text-xs leading-relaxed text-ink-muted sm:order-none sm:max-w-[45%] sm:basis-auto">{filled.length === 0 || missingRequired || missingTimeSlot ? "请填写活动时间、内容和做完后的心情" : missingSummary ? "请完成今日三项总体评分" : `已填写 ${filled.length} 项活动`}</p>
               <button
-                type="button"
-                onClick={() => setStep(1)}
-                disabled={busy}
-                className="rounded-full border border-line px-4 py-2 text-[0.82rem] text-ink-muted transition-colors duration-300 hover:border-accent-edge hover:text-accent-ink disabled:opacity-40"
-              >
-                上一步
-              </button>
-              )}
-
-              {step === 1 ? (
-              <button
-                type="button"
-                onClick={() => setStep(2)}
-                disabled={!canAdvance}
-                title={
-                  canAdvance
-                    ? undefined
-                    : filled.length === 0
-                      ? "先写下至少一项活动"
-                      : "请为每一项活动选择时间段"
-                }
-                className="rounded-full bg-accent-edge px-5 py-2 text-[0.82rem] text-accent-ink transition-all duration-300 hover:bg-accent-wash disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                下一步
-              </button>
-              ) : (
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={busy}
-                className="flex items-center gap-2 rounded-full bg-accent-edge px-5 py-2 text-[0.82rem] text-accent-ink transition-all duration-300 hover:bg-accent-wash disabled:cursor-not-allowed disabled:opacity-40"
+                type="submit"
+                disabled={busy || !canSubmit}
+                aria-describedby={`${titleId}-validation`}
+                className="flex min-h-11 shrink-0 items-center gap-2 rounded-full bg-accent px-5 py-2 text-sm font-medium text-on-accent transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {busy && (
                   <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-line-strong border-t-accent motion-reduce:animate-none" />
                 )}
-                完成记录
+                {busy ? "正在保存…" : "保存今日记录"}
               </button>
-              )}
-            </div>
           </div>
           )}
         </div>
-      </div>
-    </div>
+      </form>
+    </dialog>
   );
 }
 
@@ -426,61 +388,83 @@ function ActivityCard({
   // (both fields empty) is dropped silently on submit, not an error to nag
   // about the moment it appears.
   const timeSlotMissing =
-    value.activity.trim().length > 0 && value.time_slot.trim().length === 0;
+    value.activity.trim().length > 0 && !validTimeRange(value.time_slot);
+  const contentId = useId();
 
   return (
-    <section className="rounded-2xl border border-line bg-raised p-4 depth-bubble sm:p-5">
-      <div className="flex items-center gap-3">
-        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-accent-edge bg-accent-wash text-[0.7rem] text-accent-ink">
-          {index + 1}
-        </span>
+    <section aria-label={`活动 ${index + 1}`} className="rounded-2xl bg-raised p-4 sm:p-5">
+      <div className="mb-3 flex min-h-7 items-center gap-3">
+        <h4 className="text-sm font-semibold">活动 {index + 1}</h4>
+        <span className="ml-auto text-xs text-ink-muted">先填写下面 3 项</span>
+        {removable && (
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label={`删除活动 ${index + 1}`}
+            className="-my-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-muted transition-colors hover:bg-alert-wash hover:text-alert-ink"
+          >
+            <CloseMark className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+      <div data-activity-required className="space-y-4">
+      <div className="space-y-2">
+        <p className={FIELD_LABEL}>活动时间 <RequiredMark /></p>
         <TimeSlotSelect
           value={value.time_slot}
           onChange={(time_slot) => onChange({ time_slot })}
           invalid={timeSlotMissing}
           label={`活动 ${index + 1} 的时间段`}
         />
-        {removable && (
-          <button
-            type="button"
-            onClick={onRemove}
-            aria-label={`删除活动 ${index + 1}`}
-            className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ink-faint transition-colors duration-300 hover:bg-alert-wash hover:text-alert-ink"
-          >
-            <CloseMark className="h-3.5 w-3.5" />
-          </button>
-        )}
+        {timeSlotMissing && <p className="text-xs text-alert-ink">请选完整的时间段，结束时间须晚于开始。</p>}
       </div>
 
-      <input
+      <div className="space-y-2">
+      <label htmlFor={contentId} className={FIELD_LABEL}>
+        活动内容 <RequiredMark />
+      </label>
+      <textarea
+        id={contentId}
+        rows={2}
         value={value.activity}
+        aria-required="true"
         onChange={(e) => onChange({ activity: e.target.value })}
         // Concrete examples, not just "做了什么…": a blank prompt invites
         // abstractions ("休息了一下"), and the whole point of the record is
         // one nameable activity per row.
-        placeholder="做了什么…例如：散步、打羽毛球、做饭"
+        placeholder="例如：晚饭后散步十分钟"
         aria-label={`活动 ${index + 1} 的内容`}
-        className="mt-3 w-full border-b border-line bg-transparent pb-2 text-[0.95rem] leading-relaxed text-ink placeholder:text-ink-faint transition-colors duration-300 focus:border-accent-edge focus:outline-none"
+        className={`zen-scroll block min-h-16 w-full resize-y border-line px-3 py-2 leading-6 placeholder:text-ink-muted ${FIELD_CONTROL}`}
       />
+      </div>
 
-      <div className="mt-4 space-y-3">
+      <div data-activity-mood>
+        <SegmentedScore label="做完活动后的心情" hint="0 · 很低落　—　5 · 很愉快" required value={value.emotion} onChange={emotion => onChange({emotion})} />
+      </div>
+      </div>
+      <section aria-label="其他感受（可选）" className="mt-4 rounded-xl bg-sheet/50 p-3">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1"><h4 className="text-sm font-medium text-ink-muted">其他感受</h4><p className="text-xs text-ink-muted">4项选填</p></div>
+        <div className="grid gap-x-4 gap-y-2.5 sm:grid-cols-2">
         {ACTIVITY_SCALES.map((s) => (
           <SegmentedScore
             key={s.key}
             label={s.label}
             hint={s.hint}
+            compact
             value={value[s.key]}
-            onChange={(v) => onChange({ [s.key]: v } as Partial<ActivityLog>)}
+            onChange={(v) => onChange({ [s.key]: value[s.key] === v ? null : v } as Partial<ActivityLog>)}
           />
         ))}
-      </div>
+        </div>
+        <p className="mt-2 text-xs leading-5 text-ink-muted">0 · 很少 — 5 · 很多；再点一次可取消。</p>
+      </section>
 
       <input
         value={value.note ?? ""}
         onChange={(e) => onChange({ note: e.target.value })}
         placeholder="一句备注（可留空）"
         aria-label={`活动 ${index + 1} 的备注`}
-        className="mt-4 w-full rounded-xl border border-line bg-transparent px-3 py-2 text-[0.82rem] text-ink placeholder:text-ink-faint transition-colors duration-300 focus:border-accent-edge focus:outline-none"
+        className="mt-3 min-h-11 w-full rounded-xl border border-line bg-transparent px-3 py-2 text-sm text-ink placeholder:text-ink-muted transition-colors focus-visible:outline-2 focus-visible:outline-accent"
       />
     </section>
   );
@@ -515,6 +499,11 @@ function parseRange(value: string): [number | null, number | null] {
   return [Number(match[1]), Number(match[2])];
 }
 
+function validTimeRange(value: string): boolean {
+  const [start, end] = parseRange(value);
+  return start !== null && end !== null && start >= 0 && end <= 23 && end > start;
+}
+
 function TimeSlotSelect({
   value,
   onChange,
@@ -527,6 +516,7 @@ function TimeSlotSelect({
   label: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [placement, setPlacement] = useState({ above: false, listHeight: 208 });
   const wrapperRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
 
@@ -539,14 +529,9 @@ function TimeSlotSelect({
     function handlePointerDown(e: MouseEvent) {
       if (!wrapperRef.current?.contains(e.target as Node)) setOpen(false);
     }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
     document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKey);
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKey);
     };
   }, [open]);
 
@@ -555,7 +540,19 @@ function TimeSlotSelect({
   const pendingEnd = /^–(\d{1,2}):00$/.exec(value ?? "");
   const shownStart = start ?? (pendingStart ? Number(pendingStart[1]) : null);
   const shownEnd = end ?? (pendingEnd ? Number(pendingEnd[1]) : null);
-  const complete = start !== null && end !== null;
+  const complete = validTimeRange(value);
+
+  function togglePicker() {
+    if (!open && wrapperRef.current) {
+      const trigger = wrapperRef.current.getBoundingClientRect();
+      const scroller = wrapperRef.current.closest('[data-daily-scroll]')?.getBoundingClientRect();
+      const below = Math.min(scroller?.bottom ?? window.innerHeight, window.innerHeight) - trigger.bottom;
+      const above = trigger.top - Math.max(scroller?.top ?? 0, 0);
+      const placeAbove = below < 250 && above > below;
+      setPlacement({ above: placeAbove, listHeight: Math.min(208, Math.max(48, (placeAbove ? above : below) - 42)) });
+    }
+    setOpen((previous) => !previous);
+  }
 
   function pick(which: "start" | "end", hour: number) {
     // Read from the *shown* values, not from `parseRange`. A half-made
@@ -565,10 +562,9 @@ function TimeSlotSelect({
     const nextStart = which === "start" ? hour : shownStart;
     const nextEnd = which === "end" ? hour : shownEnd;
 
-    if (nextStart === null || nextEnd === null) {
-      // Only half chosen so far. Hold it in the field so the column shows the
-      // selection, but don't write a range that has no end — a half range
-      // would still satisfy the "did you pick a time" check downstream.
+    if (nextStart === null || nextEnd === null || nextEnd <= nextStart) {
+      // Keep the partial selection visible; validTimeRange prevents saving
+      // until both ends form a forward range.
       onChange(
         which === "start" ? `${hourLabel(hour)}–` : `–${hourLabel(hour)}`,
       );
@@ -579,7 +575,12 @@ function TimeSlotSelect({
   }
 
   return (
-    <div ref={wrapperRef} className="relative shrink-0">
+    <div ref={wrapperRef} className="relative min-w-0" onKeyDown={(event) => {
+      if (open && event.key === "Escape") {
+        event.preventDefault(); event.stopPropagation(); setOpen(false);
+        wrapperRef.current?.querySelector<HTMLButtonElement>('[role="combobox"]')?.focus();
+      }
+    }}>
       <button
         type="button"
         role="combobox"
@@ -587,14 +588,15 @@ function TimeSlotSelect({
         aria-expanded={open}
         aria-controls={panelId}
         aria-label={label}
+        aria-required="true"
         aria-invalid={invalid}
-        onClick={() => setOpen((o) => !o)}
-        className={`flex w-[9.5rem] items-center justify-between gap-1.5 rounded-full border bg-raised px-3 py-1.5 text-[0.8rem] tabular-nums transition-colors duration-300 focus:outline-none ${
-          complete ? "text-ink" : "text-ink-faint"
-        } ${invalid ? "border-alert-edge text-alert-ink" : "border-accent-edge"}`}
+        onClick={togglePicker}
+        className={`flex min-h-11 w-full items-center justify-between gap-2 px-3 py-2 tabular-nums ${FIELD_CONTROL} ${
+          complete ? "text-ink" : "text-ink-muted"
+        } ${invalid ? "border-alert-edge text-alert-ink" : "border-line"}`}
       >
         <span className="truncate">
-          {complete ? `${hourLabel(start)}–${hourLabel(end)}` : "几点到几点"}
+          {complete ? `${hourLabel(start!)}–${hourLabel(end!)}` : shownStart !== null ? `${hourLabel(shownStart)}–待选结束` : shownEnd !== null ? `待选开始–${hourLabel(shownEnd)}` : "选择活动时间"}
         </span>
         <ChevronDownMark
           className={`h-3 w-3 shrink-0 text-ink-faint transition-transform duration-300 ${open ? "rotate-180" : ""}`}
@@ -606,13 +608,14 @@ function TimeSlotSelect({
           id={panelId}
           role="dialog"
           aria-label={label}
-          className="absolute left-0 top-full z-20 mt-1.5 w-[13rem] overflow-clip rounded-2xl border border-line bg-panel depth-float"
+          className={`absolute left-0 z-20 w-[13rem] overflow-clip rounded-2xl border border-line bg-sheet depth-float ${placement.above ? "bottom-full mb-1.5" : "top-full mt-1.5"}`}
         >
           <div className="grid grid-cols-2">
             <HourColumn
               heading="开始"
               hours={HOURS}
               selected={shownStart}
+              maxHeight={placement.listHeight}
               onPick={(h) => pick("start", h)}
             />
             <div className="border-l border-line">
@@ -620,6 +623,7 @@ function TimeSlotSelect({
                 heading="结束"
                 hours={HOURS}
                 selected={shownEnd}
+                maxHeight={placement.listHeight}
                 // An end before the start is a typo, not a night shift — the
                 // column greys those out rather than accepting a backwards
                 // range and complaining about it afterwards.
@@ -639,12 +643,14 @@ function HourColumn({
   hours,
   selected,
   disabledBefore,
+  maxHeight,
   onPick,
 }: {
   heading: string;
   hours: number[];
   selected: number | null;
   disabledBefore?: number | null;
+  maxHeight: number;
   onPick: (hour: number) => void;
 }) {
   const listRef = useRef<HTMLUListElement>(null);
@@ -653,9 +659,10 @@ function HourColumn({
   // an evening activity means scrolling past twenty rows every time.
   useEffect(() => {
     if (selected === null) return;
-    listRef.current
-      ?.querySelector(`[data-hour="${selected}"]`)
-      ?.scrollIntoView({ block: "center" });
+    const list = listRef.current;
+    const option = list?.querySelector<HTMLButtonElement>(`[data-hour="${selected}"]`);
+    // Scroll only the option list, never the entire daily-record form.
+    if (list && option) list.scrollTop = option.offsetTop - (list.clientHeight - option.clientHeight) / 2;
   }, [selected]);
 
   return (
@@ -667,7 +674,17 @@ function HourColumn({
         ref={listRef}
         role="listbox"
         aria-label={heading}
-        className="zen-scroll max-h-52 overflow-y-auto px-1 pb-1"
+        className="zen-scroll relative overflow-y-auto overscroll-contain px-1 pb-1"
+        style={{ maxHeight }}
+        onKeyDown={(event) => {
+          if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          const options = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+          const index = options.indexOf(document.activeElement as HTMLButtonElement);
+          const next = event.key === "Home" ? 0 : event.key === "End" ? options.length - 1 :
+            (index + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+          options[next]?.focus();
+        }}
       >
         {hours.map((hour) => {
           const active = hour === selected;
@@ -706,30 +723,43 @@ function SegmentedScore({
   hint,
   value,
   onChange,
+  required = false,
+  compact = false,
 }: {
   label: string;
   hint: string;
-  value: number;
+  value: number | null;
   onChange: (v: number) => void;
+  required?: boolean;
+  compact?: boolean;
 }) {
-  // Stacked on phones, inline from `sm` up. Side-by-side costs the control
-  // ~76px of the row, which at 375px squeezes each pill to under 30px — too
-  // small to hit reliably, and there are thirty of them per card.
+  const hintId = useId();
+  // Secondary scores use short inline labels, not a second stack of large
+  // question cards. Their explanations remain available to assistive tech.
   return (
-    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
-      <div className="flex shrink-0 items-baseline gap-2 sm:w-16 sm:block">
-        <span className="text-[0.8rem] leading-tight text-ink-muted sm:block">
-          {label}
+    <div className={compact ? "flex items-center gap-2" : "flex flex-col gap-2"}>
+      <div className={compact ? "shrink-0" : "space-y-1"}>
+        <span title={compact ? hint : undefined} className={compact ? "text-xs font-medium leading-5 text-ink-muted" : FIELD_LABEL}>
+          <span>{label}</span> {required && <RequiredMark />}
         </span>
-        <span className="text-[0.65rem] leading-tight text-ink-faint sm:block">
+        {compact && <span id={hintId} className="sr-only">
           {hint}
-        </span>
+        </span>}
       </div>
 
       <div
         role="radiogroup"
         aria-label={`${label}（0 到 5）`}
-        className="flex flex-1 gap-0.5 sm:gap-1"
+        aria-describedby={hintId}
+        aria-required={required}
+        className={`flex flex-1 ${compact ? "gap-0.5" : "gap-1"}`}
+        onKeyDown={(event) => {
+          const delta = ["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : ["ArrowLeft", "ArrowUp"].includes(event.key) ? -1 : 0;
+          if (!delta && !["Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          const next = event.key === "Home" ? 0 : event.key === "End" ? 5 : value === null ? 0 : (value + delta + 6) % 6;
+          onChange(next); event.currentTarget.querySelectorAll<HTMLButtonElement>('button')[next]?.focus();
+        }}
       >
         {[0, 1, 2, 3, 4, 5].map((n) => {
           const active = n === value;
@@ -739,12 +769,13 @@ function SegmentedScore({
               type="button"
               role="radio"
               aria-checked={active}
+              tabIndex={active || (value === null && n === 0) ? 0 : -1}
               aria-label={`${label} ${n}`}
               onClick={() => onChange(n)}
-              className={`h-11 flex-1 rounded-lg border text-[0.75rem] transition-all duration-300 sm:h-8 ${
+              className={`min-w-0 flex-1 border transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${compact ? "h-9 rounded-lg text-xs" : "h-11 rounded-xl text-sm"} ${
                 active
-                  ? "border-accent-edge bg-accent-wash text-accent-ink"
-                  : "border-line text-ink-faint hover:border-accent-edge hover:text-ink-muted"
+                  ? compact ? "border-transparent bg-accent-wash font-semibold text-accent-ink" : "border-accent bg-accent font-semibold text-on-accent"
+                  : compact ? "border-transparent bg-raised/60 text-ink-muted hover:bg-sheet hover:text-ink" : "border-line bg-sheet text-ink hover:border-accent-edge hover:bg-accent-wash"
               }`}
             >
               {n}
@@ -752,52 +783,11 @@ function SegmentedScore({
           );
         })}
       </div>
+      {!compact && <span id={hintId} className="block text-xs leading-5 text-ink-muted">{hint}</span>}
     </div>
   );
 }
 
-function SliderRow({
-  label,
-  low,
-  high,
-  value,
-  onChange,
-}: {
-  label: string;
-  low: string;
-  high: string;
-  value: number;
-  onChange: (v: number) => void;
-}) {
-  const id = useId();
-  return (
-    <div>
-      <div className="mb-2 flex items-baseline gap-3">
-        <label htmlFor={id} className="text-[0.9rem] text-ink">
-          {label}
-        </label>
-        <span className="ml-auto text-[0.95rem] tabular-nums text-accent-ink">
-          {value}
-        </span>
-      </div>
-
-      <input
-        id={id}
-        type="range"
-        min={0}
-        max={10}
-        step={1}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="zen-range"
-      />
-
-      {/* The anchors are what make the number mean anything — a bare 0–10 asks
-          the user to invent their own scale. */}
-      <div className="mt-1 flex justify-between text-[0.7rem] text-ink-faint">
-        <span>{low}</span>
-        <span>{high}</span>
-      </div>
-    </div>
-  );
+function RequiredMark() {
+  return <span className="inline-block shrink-0 align-middle text-xs font-medium text-accent-ink">必填</span>;
 }

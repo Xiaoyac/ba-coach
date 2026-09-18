@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 
@@ -39,6 +40,34 @@ class KnowledgeImportResult:
     source: KnowledgeSourceRecord
     chunk_count: int
     unchanged: bool
+
+
+async def knowledge_revision(db: AsyncSession) -> str:
+    """Small shared manifest, visible to every worker after an import commits.
+
+    Imports replace chunks and update their source in one transaction. No
+    schema migration, shared process memory or polling window is required.
+    Direct chunk SQL edits must also update the parent source metadata.
+    """
+    # Chunk identity/count also changes when identical content is re-imported
+    # after an intervening version, even on second-precision MySQL timestamps.
+    chunks = (select(KnowledgeChunkRecord.source_id,
+                     func.count(KnowledgeChunkRecord.id).label("chunk_count"),
+                     func.max(KnowledgeChunkRecord.id).label("last_id"))
+              .group_by(KnowledgeChunkRecord.source_id).subquery())
+    rows = (await db.execute(
+        select(KnowledgeSourceRecord.id, KnowledgeSourceRecord.name,
+               KnowledgeSourceRecord.category, KnowledgeSourceRecord.content_hash,
+               KnowledgeSourceRecord.updated_at, chunks.c.chunk_count, chunks.c.last_id)
+        .outerjoin(chunks, chunks.c.source_id == KnowledgeSourceRecord.id)
+        .where(KnowledgeSourceRecord.name.notin_(IGNORED_KNOWLEDGE_SOURCE_NAMES))
+        .order_by(KnowledgeSourceRecord.id)
+    )).all()
+    manifest = [[row.id, row.name, row.category, row.content_hash,
+                 row.updated_at.isoformat() if row.updated_at else None,
+                 row.chunk_count, row.last_id] for row in rows]
+    return hashlib.sha256(json.dumps(manifest, ensure_ascii=False,
+                                    separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def _split_body(body: str, *, max_chars: int, overlap: int) -> list[str]:
@@ -125,7 +154,9 @@ async def import_knowledge_source(
     content_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
     source = (
         await db.execute(
-            select(KnowledgeSourceRecord).where(KnowledgeSourceRecord.name == clean_name)
+            select(KnowledgeSourceRecord)
+            .where(KnowledgeSourceRecord.name == clean_name)
+            .with_for_update()
         )
     ).scalar_one_or_none()
 

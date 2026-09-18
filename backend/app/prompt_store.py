@@ -34,7 +34,7 @@ PROMPT_DEFINITIONS: tuple[PromptDefinition, ...] = (
     PromptDefinition("global", "全局提示词", "适用于所有模块的角色、原则与输出规范"),
     PromptDefinition("module_1", "MODULE I", "理解困扰与具体情境"),
     PromptDefinition("module_2", "MODULE II", "目标设定与活动计划"),
-    PromptDefinition("module_3", "MODULE III", "计划执行与过程支持"),
+    PromptDefinition("module_3", "MODULE III", "计划执行前记录提醒"),
     PromptDefinition("module_4", "MODULE IV", "复盘、调整与巩固"),
     PromptDefinition(
         "router_agent",

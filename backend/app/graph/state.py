@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, TypedDict
 
 from ..config import Settings
+from ..generation_control import GenerationControl
 from ..memos_integration import MemosIntegrationManager
 from ..providers.base import LLMProvider
 from ..retrieval import KnowledgeBase, KnowledgeChunk
@@ -142,3 +143,4 @@ class GraphContext:
     stream: bool = False
     # An isolated evaluation can freeze effective prompts without enabling DB side effects.
     prompt_snapshot: dict[str, str] | None = None
+    generation: GenerationControl | None = None

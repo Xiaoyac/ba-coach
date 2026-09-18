@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Annotated, Literal
+from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 Role = Literal["user", "assistant"]
 
@@ -27,6 +28,7 @@ class Message(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=20_000)
+    generation_id: UUID | None = None
     # Omit on the first turn — the server mints one and returns it.
     session_id: str | None = None
     # Override the server default for this request ("claude" | "deepseek").
@@ -36,6 +38,10 @@ class ChatRequest(BaseModel):
     # Free-form context carried from the frontend (user profile, scenario, …).
     # Available to the prompt builder; nothing here is trusted as instructions.
     metadata: dict[str, str] = Field(default_factory=dict)
+
+
+class CancelGenerationRequest(BaseModel):
+    generation_id: UUID
 
 
 class ChatResponse(BaseModel):
@@ -92,12 +98,19 @@ class ActivityLogIn(BaseModel):
     activity: str = Field(..., min_length=1, max_length=500)
 
     emotion: Score5
-    achievement: Score5
-    connection: Score5
-    enjoyment: Score5
-    importance: Score5
+    achievement: Score5 | None = None
+    connection: Score5 | None = None
+    enjoyment: Score5 | None = None
+    importance: Score5 | None = None
 
     note: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("time_slot", "activity")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("时间和活动内容不能为空")
+        return value.strip()
 
 
 class ActivityLogOut(ActivityLogIn):
@@ -105,15 +118,20 @@ class ActivityLogOut(ActivityLogIn):
 
 
 class DailySummaryIn(BaseModel):
-    """The 0–10 sliders from step 2 of the wizard."""
+    """Three explicit 0–5 ratings. No plan is not a zero completion score."""
 
-    completion_rate: Score10
-    activity_level: Score10
-    social_connection: Score10
-    approach_vs_avoidance: Score10
-    overall_mood: Score10
+    completion_rate: Score5 | None = Field(...)
+    completion_not_applicable: bool = False
+    activity_level: Score5
+    overall_mood: Score5
 
     reflection_note: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def check_completion(self):
+        if (self.completion_rate is None) != self.completion_not_applicable:
+            raise ValueError("请选择计划完成程度，或明确选择今天没有预定计划／不适用")
+        return self
 
 
 class AssessmentSubmission(BaseModel):
@@ -161,6 +179,8 @@ class AssessmentOut(BaseModel):
     local_date: date
     timezone: str
     status: Literal["completed", "skipped"]
+    scale_version: int = 1
+    completion_not_applicable: bool = False
 
     completion_rate: int | None = None
     activity_level: int | None = None
@@ -299,7 +319,18 @@ class RegisterRequest(BaseModel):
     tag: str = Field(..., min_length=5, max_length=5, pattern=r"^[0-9]{5}$")
     # TINYINT UNSIGNED on the column. The upper bound is a typo guard, not a
     # claim about human lifespans.
-    age: int | None = Field(default=None, ge=10, le=120)
+    birth_date: date
+
+    @field_validator("birth_date", mode="before")
+    @classmethod
+    def validate_birthday(cls, value):
+        from .birth_dates import validate_birth_date
+        return validate_birth_date(value)
+
+    @property
+    def age(self) -> int:
+        from .birth_dates import age_on
+        return age_on(self.birth_date)
     living_status: LivingStatus | None = None
     communication_preference: CommunicationPreference | None = None
     # SET columns: any combination, including none at all.
@@ -357,6 +388,7 @@ class ProfileOut(BaseModel):
     tag: str | None = None
     display_id: str | None = None
     age: int | None = None
+    birth_date: date | None = None
     living_status: LivingStatus | None = None
 
     has_supporter: bool = False
@@ -418,6 +450,13 @@ class ProfileUpdate(BaseModel):
         default=None, min_length=5, max_length=5, pattern=r"^[0-9]{5}$"
     )
     age: int | None = Field(default=None, ge=10, le=120)
+    birth_date: date | None = None
+
+    @field_validator("birth_date", mode="before")
+    @classmethod
+    def validate_birthday(cls, value):
+        from .birth_dates import validate_birth_date
+        return validate_birth_date(value)
     living_status: LivingStatus | None = None
 
     has_supporter: bool | None = None
@@ -451,6 +490,16 @@ class ProfileUpdate(BaseModel):
 class LoginRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=64)
     password: str = Field(..., min_length=1, max_length=128)
+
+
+class BirthDateRequest(BaseModel):
+    birth_date: date
+
+    @field_validator("birth_date", mode="before")
+    @classmethod
+    def validate_birthday(cls, value):
+        from .birth_dates import validate_birth_date
+        return validate_birth_date(value)
 
 
 class ChangePasswordRequest(BaseModel):
@@ -518,6 +567,7 @@ class AccountInfo(BaseModel):
     email: EmailStr | None = None
     email_verified: bool = False
     email_required: bool = True
+    birth_date_required: bool = False
     email_delivery_available: bool = False
 
 
@@ -616,11 +666,23 @@ class ConversationSummary(BaseModel):
     pinned: bool = False
 
 
+class MessageTiming(BaseModel):
+    # Observed stream interval, not a provider's internal compute-time claim.
+    reply_thinking_ms: int | None = None
+    reply_generation_ms: int | None = None
+    router_processing_ms: int | None = None
+
+
+class ConversationMessageDetail(Message):
+    id: int | None = None
+    timing: MessageTiming | None = None
+
+
 class ConversationDetail(ConversationSummary):
     """A conversation's full transcript, for switching into it."""
 
     revision: int = 0
-    messages: list[Message] = Field(default_factory=list)
+    messages: list[ConversationMessageDetail] = Field(default_factory=list)
     # Durable pointer for the next turn. This is deliberately not called
     # `module`: the latest assistant reply may belong to the previous module.
     next_module: str | None = None

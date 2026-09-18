@@ -98,6 +98,10 @@ def test_history_is_newest_first_and_includes_ordered_activities(
     ]
     assert body["has_more"] is False
     assert body["next_offset"] is None
+    assert body["items"][0]["scale_version"] == 1
+    assert body["items"][0]["completion_rate"] == 7
+    assert body["items"][0]["activity_level"] == 6
+    assert body["items"][0]["completion_not_applicable"] is False
 
 
 def test_history_is_account_scoped_and_omits_skipped_days(

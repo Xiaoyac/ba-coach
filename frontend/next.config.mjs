@@ -1,6 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  async headers() {
+    return [{source:'/pa-push-sw.js',headers:[{key:'Cache-Control',value:'no-cache, no-store, must-revalidate'},
+      {key:'Service-Worker-Allowed',value:'/'}]}];
+  },
   // Hides the floating Next.js "N" badge in the bottom-left corner during
   // `next dev`. It is dev-only tooling and never ships, but it sits exactly
   // where the theme toggle lives.

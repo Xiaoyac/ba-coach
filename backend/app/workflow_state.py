@@ -275,10 +275,19 @@ async def record_interaction_transition(
 
 async def derived_current_module(db: AsyncSession, *, subject_id: str) -> str | None:
     """Latest conversation state for profile display; never a second source."""
+    from .v2_profile import enabled
+    if enabled():
+        from .database_v2_schema import metadata
+        runtime = metadata.tables["conversation_runtime_states"]
+        module_column = runtime.c.current_module
+        conversation_column = runtime.c.conversation_id
+    else:
+        module_column = ConversationRuntimeState.module
+        conversation_column = ConversationRuntimeState.conversation_id
     module = (
         await db.execute(
-            select(ConversationRuntimeState.module)
-            .join(Conversation, Conversation.id == ConversationRuntimeState.conversation_id)
+            select(module_column)
+            .join(Conversation, Conversation.id == conversation_column)
             .where(Conversation.subject_id == subject_id)
             .order_by(Conversation.updated_at.desc())
             .limit(1)

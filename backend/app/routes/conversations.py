@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..conversation_store import create_conversation_with_opening
 from ..db import get_db, get_sessionmaker
 from ..identity import require_subject_id
+from ..knowledge_references import KnowledgeReferences
 from ..graph.nodes import wait_for_pending_routing
 from ..models import (
     AIExecutionEvent,
@@ -39,6 +40,8 @@ from ..reasoning import normalize_reasoning_channels
 from ..session import SessionStore, get_session_store
 from ..schemas import (
     ConversationDetail,
+    ConversationMessageDetail,
+    MessageTiming,
     ConversationSummary,
     ConversationUpdate,
     Message,
@@ -80,17 +83,32 @@ def _summary(c: Conversation) -> ConversationSummary:
 
 
 def _detail(c: Conversation, *, next_module: str | None = None) -> ConversationDetail:
-    def project_message(message: ConversationMessage) -> Message:
+    def project_message(message: ConversationMessage) -> ConversationMessageDetail:
         normalized = normalize_reasoning_channels(
             message.content, message.reasoning_content
         )
-        return Message(
+        def duration(value):
+            return value if type(value) is int and value >= 0 else None
+        timing = None
+        if message.role == "assistant":
+            first = duration(message.time_to_first_reasoning_token_ms)
+            content = duration(message.time_to_first_content_token_ms)
+            thinking = (content - first if normalized.reasoning and first is not None
+                        and content is not None and content >= first else None)
+            timing = MessageTiming(reply_thinking_ms=thinking,
+                reply_generation_ms=duration(message.main_generation_duration_ms),
+                router_processing_ms=duration(message.router_duration_ms))
+            if all(value is None for value in timing.model_dump().values()):
+                timing = None
+        return ConversationMessageDetail(
+            id=message.id,
             role=message.role,
             content=normalized.reply,
             reasoning_content=normalized.reasoning or None,
             model_name=message.model_name,
             routing_reasoning_content=message.routing_reasoning_content,
             router_model_name=message.router_model_name,
+            timing=timing,
         )
 
     return ConversationDetail(
@@ -187,6 +205,31 @@ async def get_conversation(
         db, session_id=session_id, subject_id=subject_id
     )
     return await _detail_with_runtime(db, conversation)
+
+
+@router.get("/messages/{message_id}/knowledge", response_model=KnowledgeReferences)
+async def message_knowledge_references(
+    message_id: int,
+    response: Response,
+    subject_id: str = Depends(require_subject_id),
+    db: AsyncSession = Depends(get_db),
+) -> KnowledgeReferences:
+    response.headers["Cache-Control"] = "private, no-store"
+    # Join against the live owned message: deleted/foreign IDs reveal nothing.
+    row = (await db.execute(select(ConversationMessage.id)
+        .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+        .where(ConversationMessage.id == message_id,
+               ConversationMessage.role == "assistant",
+               Conversation.subject_id == subject_id))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    metadata = (await db.execute(select(AIExecutionEvent.event_metadata)
+        .where(AIExecutionEvent.assistant_message_id == message_id,
+               AIExecutionEvent.stage == "main_generation",
+               AIExecutionEvent.subject_id == subject_id)
+        .order_by(AIExecutionEvent.id.desc()).limit(1))).scalar_one_or_none()
+    snapshot = (metadata or {}).get("knowledge_references")
+    return KnowledgeReferences.model_validate(snapshot) if snapshot else KnowledgeReferences()
 
 
 @router.get("/{session_id}/revision", response_model=dict[str, int])
@@ -365,15 +408,30 @@ async def delete_conversation(
         from ..v2_profile import enabled as v2_enabled
         if v2_enabled():
             from ..v2_deletion import detach_conversation
+            await db.execute(select(Conversation.id).where(Conversation.id == conversation.id).with_for_update())
             await detach_conversation(db, conversation)
             await db.commit()
             await store.reset(session_id)
             return
         cycle_ids = select(PACycle.id).where(PACycle.conversation_id == conversation.id)
+        # Only explicit cycle links establish ownership; never guess by recency.
+        from ..clinical_store import MODULE_MODELS
+        links = (await db.execute(select(ClinicalRecordCycleLink).where(
+            ClinicalRecordCycleLink.cycle_id.in_(cycle_ids)))).scalars().all()
+        from ..models_business import InteractionStatus
+        deleted_cycle_ids = set((await db.execute(cycle_ids)).scalars())
+        interaction = (await db.execute(select(InteractionStatus).where(
+            InteractionStatus.user_id == subject_id))).scalar_one_or_none()
+        if interaction and isinstance(interaction.goal_history, list):
+            interaction.goal_history = [item for item in interaction.goal_history
+                if not isinstance(item, dict) or item.get("cycle_id") not in deleted_cycle_ids]
+        for link in links:
+            model = MODULE_MODELS.get(link.module)
+            if model is not None:
+                await db.execute(delete(model).where(model.id == link.record_id, model.user_id == subject_id))
         # Explicit child deletes make the endpoint deterministic even in local
         # SQLite where foreign-key cascades may be disabled. The externally
-        # owned clinical rows are intentionally retained; only their app-owned
-        # conversation/cycle links are removed.
+        # owned unlinked clinical rows are retained because their source is unknown.
         await db.execute(
             delete(ClinicalRecordCycleLink).where(
                 ClinicalRecordCycleLink.cycle_id.in_(cycle_ids)
