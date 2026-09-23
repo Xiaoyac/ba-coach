@@ -1,11 +1,13 @@
 """Latest-turn extraction is required before an old V2 draft can be confirmed."""
 import pytest
+from datetime import datetime
 from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.database_v2_schema import metadata as schema
 from app.m4_contract import normalize
 from app.models import ConversationMessage
+from app.dialogue_confirmation import anchor_rendered_summary
 from app.v2_workflow import persist_record, record_steps
 from app.workflow_contract import MODULE_STEP_KEYS
 from test_goal_overview import goal_api
@@ -30,9 +32,67 @@ async def seed_m2(db):
         last_transition_reason="awaiting_record_confirmation",
         memory={"module_extraction_freshness": {"module_2": {
             "assistant_message_id": 20, "cycle_id": "m2-cycle"}}}))
+    from app.dialogue_confirmation import render_confirmation_summary, anchor_rendered_summary
+    from app.program_confirmation import record_hash
+    pending = (await db.execute(select(plans).where(plans.c.id == 'm2-draft'))).mappings().one()
     await db.execute(insert(ConversationMessage), {"id": 20, "conversation_id": 1,
-        "position": 1, "role": "assistant", "content": "旧草稿"})
+        "position": 1, "role": "assistant", "content": render_confirmation_summary('module_2', pending)})
+    assert await anchor_rendered_summary(db, session_id='chat-a', user_id='a',
+        assistant_message_id=20, record_id='m2-draft', record_hash=record_hash(pending))
     await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_exact_rendered_card_can_be_anchored_without_telemetry_ids(goal_api):
+    """A copied deterministic card still gets a durable marker.
+
+    The model path can emit the exact renderer while omitting the workflow
+    telemetry shortcut.  The anchor must discover the current draft by the
+    owned runtime and exact body, while retaining all source/version checks.
+    """
+    _, db, _ = goal_api
+    await seed_m2(db)
+    assert await anchor_rendered_summary(
+        db, session_id='chat-a', user_id='a', assistant_message_id=20,
+    )
+    runtime = (await db.execute(select(schema.tables['conversation_runtime_states'])
+        .where(schema.tables['conversation_runtime_states'].c.conversation_id == 1))).mappings().one()
+    marker = (runtime['memory'] or {}).get('dialogue_draft', {})
+    assert marker['module'] == 'module_2'
+    assert marker['summary_verified'] is True
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_confirmation_only_turn_keeps_displayed_plan_snapshot(goal_api):
+    """A short agreement must not reparse the date or rewrite the card."""
+    _, db, _ = goal_api
+    await seed_m2(db)
+    await db.execute(update(schema.tables["module_two_record"])
+        .where(schema.tables["module_two_record"].c.id == "m2-draft")
+        .values(schedule_text="2026年9月21日12:30，每周一到周五做，先试一周",
+                scheduled_start_at=datetime(2026, 9, 21, 12, 30)))
+    await db.execute(insert(ConversationMessage), [
+        {"id": 21, "conversation_id": 1, "position": 2, "role": "user",
+         "content": "确认，就按这个计划试试。"},
+        {"id": 22, "conversation_id": 1, "position": 3, "role": "assistant",
+         "content": "好，计划就这样定下了。"},
+    ])
+    await db.commit()
+    maker = async_sessionmaker(db.bind, expire_on_commit=False)
+    await persist_record(maker, module="module_2", user_id="a", cycle_id="m2-cycle", data={
+        "activity_content": "晚饭后散步十分钟", "schedule_text": "今天（2025年）晚饭后",
+        "scheduled_start_at": "2025-09-19T19:00:00", "location": "小区",
+        "duration_minutes": 10, "frequency_rule": {"schema_version": 1, "text": "每天"},
+        "potential_barriers": ["下雨"],
+        "barrier_coping_plan": [{"barrier": "下雨", "plan": "室内走"}],
+        "_source_session_id": "chat-a", "_source_assistant_message_id": 22,
+    })
+    row = (await db.execute(select(schema.tables["module_two_record"])
+        .where(schema.tables["module_two_record"].c.id == "m2-draft"))).mappings().one()
+    assert str(row["scheduled_start_at"]).startswith("2026-09-21")
+    assert row["schedule_text"] == "2026年9月21日12:30，每周一到周五做，先试一周"
+    assert row["record_status"] == "draft"
 
 
 async def seed_m4(db):

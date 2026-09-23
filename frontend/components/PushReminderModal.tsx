@@ -8,6 +8,8 @@ export default function PushReminderModal({onClose}:{onClose:()=>void}) {
   const [busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[enabled,setEnabled]=useState(false);
   const [support,setSupport]=useState<string|null>(null),[notice,setNotice]=useState('');
   const [checks,setChecks]=useState<PushCheck[]>([]);
+  const [delay,setDelay]=useState('5');
+  const delaySeconds=Number(delay),validDelay=Number.isInteger(delaySeconds)&&delaySeconds>=1&&delaySeconds<=600;
   const latestCheck=checks.find(c=>c.device_id===localPushId());
   async function load() {
     setLoading(true);setError('');setSupport(pushSupport());
@@ -18,9 +20,21 @@ export default function PushReminderModal({onClose}:{onClose:()=>void}) {
     finally {setLoading(false);}
   }
   useEffect(()=>{dialog.current?.showModal();void load();},[]);
+  useEffect(()=>{
+    if(!latestCheck||latestCheck.displayed_at||!['queued','attempting','accepted','unknown','timeout','unreachable'].includes(latestCheck.state)
+      ||new Date(latestCheck.expires_at).getTime()<=Date.now()) return;
+    let stopped=false,fetching=false;
+    const timer=setInterval(()=>{
+      if(new Date(latestCheck.expires_at).getTime()<=Date.now()) {clearInterval(timer);return;}
+      if(document.visibilityState!=='visible'||fetching) return;
+      fetching=true;
+      void readPushChecks().then(data=>{if(!stopped)setChecks(data.items??[]);}).catch(()=>{}).finally(()=>{fetching=false;});
+    },3000);
+    return ()=>{stopped=true;clearInterval(timer);};
+  },[latestCheck?.id,latestCheck?.state,latestCheck?.displayed_at,latestCheck?.expires_at]);
   async function testClosedPage() {
     setBusy(true);setError('');setNotice('');
-    try {const check=await schedulePushCheck();setChecks(previous=>[check,...previous.filter(c=>c.id!==check.id)]);}
+    try {const check=await schedulePushCheck(delaySeconds);setChecks(previous=>[check,...previous.filter(c=>c.id!==check.id)]);}
     catch(e) {setError(e instanceof Error?e.message:'预约测试失败，请重试。');}
     finally {setBusy(false);}
   }
@@ -47,9 +61,15 @@ export default function PushReminderModal({onClose}:{onClose:()=>void}) {
       {enabled&&<p className="mt-3 text-sm text-accent-ink">此浏览器已开启 · 已授权 {status?.devices.length??0} 个设备订阅</p>}
       {(enabled||latestCheck)&&<section aria-label="关页接收测试" className="mt-5 rounded-2xl bg-raised/70 p-4 text-sm leading-6">
         <h3 className="font-medium">试试关掉网页后接收</h3>
-        <p className="mt-1 text-ink-muted">服务器约一分钟后发一条测试通知，扫描可能额外延迟30秒。无需修改目标；不需要一直开着本页。</p>
+        <p className="mt-1 text-ink-muted">选择多久后发送，默认 5 秒。到时由服务器发送，实际到达受网络和浏览器影响。无需修改目标，也不需要一直开着本页。</p>
+        <label className="mt-3 flex flex-wrap items-center gap-2">测试延迟
+          <input aria-label="测试延迟（秒）" type="number" min="1" max="600" step="1" value={delay} disabled={busy}
+            onChange={event=>setDelay(event.target.value)} className="min-h-11 w-24 rounded-xl border border-current/20 bg-sheet px-3 text-ink" />
+          <span className="text-ink-muted">秒（1–600）</span>
+        </label>
+        {!validDelay&&<p className="mt-1 text-alert-ink">请输入 1–600 秒的整数。</p>}
         <div className="mt-3 flex flex-wrap gap-2">
-          <button disabled={busy||!enabled||status?.preference_blocked} onClick={()=>void testClosedPage()} className="surface-button min-h-11 rounded-xl bg-accent-wash px-3 text-sm font-medium text-accent-ink disabled:opacity-50">一分钟后测试通知</button>
+          <button disabled={busy||!enabled||!validDelay||status?.preference_blocked} onClick={()=>void testClosedPage()} className="surface-button min-h-11 rounded-xl bg-accent-wash px-3 text-sm font-medium text-accent-ink disabled:opacity-50">{busy?'正在预约…':'发送测试通知'}</button>
           <button disabled={busy} onClick={()=>void load()} className="surface-button min-h-11 rounded-xl px-3 text-sm text-ink-muted">查看测试结果</button>
         </div>
         {latestCheck&&<p role="status" className="mt-3 text-ink-muted">{pushCheckMessage(latestCheck)}</p>}

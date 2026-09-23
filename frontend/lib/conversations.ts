@@ -32,6 +32,8 @@ export interface KnowledgeReferences {
   mediator_status: string | null;
   mediator_reason: string | null;
   mediator_reasoning_content: string | null;
+  mediator_guidance?: string | null;
+  mediator_cautions?: string[];
   mediator_model: string | null;
   mediator_duration_ms: number | null;
   context_withheld: boolean;

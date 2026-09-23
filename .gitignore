@@ -33,11 +33,14 @@ pnpm-debug.log*
 *.tsbuildinfo
 
 # Runtime output and machine-local tools
+/work/full-cycle-acceptance-0920/
 *.log
 *.bak
 runtime-logs/
 .tools/
 .rag-local/
+/work/latency-release-20260919/
+/work/latency-baseline-20260919/
 
 # Assistant/editor-local state
 .claude/

@@ -1,6 +1,7 @@
 """Shared transaction-level confirmation; callers own authentication, locking and commit."""
 import hashlib
 import json
+import re
 from fastapi import HTTPException
 from sqlalchemy import select, update, insert, func
 from .database_v2_schema import metadata as schema
@@ -8,6 +9,7 @@ from .models import ConversationMessage
 from .v2_repository import (now, confirm_plan, continue_reviewed_cycle, start_cycle,
     append_plan_draft, PLAN_WRITABLE_FIELDS, V2Conflict)
 from .v2_workflow import TABLES, module_extraction_is_current
+from .workflow_contract import MODULE_STEP_KEYS
 
 
 def record_hash(row):
@@ -43,8 +45,113 @@ async def current_m1_missing(db, pending, conversation_id, session_id):
     return missing
 
 
+async def confirmation_readiness(
+    db, *, conversation, state, user_id, session_id, pending=None,
+    extraction_assistant_message_id=None, confirmation_user_message_id=None,
+):
+    """Evaluate the one authoritative readiness contract for confirmation.
 
-async def validate_confirmation(db, *, conversation, state, user_id, session_id, payload):
+    The chat precommit path, the program API and the reply guard must agree on
+    the same evidence.  Keeping this query/evaluation in one place prevents a
+    UI from reporting a record as confirmable while the transactional commit
+    rejects it (or vice versa).  The result is JSON-safe and deliberately
+    includes the freshness/version inputs used by the evaluator so callers
+    can expose a useful diagnostic without reimplementing the checks.
+    """
+    module = state["current_module"]
+    if pending is None:
+        pending = await draft(db, state, user_id)
+    extraction_fresh = None
+    if module in {"module_2", "module_3", "module_4"}:
+        extraction_fresh = await module_extraction_is_current(
+            db, conversation_id=conversation.id, state=state, module=module,
+            assistant_message_id=extraction_assistant_message_id,
+            following_user_message_id=confirmation_user_message_id,
+        )
+    memory = state.get("memory") or {}
+    marker = memory.get("dialogue_draft") if isinstance(memory, dict) else None
+    marker = marker if isinstance(marker, dict) else {}
+    actual_fingerprint = None
+    if module in {"module_2", "module_3"} and pending:
+        # Keep this local import to avoid dialogue_confirmation ↔
+        # program_confirmation import cycles while modules initialise.
+        from .dialogue_confirmation import fingerprint
+        actual_fingerprint = fingerprint(pending)
+    m4_missing = None
+    if module == "module_4" and pending:
+        from .m4_contract import missing_fields
+        m4_missing = missing_fields(pending, session_id=session_id,
+                                     cycle_id=state["active_cycle_id"])
+    from .workflow_readiness import evaluate_readiness
+    readiness = evaluate_readiness(
+        module, pending,
+        extraction_fresh=extraction_fresh,
+        summary_verified=marker.get("summary_verified") if module in {"module_2", "module_3"} else None,
+        expected_fingerprint=marker.get("fingerprint") if module in {"module_2", "module_3"} else None,
+        actual_fingerprint=actual_fingerprint,
+        evidence_session_id=marker.get("session_id") if module in {"module_2", "module_3"} else None,
+        session_id=session_id,
+        evidence_cycle_id=marker.get("cycle_id") if module in {"module_2", "module_3"} else None,
+        cycle_id=state.get("active_cycle_id"),
+        m4_missing_fields=m4_missing,
+        require_summary=module in {"module_2", "module_3"},
+        require_fingerprint=module in {"module_2", "module_3"},
+    )
+    # A structurally complete draft is still only a draft until the router has
+    # published the verified summary and opened the confirmation boundary.
+    # Expose that phase gate here so the program API and reply guard cannot
+    # accidentally promise a transition from a merely complete extraction.
+    from .workflow_readiness import CONFIRMATION_WINDOW_CLOSED, REVIEW_ACTION_MISSING
+    if module in {"module_2", "module_3", "module_4"} and state.get("last_transition_reason") != "awaiting_record_confirmation":
+        readiness["ready"] = False
+        readiness["reasons"].append({
+            "code": CONFIRMATION_WINDOW_CLOSED,
+            "message": "当前模块尚未进入可确认状态",
+        })
+    review_action = None
+    if module == "module_4" and pending:
+        review_details = schema.tables["pa_review_details"]
+        detail = (await db.execute(select(review_details).where(
+            review_details.c.review_id == pending["id"]))).mappings().one_or_none()
+        review_action = detail["action"] if detail else None
+        allowed_actions = {1: {"continue"}, 3: {"adjust"},
+                           4: {"end", "pause"}, 2: {"replace_keep", "replace_pause"}}
+        valid_source = False
+        quote = detail.get("source_quote") if detail else None
+        if detail and detail["source_message_id"] and isinstance(quote, str) and quote.strip():
+            source = (await db.execute(select(ConversationMessage).where(
+                ConversationMessage.id == detail["source_message_id"],
+                ConversationMessage.conversation_id == conversation.id,
+                ConversationMessage.role == "user"))).scalar_one_or_none()
+            valid_source = bool(source and quote in source.content)
+        pause_word = r"暂停|先停|停一阵|暂时不做|先放一放"
+        action_semantics_ok = review_action not in {"pause", "replace_pause"} or bool(
+            detail and isinstance(quote, str) and re.search(pause_word, quote))
+        if (review_action not in allowed_actions.get(pending.get("review_decision"), set())
+                or not valid_source or not action_semantics_ok):
+            readiness["ready"] = False
+            readiness["reasons"].append({
+                "code": REVIEW_ACTION_MISSING,
+                "message": "复盘方向缺少聊天中的真实决定证据",
+            })
+    readiness["review_action"] = review_action
+    readiness["confirmation_window_open"] = state.get("last_transition_reason") == "awaiting_record_confirmation"
+    return {
+        **readiness,
+        "marker": marker,
+        "extraction_fresh": extraction_fresh,
+        "expected_fingerprint": marker.get("fingerprint"),
+        "actual_fingerprint": actual_fingerprint,
+        "evidence_session_id": marker.get("session_id"),
+        "evidence_cycle_id": marker.get("cycle_id"),
+    }
+
+
+
+async def validate_confirmation(
+    db, *, conversation, state, user_id, session_id, payload,
+    extraction_assistant_message_id=None, confirmation_user_message_id=None,
+):
     pending = await draft(db, state, user_id)
     if state["row_version"] != payload.row_version or not pending or pending["id"] != payload.record_id or record_hash(pending) != payload.record_hash:
         raise HTTPException(409, "记录已更新，请重新查看后确认")
@@ -52,15 +159,26 @@ async def validate_confirmation(db, *, conversation, state, user_id, session_id,
         raise HTTPException(409, "当前模块的必要讨论尚未完成")
     module, cycle_id, goal_id = state["current_module"], state["active_cycle_id"], state["active_goal_id"]
     table = schema.tables[TABLES[module]]
-    if module in {"module_2", "module_3", "module_4"} and not await module_extraction_is_current(
-            db, conversation_id=conversation.id, state=state, module=module):
-        raise HTTPException(409, "最新一轮讨论尚未成功刷新记录，请继续讨论后再确认")
     if module == "module_1":
         from .m1_contract import missing_m1_fields
         if await current_m1_missing(db, pending, conversation.id, session_id):
             raise HTTPException(409, "M1 的经历/低披露选择、理解或目标意愿证据尚未齐全，请继续讨论后刷新")
-    if module == "module_3" and not pending["negotiated_record_plan"]:
-        raise HTTPException(409, "记录办法尚未明确，请继续讨论")
+    # Use one deterministic readiness result for M2/M3/M4.  The existing
+    # module-specific checks below remain for M1 and the M4 review action, but
+    # all record-shape/evidence failures now carry stable reason codes.
+    if module in {"module_2", "module_3", "module_4"}:
+        readiness = await confirmation_readiness(
+            db, conversation=conversation, state=state, user_id=user_id,
+            session_id=session_id, pending=pending,
+            extraction_assistant_message_id=extraction_assistant_message_id,
+            confirmation_user_message_id=confirmation_user_message_id,
+        )
+        if not readiness["ready"]:
+            codes = [item["code"] for item in readiness["reasons"]]
+            messages = [item["message"] for item in readiness["reasons"]]
+            raise HTTPException(409, {"message": "；".join(dict.fromkeys(messages)),
+                                      "reason_codes": codes,
+                                      "reasons": readiness["reasons"]})
     if module == "module_4":
         from .m4_contract import missing_fields
         if missing_fields(pending, session_id=session_id, cycle_id=cycle_id):
@@ -96,12 +214,20 @@ async def commit_confirmation(db, *, conversation, state, user_id, pending, mess
     elif module == "module_2":
         await confirm_plan(db, user_id=user_id, goal_id=goal_id, cycle_id=cycle_id,
                            plan_id=pending["id"], message_id=message.id)
+        progress = schema.tables["pa_cycle_progress"]
+        await db.execute(update(progress).where(progress.c.cycle_id == cycle_id).values(
+            module_2_steps=list(MODULE_STEP_KEYS["module_2"]),
+            row_version=progress.c.row_version + 1, updated_at=now()))
         next_module = "module_3"
     elif module == "module_3":
         await db.execute(update(table).where(table.c.id == pending["id"]).values(**common, acceptance_status="confirmed"))
         cycles = schema.tables["pa_cycles"]
         await db.execute(update(cycles).where(cycles.c.id == cycle_id, cycles.c.goal_id == goal_id).values(
             module_three_record_id=pending["id"], status="waiting_execution"))
+        progress = schema.tables["pa_cycle_progress"]
+        await db.execute(update(progress).where(progress.c.cycle_id == cycle_id).values(
+            module_3_steps=list(MODULE_STEP_KEYS["module_3"]),
+            row_version=progress.c.row_version + 1, updated_at=now()))
         next_module, flow = "module_4", "waiting_execution"
     else:
         # The column identifies the actual ABC acknowledgement, not

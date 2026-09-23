@@ -28,7 +28,11 @@ async def test_native_reasoning_is_opt_in_single_request(provider_type, include_
 @pytest.mark.parametrize("mode", ["normal", "empty_reasoning", "invalid", "timeout", "no_chunks"])
 async def test_reasoning_is_separate_and_not_synthesized(context, provider, mode):
     async def complete(**kwargs):
-        assert kwargs["include_reasoning"] is True
+        # Production mediator calls are deliberately non-thinking.  A stub
+        # that returns a reasoning field anyway must not leak it to the UI.
+        assert kwargs["include_reasoning"] is False
+        assert kwargs["reasoning_effort"] is None
+        assert kwargs["max_tokens"] == 512
         if mode == "timeout":
             raise TimeoutError
         return Completion(text="invalid" if mode == "invalid" else '{"selected_ids":["one"],"guidance":"GUIDANCE_ONLY"}',
@@ -39,7 +43,7 @@ async def test_reasoning_is_separate_and_not_synthesized(context, provider, mode
     selected, block, metrics = await mediate_knowledge(state={"user_input":"synthetic"},module="module_2",
         knowledge=chunks,provider=provider,settings=context.settings,debug_output=output)
     assert "THOUGHT_ONLY" not in str(metrics) and "THOUGHT_ONLY" not in block
-    assert output.get("reasoning_content") == (None if mode in ("empty_reasoning", "timeout", "no_chunks") else "THOUGHT_ONLY")
+    assert output.get("reasoning_content") is None
     if mode in ("invalid", "timeout", "no_chunks"):
         assert selected == [] and block == ""
 
@@ -101,12 +105,15 @@ async def test_compact_input_preserves_full_safety_facts(context, provider):
         payload=json.loads(kwargs["user"])
         assert payload["facts"] == facts
         assert kwargs["user"] == json.dumps(payload,ensure_ascii=False,separators=(",",":"))
-        assert kwargs["reasoning_effort"] == "low"
+        assert kwargs["reasoning_effort"] is None
+        assert kwargs["include_reasoning"] is False
         return Completion(text='{"selected_ids":[],"guidance":"先澄清约束"}',model="test")
     provider.route_detailed=complete
     state={"user_input":"synthetic","knowledge_context":{"facts":facts}}
     _,_,metrics=await mediate_knowledge(state=state,module="module_2",knowledge=[KnowledgeChunk("one","evidence","test")],provider=provider,settings=context.settings)
-    assert metrics["status"] == "completed" and metrics["timeout_seconds"] == 20
+    assert metrics["status"] == "completed" and metrics["timeout_seconds"] == 8
+    assert metrics["configured_timeout_seconds"] == 8
+    assert metrics["max_tokens"] == 512
     facts[0]["text"]="约束"*30000
     _,_,metrics=await mediate_knowledge(state=state,module="module_2",knowledge=[KnowledgeChunk("one","evidence","test")],provider=provider,settings=context.settings)
     assert metrics["reason"] == "context_too_large"

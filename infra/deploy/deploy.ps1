@@ -2,10 +2,12 @@ param(
     [string]$Server = "root@8.134.178.40",
     [string]$IdentityFile = "$HOME\.ssh\bacoach_deploy_20260907_ed25519",
     [switch]$SkipChecks,
-    [switch]$SkipDatabaseTasks
+    [switch]$SkipDatabaseTasks,
+    [switch]$CodeOnly
 )
 
 $ErrorActionPreference = "Stop"
+if ($CodeOnly) { $SkipDatabaseTasks = $true }
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $ReleaseId = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
 $Archive = Join-Path $env:TEMP "bacoach-$ReleaseId.tar.gz"
@@ -92,17 +94,23 @@ try {
     # Keep the privileged release runner versioned with the project. This is
     # especially important for additive schema migrations that must run before
     # the new ORM code starts selecting its new columns.
+    $RunnerFile = if ($CodeOnly) { "infra\deploy\server-deploy-chat-hotfix.sh" } else { "infra\deploy\server-deploy.sh" }
+    $RunnerName = if ($CodeOnly) { "bacoach-deploy-chat-hotfix" } else { "bacoach-deploy-release" }
     scp -i $IdentityFile -o BatchMode=yes -o ConnectTimeout=25 `
-        (Join-Path $ProjectRoot "infra\deploy\server-deploy.sh") `
+        (Join-Path $ProjectRoot $RunnerFile) `
         "${Server}:$RemoteDeployScript"
     if ($LASTEXITCODE -ne 0) { throw "deploy-script upload failed" }
     ssh -i $IdentityFile -o BatchMode=yes $Server `
-        "install -m 0755 '$RemoteDeployScript' /usr/local/sbin/bacoach-deploy-release && rm -f '$RemoteDeployScript'"
+        "install -m 0755 '$RemoteDeployScript' /usr/local/sbin/$RunnerName && rm -f '$RemoteDeployScript'"
     if ($LASTEXITCODE -ne 0) { throw "deploy-script install failed" }
 
     $DatabaseTaskFlag = if ($SkipDatabaseTasks) { " '--skip-database-tasks'" } else { "" }
-    ssh -i $IdentityFile -o BatchMode=yes $Server `
-        "sudo /usr/local/sbin/bacoach-deploy-release '$ReleaseId' '$RemoteArchive'$DatabaseTaskFlag"
+    $RemoteCommand = if ($CodeOnly) {
+        "sudo /usr/local/sbin/$RunnerName '$ReleaseId'"
+    } else {
+        "sudo /usr/local/sbin/$RunnerName '$ReleaseId' '$RemoteArchive'$DatabaseTaskFlag"
+    }
+    ssh -i $IdentityFile -o BatchMode=yes $Server $RemoteCommand
     if ($LASTEXITCODE -ne 0) { throw "remote deployment failed" }
 
     curl.exe --fail --silent --show-error https://bacoach.xyz/ --output NUL

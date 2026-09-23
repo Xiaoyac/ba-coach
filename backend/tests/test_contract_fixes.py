@@ -21,6 +21,24 @@ def test_complete_plan_and_unmatched_barrier():
     assert missing_plan_fields(PLAN)==[]
     assert 'barrier_coping_plan' in missing_plan_fields({**PLAN,'potential_barriers':['下雨']})
 
+
+def test_barrier_explanation_can_cover_a_canonical_barrier():
+    # The extractor may keep the short obstacle as a label and put its
+    # concrete explanation in a second barrier row. Both are covered by the
+    # same user-provided coping plan and should not block a complete card.
+    plan = {**PLAN,
+        "potential_barriers": ["贪睡", "周日中午午睡容易睡过头，可能影响到两点见面"],
+        "barrier_coping_plan": [
+            {"barrier": "贪睡", "plan": "马哥提醒我"},
+            {"barrier": "贪睡", "plan": "那我就定个闹钟"},
+        ]}
+    assert missing_plan_fields(plan) == []
+
+
+def test_unrelated_uncovered_barrier_still_blocks():
+    plan = {**PLAN, "potential_barriers": ["忘记", "下雨"]}
+    assert "barrier_coping_plan" in missing_plan_fields(plan)
+
 @pytest.mark.parametrize("valid", [True,False])
 async def test_router_revocation_requires_current_quote(provider,valid):
     provider.route_result=json.dumps(dict(target_module='3',completed_steps=list(MODULE_STEP_KEYS['module_2']),

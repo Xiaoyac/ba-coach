@@ -16,14 +16,15 @@ export const localPushId = () => localStorage.getItem(BINDING_KEY);
 export type PushCheck = {id:string;device_id:string;state:string;due_at:string;expires_at:string;
   displayed_at:string|null;had_open_window:boolean|null;http_status:number|null};
 export const readPushChecks = ():Promise<{items:PushCheck[]}> => request('checks');
-export async function schedulePushCheck():Promise<PushCheck> {
+export async function schedulePushCheck(delaySeconds=5):Promise<PushCheck> {
+  if(!Number.isInteger(delaySeconds)||delaySeconds<1||delaySeconds>600) throw new Error('测试延迟需为 1–600 秒的整数。');
   const id=localPushId();
   if(!id) throw new Error('请先在此浏览器开启提醒。');
   const reg=await navigator.serviceWorker.getRegistration('/');
   if(!reg?.active?.scriptURL.endsWith('/pa-push-sw.js')) throw new Error('通知服务尚未就绪，请重新开启提醒。');
   // Existing subscribers need the receipt-capable worker too; no new permission.
   await bounded(reg.update());
-  return request('checks','POST',{device_id:id});
+  return request('checks','POST',{device_id:id,delay_seconds:delaySeconds});
 }
 
 export function pushCheckMessage(check:PushCheck):string {
@@ -32,12 +33,16 @@ export function pushCheckMessage(check:PushCheck):string {
     :check.had_open_window===true?'浏览器报告通知显示成功，但当时仍有本站窗口，尚未验证关页接收。'
     :'浏览器报告通知显示成功，无法确定当时是否关闭网页。';
   if(check.state==='cancelled') return '测试已取消：通知订阅、登录状态或提醒偏好发生了变化。';
+  if(check.state==='unreachable') return '服务器连接浏览器推送服务失败，尚未确认送达。需要检查服务器网络出口；重新授权通知通常无法解决此问题。';
+  if(check.state==='timeout') return '服务器连接或发送超时，尚未确认送达。请检查服务器与推送服务的网络连接；不会自动重复发送。';
   if(check.state==='failed') return '推送服务拒绝了请求，尚未确认送达。请检查权限，必要时重新开启提醒。';
   if(new Date(check.expires_at).getTime()<=Date.now() || check.state==='expired') return '测试窗口已结束，没有收到浏览器确认。这不一定表示通知未显示，请同时检查系统通知中心。';
   if(check.state==='accepted') return '推送服务已接收，等待浏览器确认；这还不代表设备收到通知。';
   if(check.state==='unknown') return '发送结果不明，等待浏览器确认；不会自动重发，避免重复打扰。';
   if(check.state==='attempting') return '服务器正在发送，暂未收到浏览器确认。';
-  return '已预约。现在可以关闭本站所有标签页或离开主屏幕应用，不要退出登录；约一分钟后留意系统通知。';
+  const due=new Date(check.due_at);
+  if(due.getTime()<Date.now()-15000) return '测试已到发送时间，但服务器尚未处理。请稍后查看结果；持续无变化时需要检查推送后台服务。';
+  return `已预约。预计 ${due.toLocaleTimeString('zh-CN',{hour12:false})} 开始发送。现在可以关闭本站所有标签页或离开主屏幕应用，不要退出登录。`;
 }
 
 export function pushSupport():string|null {

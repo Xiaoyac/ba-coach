@@ -7,6 +7,7 @@ compiled source and need an explicit precedence decision or cleanup.
 from __future__ import annotations
 
 import json
+import runpy
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,6 +22,7 @@ def main() -> None:
     prompts = ROOT / "backend/app/prompts.py"
     sidebar = ROOT / "frontend/components/ConversationSidebar.tsx"
     findings = []
+    effective_findings = runpy.run_path(str(ROOT / 'infra/qa/response-quality-audit-0918.py'))['static_prompt_audit']()['findings']
 
     checks = [
         {
@@ -59,7 +61,7 @@ def main() -> None:
         old_lines = locations(check["file"], check["old"])
         new_file = check.get("new_file", check["file"])
         new_lines = locations(new_file, check["new"])
-        if old_lines and new_lines:
+        if old_lines or not new_lines:
             findings.append({
                 "id": check["id"],
                 "file": str(check["file"].relative_to(ROOT)),
@@ -75,11 +77,11 @@ def main() -> None:
     ui_check = {"id": "ui_current_daily_record_entry", "file": str(sidebar.relative_to(ROOT)),
                 "lines": sidebar_lines, "present": bool(sidebar_lines)}
     report = {
-        "scope": "local static source check",
-        "finding_count": len(findings),
-        "findings": findings,
+        "scope": "local static source and compiled prompt check",
+        "finding_count": len(findings) + len(effective_findings),
+        "findings": findings + effective_findings,
         "ui_source_check": ui_check,
-        "status": "findings" if findings else "passed",
+        "status": "findings" if findings or effective_findings or not sidebar_lines else "passed",
         "limitations": [
             "This finds textual contradictions/stale references only; it does not prove how a provider will resolve them.",
             "No model, network, database, production site, or user data was accessed.",
@@ -88,8 +90,10 @@ def main() -> None:
     out = ROOT / ".test-tmp/prompt-consistency-audit-report.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"status": report["status"], "finding_count": len(findings),
+    print(json.dumps({"status": report["status"], "finding_count": report["finding_count"],
                       "report": str(out)}, ensure_ascii=False))
+    if report['status'] != 'passed':
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

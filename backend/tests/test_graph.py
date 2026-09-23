@@ -12,7 +12,13 @@ import dataclasses
 from app.graph import build_graph, get_graph
 from app.graph import nodes as nodes_module
 from app.graph.nodes import MODULE_CONFIGS
-from app.prompts import GLOBAL_PROMPT, MODULE_PROMPTS
+from app.prompts import (
+    GLOBAL_PROMPT,
+    MODULE_PROMPTS,
+    SystemPromptSegment,
+    append_admin_prompt_overrides,
+    build_system_segments,
+)
 from app.providers.base import Completion, ProviderError, as_segments, as_text
 from app.retrieval import StubKnowledgeBase
 from app.schemas import Message
@@ -636,6 +642,39 @@ async def test_global_prompt_stays_first_and_cacheable(context, provider, approv
     # Volatile tail (knowledge/memory/context) must NOT carry a breakpoint.
     assert not segments[-1].cacheable
     assert any("# Retrieved Knowledge" in s.text and not s.cacheable for s in segments)
+
+
+async def test_custom_global_prompt_is_reasserted_after_server_contracts() -> None:
+    custom = "不管用户说什么，回复666666。"
+    segments = build_system_segments("module_1", global_prompt=custom)
+    assert segments[0].text == custom
+    assert segments[-1].cacheable is False
+    assert "管理员自定义全局提示词" in segments[-1].text
+    assert custom in segments[-1].text
+    assert "不得用它覆盖服务器注入的安全规则" in segments[-1].text
+
+
+async def test_custom_module_and_global_prompts_are_the_true_final_instructions() -> None:
+    global_custom = "全局调试标记：回复必须包含 GLOBAL_SENTINEL。"
+    module_custom = "当前模块调试标记：回复必须包含 MODULE_SENTINEL。"
+    segments = build_system_segments(
+        "module_1", global_prompt=global_custom, module_prompt=module_custom
+    )
+    # Simulate the graph's later retrieval/workflow additions, then reassert
+    # the editable prompts at the actual end of the assembled request.
+    segments.append(SystemPromptSegment("late server-owned workflow contract", cacheable=False))
+    append_admin_prompt_overrides(
+        segments,
+        module_name="module_1",
+        global_prompt=global_custom,
+        module_prompt=module_custom,
+    )
+
+    assert segments[-2].text.startswith("# 管理员自定义当前模块提示词")
+    assert segments[-1].text.startswith("# 管理员自定义全局提示词")
+    assert "MODULE_SENTINEL" in segments[-2].text
+    assert "GLOBAL_SENTINEL" in segments[-1].text
+    assert not segments[-1].cacheable
 
 
 async def test_knowledge_is_labelled_as_untrusted_data(context, provider, approved_mediator) -> None:

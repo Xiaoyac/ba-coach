@@ -20,6 +20,7 @@ release_dir="$root_dir/releases/$release_id"
 current_link="$root_dir/current"
 previous_target=""
 push_was_active="false"
+deploy_env_file=""
 if systemctl is-active --quiet bacoach-pa-push.service; then
   push_was_active="true"
 fi
@@ -43,6 +44,9 @@ fi
 
 rollback() {
   local status=$?
+  if [[ -n "$deploy_env_file" ]]; then
+    rm -f "$deploy_env_file"
+  fi
   if [[ $status -ne 0 && -n "$previous_target" && -d "$previous_target" ]]; then
     echo "deployment failed; restoring $previous_target" >&2
     if [[ "$push_was_active" == "true" ]]; then
@@ -77,10 +81,17 @@ if [[ "$skip_database_tasks" == "true" ]]; then
   echo "skipping database migrations and knowledge import (code-only release)"
 else
   echo "running idempotent app-owned schema migrations"
-  runuser -u bacoach -- bash -lc "set -a; source <(sed 's/\r$//' /etc/bacoach/backend.env); set +a; cd '$release_dir/backend' && PYTHONPATH='$release_dir/backend' .venv/bin/python scripts/add_latency_telemetry.py"
+  # The backend env file is intentionally root-only because it contains provider
+  # credentials. Give the deployment user a short-lived, mode-0600 copy only for
+  # these app-owned migration/import commands, then remove it before cutover.
+  deploy_env_file="$release_dir/.deploy-backend.env"
+  install -o bacoach -g bacoach -m 0600 /etc/bacoach/backend.env "$deploy_env_file"
+  runuser -u bacoach -- bash -lc "set -a; source <(sed 's/\r$//' '$deploy_env_file'); set +a; cd '$release_dir/backend' && PYTHONPATH='$release_dir/backend' .venv/bin/python scripts/add_latency_telemetry.py"
 
   echo "importing curated shared knowledge base"
-  runuser -u bacoach -- bash -lc "set -a; source <(sed 's/\r$//' /etc/bacoach/backend.env); set +a; cd '$release_dir/backend' && PYTHONPATH='$release_dir/backend' .venv/bin/python scripts/import_project_knowledge.py"
+  runuser -u bacoach -- bash -lc "set -a; source <(sed 's/\r$//' '$deploy_env_file'); set +a; cd '$release_dir/backend' && PYTHONPATH='$release_dir/backend' .venv/bin/python scripts/import_project_knowledge.py"
+  rm -f "$deploy_env_file"
+  deploy_env_file=""
 fi
 
 # Never leave the reminder worker running against the previous release after

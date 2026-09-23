@@ -58,7 +58,7 @@ MODULE_ONE: tuple[Spec, ...] = (
     ),
     Spec("coping_behavior", "text", "同一事件实际行动或不行动，不是未来计划；刷手机、躺着不等于回避"),
     Spec("coping_consequence", "text", "同一事件的实际反馈；没有明显变化也有效，不写假设结果或推断因果"),
-    Spec("ai_depression_cycle_summary", "text", "逻辑名 behavior_state_relation_summary：教练已向用户表述的最新行为—状态/结果关系，尽量逐字提取。不是必须存在抑郁循环，机制标签需要额外的重复证据"),
+    Spec("ai_depression_cycle_summary", "text", "逻辑名 behavior_state_relation_summary：教练让用户核对的当前具体事件行为—状态/结果关系原文，完整连续逐字提取，与m1_contract.summary_quote一致。不要用后续一般性BA教育或收尾回顾替换已获认可的事件总结；只有事实被纠正才更新并重新确认。不是必须存在抑郁循环，机制标签需要额外的重复证据"),
     Spec("user_approval_level", "level", f"仅对最新关系总结的认可，非 BA 理解或目标意愿；纠正使旧认可失效，{LEVEL_SCALE}"),
     Spec(
         "attempted_relief_methods",
@@ -87,7 +87,7 @@ MODULE_TWO: tuple[Spec, ...] = (
     Spec("target_activity_location", "varchar", "在哪里做（Where）", 255),
     Spec("target_activity_duration_minutes", "int", "计划时长，单位分钟，整数"),
     Spec("target_activity_companion", "varchar", "和谁一起（Who），独自完成写「独自」", 32),
-    Spec("frequency_rule", "json", '明确表达的执行频率，{"schema_version":1,"text":"每周三次"}，不得推断，未知为 null'),
+    Spec("frequency_rule", "json", '明确表达的执行频率或一次性安排，{"schema_version":1,"text":"每周三次"}；“今天试一次”“先做一次”也要原样记录，不得从单独日期推断，未知为 null'),
     Spec("potential_barriers", "json", "可能遇到的障碍，字符串数组；没谈到给 []；只有用户明确表示无障碍时记录该原意，不得把未知写成无障碍"),
     Spec(
         "barrier_coping_plan",
@@ -105,7 +105,12 @@ MODULE_THREE: tuple[Spec, ...] = (
     Spec("ai_record_requirement", "text", "教练向用户说明的记录要求"),
     Spec("user_acceptance_level", "level", f"用户对记录要求的接受程度，{LEVEL_SCALE}"),
     Spec("user_acceptance_feeling", "text", "用户对记录这件事表达的感受"),
-    Spec("negotiated_record_plan", "text", "双方最终商定的记录方式与格式"),
+    # This field is also the structured snapshot shown in the confirmation
+    # card.  It must be populated for a complete *proposal* before consent;
+    # otherwise the first M3 card cannot be rendered or versioned and the
+    # user's next natural confirmation has nothing authoritative to bind to.
+    # The record becomes final only when the user's confirmation is committed.
+    Spec("negotiated_record_plan", "text", "当前对话中完整、可执行的拟议记录方式与格式；用户确认后才视为最终商定"),
     Spec("has_contract_reached", "flag", "是否已就执行契约达成一致，true 或 false"),
     Spec("difficulty_feedback_mechanism", "text", "约定的遇到困难时的反馈机制"),
 )

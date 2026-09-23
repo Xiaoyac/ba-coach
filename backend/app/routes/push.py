@@ -33,6 +33,7 @@ class Subscription(BaseModel):
 class CheckRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     device_id: str = Field(min_length=1, max_length=36)
+    delay_seconds: int = Field(default=60, ge=1, le=600, strict=True)
 
 
 class Receipt(BaseModel):
@@ -112,7 +113,7 @@ async def history(caller: CallerIdentity = Depends(require_caller), db=Depends(g
 @router.post('/checks', status_code=202)
 async def create_check(payload: CheckRequest, caller: CallerIdentity = Depends(require_caller), db=Depends(get_db)):
     require_available()
-    return await schedule_check(db, caller, payload.device_id)
+    return await schedule_check(db, caller, payload.device_id, delay_seconds=payload.delay_seconds)
 
 
 @router.get('/checks')

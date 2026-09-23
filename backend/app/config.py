@@ -45,7 +45,12 @@ class Settings(BaseSettings):
     knowledge_intent_gate_enabled: bool = True
     knowledge_mediator_enabled: bool = True
     answer_validator_enabled: bool = True
-    knowledge_mediator_timeout_seconds: float = Field(default=20, ge=1, le=60)
+    # The mediator is a bounded selector, not a second conversational model.
+    # Eight seconds is an upper bound for the user-visible critical path;
+    # failures remain fail-closed and never release raw retrieved chunks.
+    knowledge_mediator_timeout_seconds: float = Field(default=8, ge=1, le=60)
+    knowledge_mediator_include_reasoning: bool = False
+    knowledge_mediator_max_tokens: int = Field(default=512, ge=128, le=512)
     knowledge_mediator_reasoning_effort: Literal["low", "medium", "high"] | None = "low"
     api_prefix: str = "/api"
 
@@ -73,12 +78,39 @@ class Settings(BaseSettings):
 
     # ---- Provider selection -------------------------------------------
     default_provider: Provider = "claude"
+    # Only exact short acknowledgements use the same main model without native
+    # thinking. Context, risk screening, retrieval rules and validators remain.
+    chat_fast_ack_enabled: bool = True
+    # Low effort is opt-in: the live probe can exhaust its output budget without
+    # producing routing JSON. Keep production behaviour until separately qualified.
+    module_router_reasoning_effort: Literal["disabled", "low", "medium", "high", "provider_default"] = "provider_default"
 
     # ---- Module router -------------------------------------------------
+    # A post-hoc router normally runs after the visible reply.  A subsequent
+    # chat request should give it a brief chance to publish the next module,
+    # but must not inherit an upstream provider's (potentially minute-long)
+    # timeout. A newer durable reply safely replaces a stale router;
+    # state-changing endpoints keep their strict wait semantics.
+    routing_wait_timeout_seconds: float = Field(default=2.0, ge=0.1, le=30)
+    # Hard client-side budgets for calls to the upstream model APIs.  The SDK
+    # timeout is a per-request/read timeout, while providers also enforce the
+    # same value around the complete response (including a stream) so a slow
+    # model cannot keep a chat turn open indefinitely.  Retries default to zero
+    # because a retry after a long timeout multiplies the user-visible tail.
+    provider_request_timeout_seconds: float = Field(default=60.0, ge=5, le=300)
+    router_request_timeout_seconds: float = Field(default=12.0, ge=2, le=120)
+    # Background reasoning/extraction already has a ~24s observed P95. Do not
+    # cut these at the small foreground classifier budget and break progress.
+    background_model_timeout_seconds: float = Field(default=30.0, ge=2, le=120)
+    provider_max_retries: int = Field(default=0, ge=0, le=2)
     # Token cap for the router agent's call (app.router_agent) — a compact
     # JSON object, so this stays small. Shared with CLAUDE_ROUTER_MODEL /
     # DEEPSEEK_ROUTER_MODEL below, which is also the model that call uses.
     router_max_tokens: int = 256
+    # Provider used for post-hoc module routing and risk classification.  Keep
+    # this explicit so production can move routing to the currently funded
+    # provider without changing the user's visible model preference.
+    router_provider_name: Literal["claude", "deepseek", "doubao"] = "deepseek"
     # Thinking-enabled module routing needs enough room for reasoning plus the
     # final JSON decision. Other router users keep the tighter budget above.
     router_reasoning_max_tokens: int = 1024
@@ -115,12 +147,17 @@ class Settings(BaseSettings):
     # thinking config.
     claude_router_model: str = "claude-haiku-4-5"
 
-    # ---- DeepSeek ------------------------------------------------------
+    # ---- Qwen-Max via the existing OpenAI-compatible provider ----------
+    # The compatibility provider and environment variable names remain
+    # ``deepseek_*`` so the production API address/key contract is unchanged.
+    # The configured wire model is Qwen-Max.
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-chat"  # or "deepseek-reasoner"
+    deepseek_model: str = "qwen-max"
     deepseek_max_tokens: int = 4000
-    # Sampling temperature for the *conversational* call. Left unset, DeepSeek
+    qwen_thinking_budget: int = Field(default=1024, ge=128, le=8000)
+    deepseek_reasoning_effort: Literal["low", "medium", "high", "provider_default"] = "provider_default"
+    # Sampling temperature for the *conversational* call. Left unset, Qwen-Max
     # defaults to 1.0, which is far too loose for this app: the module prompts
     # are a procedure with gates and ordering, and at 1.0 the model reads them
     # as tone rather than as rules — which is exactly what "it behaves like a
@@ -128,7 +165,7 @@ class Settings(BaseSettings):
     # hardcodes 0 (it must be deterministic); this keeps the coach mostly
     # deterministic while leaving a little room for natural phrasing.
     deepseek_temperature: float = 0.3
-    deepseek_router_model: str = "deepseek-chat"
+    deepseek_router_model: str = "qwen-max"
 
     # ---- Doubao / Volcengine Ark --------------------------------------
     # Ark exposes an OpenAI-compatible chat-completions endpoint.  The model
@@ -142,13 +179,17 @@ class Settings(BaseSettings):
     # Keep native thinking enabled, but ask Seed 2.1 to spend less time on
     # ordinary coaching turns.  Sent through Ark's OpenAI-compatible
     # ``extra_body`` so older OpenAI SDK type definitions cannot discard it.
-    doubao_reasoning_effort: Literal["low", "medium", "high"] = "low"
+    doubao_reasoning_effort: Literal["disabled", "low", "medium", "high"] = "low"
     doubao_router_model: str | None = None
 
     # ---- Session store -------------------------------------------------
     # Number of *messages* (user + assistant) kept per session before the
-    # oldest ones are dropped. 20 ≈ 10 exchanges.
-    max_history_messages: int = 40
+    # oldest ones are dropped. Keep enough for a full M1 conversation: a
+    # 40-message window (about ten exchanges) could discard the user's
+    # opening trigger while they were still discussing it. A compact early
+    # context anchor is also persisted by the graph for conversations longer
+    # than this window.
+    max_history_messages: int = 80
     session_ttl_seconds: int = 60 * 60 * 6  # 6 hours
     redis_url: str | None = None  # if set, use Redis instead of in-memory
 

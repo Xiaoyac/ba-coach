@@ -144,6 +144,9 @@ export default function PromptManagerModal({ onClose }: { onClose: () => void })
             <p className="mt-1 text-xs leading-relaxed text-ink-faint">
               系统级共享配置，所有管理员编辑同一份内容；保存后会影响所有用户的下一轮对话。
             </p>
+            <p className="mt-1 text-xs leading-relaxed text-ink-faint">
+              这里编辑的是模型理解层；服务器的流程状态、确认门禁、确定性卡片和回复完整性校验仍会优先生效。
+            </p>
           </div>
           <button
             type="button"

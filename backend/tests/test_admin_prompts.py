@@ -135,6 +135,7 @@ def test_saved_override_is_used_by_the_next_model_turn(
     system = as_text(provider.systems[-1])
     assert "GLOBAL OVERRIDE SENTINEL" in system
     assert "MODULE ONE OVERRIDE SENTINEL" in system
+    assert system.rfind("MODULE ONE OVERRIDE SENTINEL") < system.rfind("GLOBAL OVERRIDE SENTINEL")
 
 
 def test_saved_web_override_changes_the_agent_reply(

@@ -1,9 +1,13 @@
 import dataclasses
 import pytest
+from sqlalchemy import insert, update
+from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.answer_validator import validate_answer
-from app.reply_workflow import truthful_workflow_reply
+from app.database_v2_schema import metadata as schema
+from app.reply_workflow import read_reply_workflow, truthful_workflow_reply, workflow_prompt
 from app.graph import get_graph
 from app.providers.base import StreamDelta
+from test_goal_overview import goal_api
 
 PENDING={'available':True,'current_module':'module_2','plan_confirmed':False}
 BAD='收到确认，目标卡片已锁定。接下来进入模块三，我们一起把计划落实到行动中。'
@@ -38,3 +42,59 @@ async def test_authority_corrects_before_delivery(context,provider,monkeypatch,s
     assert final['final_response']==truthful_workflow_reply(PENDING)
     assert final['telemetry']['answer_validator']['status']=='corrected'
     assert BAD not in ''.join(e.get('text','') for e in events if e.get('type')=='delta')
+
+
+@pytest.mark.asyncio
+async def test_reply_authority_reads_fresh_m1_dialogue_status(goal_api):
+    _, db, _ = goal_api
+    contract = {
+        'version': 'm1-20260914-v1', 'session_id': 'chat-a',
+        'path': 'personalized', 'missing_fields': ['ba_understanding', 'goal_setting_consent'],
+        'completed_steps': ['core_problem_example', 'depression_cycle_formulated'],
+        'milestones': {'m1_milestone_1': True, 'm1_milestone_2': True, 'm1_milestone_3': False},
+        'education_missing_topics': ['情绪、精力和行动相互影响'],
+        'education_evidence_complete': False, 'understanding_verified': False,
+        'goal_consent_expressed': True, 'core_questions_resolved': True,
+    }
+    await db.execute(update(schema.tables['conversation_runtime_states']).where(
+        schema.tables['conversation_runtime_states'].c.conversation_id == 1).values(
+            current_module='module_1', flow_status='active', active_goal_id=None,
+            active_cycle_id=None, last_transition_reason='discussion_required'))
+    await db.execute(insert(schema.tables['module_one_record']), {
+        'id': 'm1-reply-status', 'user_id': 'a', 'version_no': 1,
+        'record_status': 'draft', 'event_experience': {'schema_version': 2, '_m1_contract': contract},
+    })
+    await db.commit()
+    maker = async_sessionmaker(db.bind, expire_on_commit=False)
+    authority = await read_reply_workflow(maker, 'a', 'chat-a')
+    assert authority['m1_status']['missing_fields'] == ['ba_understanding', 'goal_setting_consent']
+    assert authority['m1_status']['education_missing_topics'] == ['情绪、精力和行动相互影响']
+    assert authority['m4_status'] is None
+
+
+def test_workflow_prompt_requires_real_m1_education_before_consent_or_activity():
+    prompt = workflow_prompt({
+        'available': True, 'current_module': 'module_1',
+        'm1_status': {
+            'missing_fields': ['ba_understanding', 'goal_setting_consent'],
+            'education_missing_topics': ['情绪、精力和行动相互影响', '行动不保证立刻开心'],
+            'goal_consent_expressed': True,
+        },
+    })
+    assert '逐项补充 education_missing_topics' in prompt
+    assert '不能只说“我收到/你已理解”' in prompt
+    assert '不能跳去问具体活动或重复索取目标设定同意' in prompt
+
+
+def test_workflow_prompt_exposes_m4_first_missing_evidence_action():
+    prompt = workflow_prompt({
+        'available': True, 'current_module': 'module_4', 'flow_status': 'waiting_execution',
+        'm4_status': {
+            'missing_fields': ['m4_milestone_3', 'm4_milestone_5'],
+            'completed_steps': ['execution_reviewed', 'abc_chain_completed'],
+            'review_decision': 4, 'next_action': '先补实际提供的BA教育及用户理解，再继续后续收尾。',
+        },
+    })
+    assert 'M4最新证据状态' in prompt
+    assert '按 next_action 只补当前首个缺项' in prompt
+    assert '用户已说结束/暂停也不能跳过前置证据' in prompt

@@ -344,6 +344,10 @@ async def finish_turn(
             "risk_gate_duration_ms": metrics.get("risk_gate_duration_ms"),
             "time_to_first_reasoning_token_ms": metrics.get("time_to_first_reasoning_token_ms"),
             "time_to_first_content_token_ms": metrics.get("time_to_first_content_token_ms"),
+            "reply_recovery": metrics.get("reply_recovery"),
+            # Rule codes/timing only; never store the rejected draft or its
+            # reasoning. A corrected turn is not a successful semantic check.
+            "answer_validator": metrics.get("answer_validator"),
             "knowledge_references": ({
                 **metrics["knowledge_references"],
                 "validator_status": (metrics.get("answer_validator") or {}).get("status"),

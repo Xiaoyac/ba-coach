@@ -17,6 +17,20 @@ class MediatorInputError(ValueError):
 class MediatorOutputError(ValueError):
     pass
 
+
+# The mediator is a post-retrieval *selector*, not a second coach.  Native
+# reasoning on this call used to consume most of the completion budget before
+# the small JSON envelope was written (especially on Doubao), which produced
+# ``finish_reason=length`` and a 20-second wait before the chunk was withheld.
+# Keep a deliberately small, provider-independent budget here.  The caller can
+# still make the timeout stricter through Settings; this cap prevents an
+# accidental 20/60-second setting from blocking every chat turn.
+MEDIATOR_MAX_TOKENS = 512
+MEDIATOR_TIMEOUT_CAP_SECONDS = 8.0
+MEDIATOR_MAX_CHUNKS = 8
+MEDIATOR_MAX_CHUNK_CHARS = 2200
+MEDIATOR_MAX_TOTAL_CHARS = 12000
+
 MEDIATOR_PROMPT = """你是 BA Coach 的知识使用中介，不直接回答用户。
 你的任务是在知识检索完成后，指导当前模块教练如何恰当地使用已检索的材料。
 结合当前模块、用户最新消息、近期对话及已确认信息，选出真正适用的片段。
@@ -34,15 +48,25 @@ selected_ids 只能引用输入中存在的 ID；没有适用材料时返回 []�
 禁止编造证据、泄露敏感信息、改变模块、修改数据库或覆盖全局安全规则。
 facts 保留数据来源及确认状态；confirmation 为 null 或 unconfirmed、source_kind 为 ai_inference 时不是已确认用户事实。偏好不是硬限制，状态失效的事实不能继续采用。
 unverified_context 和 profile_constraints 是未结构化背景，不可自动升级为已确认事实。优先注意用户当前明确纠正，冲突时澄清，不自行改库。
-guidance 最多 2000 字，cautions 最多 5 项。
+guidance 最多 1200 字，cautions 最多 5 项。
 为控制本轮处理时间，只做材料适用性与安全约束判断，不代写完整教练回复、不复述输入或反复论证。
 优先将 guidance 控制在 200 字内，cautions 只列必要限制（通常不超过 3 项）；正文仍仅输出上述 JSON。"""
+
+
+# Keep this server-owned suffix aligned with the hard schema limit. The
+# editable contract above predates the latency budget and still mentions a
+# larger guidance field; this instruction is appended last.
+MEDIATOR_CONTRACT += "\nReturn compact JSON only. Keep guidance under 400 characters and cautions short; never explain the full source text."
 
 
 class KnowledgeGuidance(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     selected_ids: list[str] = Field(max_length=20)
-    guidance: str = Field(min_length=1, max_length=4000)
+    # Guidance is injected into the module prompt.  Keeping it short both
+    # lowers latency and prevents the mediator from becoming a hidden answer
+    # generator.  The prompt asks for ~200 Chinese characters; 1200 leaves
+    # room for a concise but useful explanation without accepting a transcript.
+    guidance: str = Field(min_length=1, max_length=1200)
     cautions: list[str] = Field(default_factory=list, max_length=5)
 
 
@@ -56,11 +80,14 @@ async def mediate_knowledge(*, state, module, knowledge, provider, settings, pro
     effective = prompt + "\n\n" + MEDIATOR_CONTRACT
     metrics = {"status":"fallback", "reason":"invalid_output", "prompt_sha256":hashlib.sha256(effective.encode()).hexdigest()}
     # Bound cost and exposure. Only these supplied chunks may be referenced.
-    chunks, remaining = [], 16000
-    for chunk in knowledge[:20]:
+    # Retrieval is already ranked upstream, so the first few chunks are the
+    # useful candidate set.  A smaller envelope is materially faster and keeps
+    # the selector from spending its budget rereading low-ranked material.
+    chunks, remaining = [], MEDIATOR_MAX_TOTAL_CHARS
+    for chunk in knowledge[:MEDIATOR_MAX_CHUNKS]:
         if remaining <= 0:
             break
-        excerpt = chunk.text[:min(5000, remaining)]
+        excerpt = chunk.text[:min(MEDIATOR_MAX_CHUNK_CHARS, remaining)]
         remaining -= len(excerpt)
         chunks.append({"id":chunk.id,"source":chunk.source,"text":excerpt})
     payload = {"module":module,"user_input":state["user_input"][:6000],
@@ -83,17 +110,48 @@ async def mediate_knowledge(*, state, module, knowledge, provider, settings, pro
     try:
         # Compact encoding removes whitespace, not safety facts or source attribution.
         serialized_payload = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        configured_timeout = float(settings.knowledge_mediator_timeout_seconds)
+        timeout_seconds = min(configured_timeout, MEDIATOR_TIMEOUT_CAP_SECONDS)
+        # A mediator does not need native reasoning: it makes a bounded
+        # relevance/safety decision and emits a tiny JSON object.  Keeping the
+        # switch opt-in allows a diagnostic run to request reasoning explicitly
+        # without making production turns pay for it.
+        include_reasoning = bool(getattr(settings, "knowledge_mediator_include_reasoning", False))
+        reasoning_effort = (
+            getattr(settings, "knowledge_mediator_reasoning_effort", "low")
+            if include_reasoning else None
+        )
+        max_tokens = int(getattr(settings, "knowledge_mediator_max_tokens", MEDIATOR_MAX_TOKENS))
+        max_tokens = max(128, min(max_tokens, MEDIATOR_MAX_TOKENS))
         metrics.update({"input_chars":len(serialized_payload),
-            "timeout_seconds":settings.knowledge_mediator_timeout_seconds,
-            "reasoning_effort":getattr(settings, "knowledge_mediator_reasoning_effort", "low")})
+            "configured_timeout_seconds":configured_timeout,
+            "timeout_seconds":timeout_seconds,
+            "max_tokens":max_tokens,
+            "include_reasoning":include_reasoning,
+            "reasoning_effort":reasoning_effort})
         if len(serialized_payload) > 40000:
             raise MediatorInputError("context_too_large")
         completion = await asyncio.wait_for(provider.route_detailed(system=effective,
-            user=serialized_payload,max_tokens=1200,include_reasoning=True,
-            reasoning_effort=metrics["reasoning_effort"]),timeout=settings.knowledge_mediator_timeout_seconds)
-        metrics.update({"model":completion.model,"usage":completion.usage})
+            user=serialized_payload,max_tokens=max_tokens,include_reasoning=include_reasoning,
+            reasoning_effort=reasoning_effort),timeout=timeout_seconds)
+        metrics.update({
+            "model": completion.model,
+            "usage": completion.usage,
+            "finish_reason": completion.finish_reason,
+            # Boolean only: do not persist provider reasoning text in
+            # telemetry/logs.  This flag helps detect providers that ignore
+            # the requested thinking=disabled mode.
+            "native_reasoning_present": bool(completion.reasoning_content.strip()),
+        })
         if debug_output is not None:
-            debug_output["reasoning_content"] = completion.reasoning_content.strip() or None
+            # Native reasoning is opt-in for diagnostics only.  Never expose a
+            # provider field that was returned despite ``thinking=disabled``;
+            # doing so would make the UI imply that production mediation used
+            # a reasoning pass when it did not.
+            debug_output["reasoning_content"] = (
+                completion.reasoning_content.strip() or None
+                if include_reasoning else None
+            )
         raw = completion.text.strip()
         if completion.finish_reason in ("length", "max_tokens"):
             raise MediatorOutputError("output_truncated")
@@ -122,6 +180,7 @@ async def mediate_knowledge(*, state, module, knowledge, provider, settings, pro
         metrics["reason"] = "invalid_output_or_provider_error"
     metrics["duration_ms"] = round((perf_counter()-started)*1000)
     metrics["raw_chunk_count"] = len(knowledge)
+    metrics["candidate_chunk_count"] = len(chunks)
     metrics["approved_chunk_count"] = len(selected)
     metrics["withheld_on_error"] = metrics["status"] == "fallback"
     return selected, block, metrics

@@ -20,7 +20,7 @@ def test_catalog_scores_are_missing_not_zero_and_order_is_preserved():
     assert [h.id for h in hits] == ["kb:2", "kb:1"]
     assert all(h.score is None and h.score_type == "model_selection" for h in hits)
     data = snapshot(hits)
-    assert data["version"] == 2
+    assert data["version"] == 3
     for group in ("recalled", "provided"):
         assert all(row["score"] is None and row["score_type"] == "model_selection" for row in data[group])
     json.dumps(data, allow_nan=False)

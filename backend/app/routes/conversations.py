@@ -339,6 +339,11 @@ async def update_conversation(
     it. Bumping it would shuffle an untouched conversation to the top of the
     list purely because it was relabelled.
     """
+    # A delayed Router may still be enriching the latest assistant row.  Wait
+    # for that durable write before changing the same conversation row; this
+    # keeps SQLite tests and production single-writer databases from racing a
+    # background commit while preserving the strict semantics used by delete.
+    await wait_for_pending_routing(session_id)
     conversation = await _owned_or_404(
         db, session_id=session_id, subject_id=subject_id
     )

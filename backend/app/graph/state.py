@@ -94,6 +94,11 @@ class AgentState(TypedDict, total=False):
     # True only for an ordinary successful turn whose Router Agent will run
     # after the visible response has already completed.
     routing_pending: bool
+    # A deterministic replacement was delivered, not an accepted model reply.
+    # Do not extract facts, route, or summarize from a rejected generation.
+    reply_held: bool
+    # Present only after the chat transaction has actually committed consent.
+    confirmation_receipt: dict
 
     # ---- Output -------------------------------------------------------
     final_response: str

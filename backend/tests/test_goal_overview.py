@@ -162,10 +162,16 @@ async def test_agent_creates_goal_only_when_router_and_extractor_agree(goal_api)
     ])
     await db.commit()
 
+    diagnostics = {}
     assert await create_goal_from_agent_dialogue(db, session_id="new-chat-a", user_id="a",
-        data={"target_activity_content": "晚饭后散步"}, completed_steps=[], assistant_message_id=101) is None
+        data={"target_activity_content": "晚饭后散步"}, completed_steps=[], assistant_message_id=101,
+        diagnostics=diagnostics) is None
+    assert diagnostics["goal_creation"]["reason_code"] == "proposal_evidence_missing"
+    diagnostics = {}
     assert await create_goal_from_agent_dialogue(db, session_id="new-chat-a", user_id="a",
-        data={}, completed_steps=["activity_selected"], assistant_message_id=101) is None
+        data={}, completed_steps=["activity_selected"], assistant_message_id=101,
+        diagnostics=diagnostics) is None
+    assert diagnostics["goal_creation"]["reason_code"] == "activity_missing"
 
     created = await create_goal_from_agent_dialogue(db, session_id="new-chat-a", user_id="a",
         data={"target_activity_content": "晚饭后散步", "schedule_text": "每天晚饭后",
@@ -192,3 +198,29 @@ async def test_agent_creates_goal_only_when_router_and_extractor_agree(goal_api)
     owned = (await db.execute(select(schema.tables["pa_goals"].c.id).where(
         schema.tables["pa_goals"].c.user_id == "a"))).scalars().all()
     assert len(owned) == 3
+
+
+@pytest.mark.asyncio
+async def test_agent_goal_creation_uses_verified_proposal_when_router_omits_step(goal_api):
+    """A missing Router step must not discard a clearly selected chat goal."""
+    _, db, _ = goal_api
+    runtime = schema.tables["conversation_runtime_states"]
+    await db.execute(update(runtime).where(runtime.c.conversation_id == 2).values(current_module="module_2"))
+    await db.execute(insert(ConversationMessage), [
+        {"id": 110, "conversation_id": 2, "position": 0, "role": "user",
+         "content": "我选择晚饭后散步十分钟作为一个独立的小目标。"},
+        {"id": 111, "conversation_id": 2, "position": 1, "role": "assistant",
+         "content": "好，我记下你选择的晚饭后散步十分钟。"},
+    ])
+    created = await create_goal_from_agent_dialogue(db, session_id="new-chat-a", user_id="a",
+        data={"target_activity_content": "晚饭后散步十分钟", "schedule_text": "每天晚饭后",
+              "goal_proposal": {"goal_kind": "secondary",
+                  "selection_quote": "我选择晚饭后散步十分钟作为一个独立的小目标。",
+                  "activity_quote": "散步十分钟"}},
+        completed_steps=[], assistant_message_id=111)
+    assert created is not None
+    await db.commit()
+    audit = (await db.execute(select(schema.tables["ai_decision_logs"]).where(
+        schema.tables["ai_decision_logs"].c.decision_type == "agent_goal_created")
+        .order_by(schema.tables["ai_decision_logs"].c.id.desc()))).mappings().first()
+    assert audit["decision_value"]["creation_rule"] == "extractor_evidence_fallback_router_step_missing"

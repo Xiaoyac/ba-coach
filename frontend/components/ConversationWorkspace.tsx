@@ -48,6 +48,10 @@ const SYNC_FALLBACK_INTERVAL_MS = 2_000;
 type ConversationTurn = {
   id: string;
   sessionId: string;
+  /** Position/text of the submitted user row. Kept so a live snapshot can
+   * acknowledge a reply even when the POST stream never delivers EOF. */
+  baseline: number;
+  userText: string;
   startedAt: number;
   controller: AbortController;
   cancelled: boolean;
@@ -57,6 +61,21 @@ type ConversationTurn = {
   error: string | null;
   notice: string | null;
 };
+
+/**
+ * A durable assistant reply is the only safe signal for ending a local turn
+ * from the revision/event-sync path. A snapshot containing just the user row
+ * is expected while generation is still running and must not clear the UI.
+ */
+function hasDurableReplyForTurn(detail: ConversationDetail, turn: ConversationTurn): boolean {
+  const user = detail.messages[turn.baseline];
+  const assistant = detail.messages[turn.baseline + 1];
+  return detail.session_id === turn.sessionId
+    && user?.role === "user"
+    && user.content === turn.userText
+    && assistant?.role === "assistant"
+    && Boolean(assistant.content?.trim());
+}
 
 /**
  * Mirrors the server's ORDER BY (pinned desc, updated_at desc). The list
@@ -145,9 +164,16 @@ export default function ConversationWorkspace({
   const appliedRevisions = useRef(new Map<string, number>());
   const pendingFloors = useRef(new Map<string, number>());
   const turns = useRef(new Map<string, ConversationTurn>());
-  useEffect(() => () => {
-    for (const turn of turns.current.values()) turn.controller.abort();
-    turns.current.clear();
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    // React Strict Mode replays this effect in development, so set the flag
+    // in setup as well as clearing it in cleanup.
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      for (const turn of turns.current.values()) turn.controller.abort();
+      turns.current.clear();
+    };
   }, []);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [emailSettingsOpen, setEmailSettingsOpen] = useState(false);
@@ -196,6 +222,7 @@ export default function ConversationWorkspace({
   }
 
   const applyRemoteSnapshot = useCallback((detail: ConversationDetail) => {
+    if (!mountedRef.current) return;
     setConversations((prev) =>
       sortConversations(
         prev.map((entry) =>
@@ -215,7 +242,40 @@ export default function ConversationWorkspace({
     // snapshot while React is switching views. Keep its sidebar metadata,
     // but never attach its module state or messages to the active chat.
     if (activeSessionIdRef.current !== detail.session_id) return;
-    if (turns.current.has(detail.session_id)) return;
+
+    // Some mobile/proxy connections keep the POST body open after the server
+    // has committed the assistant row and the client never receives the SSE
+    // `persisted` frame. In that case the revision/event snapshot is the
+    // authoritative completion signal. Adopt the durable transcript and
+    // release this room's turn before aborting the orphaned stream. A snapshot
+    // containing only the user row is deliberately ignored: generation is
+    // still in flight and clearing it would permit duplicate submissions.
+    const running = turns.current.get(detail.session_id);
+    if (running) {
+      if (!hasDurableReplyForTurn(detail, running)) return;
+      running.messages = detail.messages;
+      running.error = null;
+      running.notice = null;
+      if (detail.next_module) {
+        running.routing = {
+          ...running.routing,
+          next_module: detail.next_module,
+          routing_pending: false,
+          routed_by: "stored_state",
+        };
+      }
+      turns.current.delete(detail.session_id);
+      pendingFloors.current.delete(detail.session_id);
+      running.controller.abort();
+      setMessages(detail.messages);
+      setRouting(running.routing);
+      busyRef.current = false;
+      setBusy(false);
+      setStopping(false);
+      setGenerationNotice(null);
+      void refreshConversations();
+      return;
+    }
 
     setRouting((prev) =>
       detail.next_module
@@ -255,6 +315,17 @@ export default function ConversationWorkspace({
         );
       return same ? prev : detail.messages;
     });
+
+    // Defensive reconciliation for an earlier task that was removed by a
+    // navigation/deletion race before its finally block could paint. Live
+    // snapshots are only applied to the active room, so clearing stale busy
+    // here cannot affect another conversation's in-flight task.
+    if (busyRef.current) {
+      busyRef.current = false;
+      setBusy(false);
+      setStopping(false);
+      setGenerationNotice(null);
+    }
   }, []);
 
   async function refreshConversations(): Promise<ConversationSummary[] | null> {
@@ -464,11 +535,15 @@ export default function ConversationWorkspace({
     revisionRef.current = null;
 
     async function reconcile() {
-      if (cancelled || inFlight || busyRef.current) return;
+      // Keep polling while a turn is streaming. The server may have already
+      // committed the reply even when a mobile/proxy swallowed the final SSE
+      // frame; applyRemoteSnapshot now distinguishes that durable reply from
+      // an in-flight user-only snapshot and clears the local turn safely.
+      if (cancelled || inFlight) return;
       inFlight = true;
       try {
         const current = await fetchConversationRevision(sessionId!);
-        if (cancelled || busyRef.current) return;
+        if (cancelled) return;
         const previous = revisionRef.current;
         if (
           previous?.sessionId === sessionId &&
@@ -477,12 +552,18 @@ export default function ConversationWorkspace({
           return;
         }
 
-        revisionRef.current = {
-          sessionId: sessionId!,
-          revision: current.revision,
-        };
         const detail = await fetchConversation(sessionId!);
-        if (!cancelled && !busyRef.current) applyRemoteSnapshot(detail);
+        // Commit the observed revision only after the corresponding full
+        // snapshot was fetched. If this second request fails transiently,
+        // leaving the old revision forces the next poll to retry instead of
+        // permanently skipping the durable assistant reply.
+        if (!cancelled) {
+          revisionRef.current = {
+            sessionId: sessionId!,
+            revision: current.revision,
+          };
+          applyRemoteSnapshot(detail);
+        }
       } catch (err) {
         if (!cancelled && isMissing(err)) dropMissingConversation(sessionId!);
         // Transient network failures stay silent; the next interval retries.
@@ -535,7 +616,8 @@ export default function ConversationWorkspace({
     const controller = new AbortController();
     const baseline = messages.length;
     const turn: ConversationTurn = {
-      id: crypto.randomUUID(), sessionId: sourceId, startedAt: Date.now(), controller, cancelled: false, stopRequested: false,
+      id: crypto.randomUUID(), sessionId: sourceId, baseline, userText: text,
+      startedAt: Date.now(), controller, cancelled: false, stopRequested: false,
       messages: [...messages, { role: "user", content: text }, {
         role: "assistant", content: "", reasoning_content: "", model_name: null,
         routing_reasoning_content: "", router_model_name: null,
@@ -618,8 +700,10 @@ export default function ConversationWorkspace({
       window.clearInterval(recovery);
       window.clearTimeout(deadline);
       recoveryRequest.current?.abort();
-      if (!ownsTask()) return; // deleted room / unmounted workspace
-      if (turn.cancelled) {
+      // Do not return early when ownership changed. A room switch or a late
+      // deletion may remove the map entry while this promise is unwinding;
+      // returning here used to leave the active UI's busy flag behind.
+      if (ownsTask() && turn.cancelled) {
         pendingFloors.current.delete(sourceId);
         turn.error = null;
         turn.routing = { ...turn.routing, routing_pending: false };
@@ -628,26 +712,41 @@ export default function ConversationWorkspace({
       }
       let detail: ConversationDetail | null = recoveredDetail;
       if (!detail) {
-        try { detail = await fetchConversation(sourceId, AbortSignal.timeout(10000)); }
-        catch { /* Live sync retries, without changing a different chat. */ }
+        // A hidden/deleted task does not need another network read. The live
+        // snapshot/revision path will reconcile it when the room is revisited.
+        if (ownsTask()) {
+          try { detail = await fetchConversation(sourceId, AbortSignal.timeout(10000)); }
+          catch { /* Live sync retries, without changing a different chat. */ }
+        }
       }
       // Recheck ownership AFTER awaiting: navigation or deletion can happen
       // during the final fetch, not just before it.
-      if (!ownsTask()) return;
-      if (detail && hasDurableReply(detail)) {
-        turn.error = null;
+      if (ownsTask()) {
+        if (detail && hasDurableReply(detail)) {
+          turn.error = null;
+          pendingFloors.current.delete(sourceId);
+        }
+        publishTurn(turn);
+      }
+
+      // Remove only this generation's entry. Never delete a newer turn that
+      // could have been created after a navigation race.
+      const sameTurn = turns.current.get(sourceId) === turn;
+      if (sameTurn) {
+        turns.current.delete(sourceId);
         pendingFloors.current.delete(sourceId);
       }
-      publishTurn(turn);
-      turns.current.delete(sourceId);
-      if (activeSessionIdRef.current === sourceId) {
+      // A completion from an older turn must not clear a newer turn that was
+      // started in the same room after the durable snapshot path removed the
+      // old entry. Only clear the room-level flag when no turn remains.
+      if (mountedRef.current && activeSessionIdRef.current === sourceId && !turns.current.has(sourceId)) {
         busyRef.current = false;
         setBusy(false);
         setStopping(false);
         if (!turn.cancelled) setGenerationNotice(null);
       }
-      if (detail) applyRemoteSnapshot(detail);
-      void refreshConversations();
+      if (detail && activeSessionIdRef.current === sourceId) applyRemoteSnapshot(detail);
+      if (sameTurn || detail) void refreshConversations();
     }
   }
 

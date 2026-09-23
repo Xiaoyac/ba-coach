@@ -281,6 +281,42 @@ async def _initial_state(
     return state, session.session_id
 
 
+async def _precommit_chat_confirmation(
+    db: AsyncSession,
+    *,
+    request: ChatRequest,
+    subject_id: str | None,
+    session_id: str,
+    user_message_id: int | None,
+    store: SessionStore,
+) -> tuple[str, str | None] | None:
+    """Commit a verified M2/M3 confirmation before generating its reply.
+
+    Normal turns still use the detached Router. A confirmation turn is a
+    state-changing command: the next reply must be generated from the state
+    that actually committed, otherwise it can promise a plan that the
+    database later rejects. Explicit module pins and legacy storage retain
+    their existing behaviour until they migrate to the V2 authority.
+    """
+    if not subject_id or user_message_id is None or request.module:
+        return None
+    if get_settings().database_schema_version != "v2":
+        return None
+    from ..dialogue_confirmation import precommit_user_confirmation
+    result = await precommit_user_confirmation(
+        db, session_id=session_id, user_id=subject_id,
+        user_message_id=user_message_id,
+        confirmation_provider=get_provider(get_settings().router_provider_name),
+    )
+    if not result:
+        return None
+    await db.commit()
+    next_module, next_cycle = result
+    await store.set_module(session_id, next_module)
+    await store.set_memory(session_id, {})
+    return next_module, next_cycle
+
+
 def _context(
     provider: LLMProvider,
     store: SessionStore,
@@ -289,11 +325,14 @@ def _context(
     router_prompt: str,
 ) -> GraphContext:
     settings = get_settings()
+    router_provider_name = settings.router_provider_name
     return GraphContext(
         provider=provider,
-        # Business requirement: module transitions are always judged by
-        # DeepSeek, even when Doubao generates the visible coaching reply.
-        router_provider=get_provider("deepseek"),
+        # Module transitions use the configured routing provider, independently
+        # from the provider that generates the visible coaching reply.  This
+        # keeps routing available when one provider is out of service (the
+        # production DeepSeek account can be unpaid while Ark remains active).
+        router_provider=get_provider(router_provider_name),
         store=store,
         knowledge_base=get_knowledge_base(),
         settings=settings,
@@ -320,7 +359,16 @@ async def chat(
     db: AsyncSession = Depends(get_db),
     subject_id: str | None = Depends(optional_subject_id),
 ) -> ChatResponse:
-    await wait_for_pending_routing(request.session_id)
+    settings = get_settings()
+    await wait_for_pending_routing(
+        request.session_id,
+        timeout_seconds=settings.routing_wait_timeout_seconds,
+        # Do not cancel the previous decision merely because the user sent a
+        # follow-up. It may still contain the evidence needed to finish a
+        # module transition; schedule_background_routing supersedes it safely
+        # after the new assistant row is durable.
+        cancel_on_timeout=False,
+    )
     provider = await _resolve_provider(request, db, subject_id=subject_id)
     router_prompt = await effective_router_prompt(db)
     state, session_id = await _initial_state(request, store, db, subject_id=subject_id)
@@ -334,6 +382,16 @@ async def chat(
 
     turn_lock = await store.get_turn_lock(session_id)
     async with turn_lock:
+        precommitted = await _precommit_chat_confirmation(
+            db, request=request, subject_id=subject_id, session_id=session_id,
+            user_message_id=user_message_id, store=store,
+        )
+        if precommitted:
+            state['confirmation_receipt'] = {'module': precommitted[0], 'cycle_id': precommitted[1]}
+        # _precommit_chat_confirmation already publishes the committed module
+        # and memory to the store. The graph loads that store in extract_memory.
+        # Re-adopting the session here would acquire this non-reentrant turn
+        # lock a second time and hang every successful confirmation.
         final_state = await get_graph().ainvoke(
             state,
             context=context,
@@ -449,7 +507,12 @@ async def _prepare_chat_stream(
     request: ChatRequest, store: SessionStore, db: AsyncSession,
     subject_id: str | None, control: GenerationControl,
 ) -> StreamingResponse:
-    await wait_for_pending_routing(request.session_id)
+    settings = get_settings()
+    await wait_for_pending_routing(
+        request.session_id,
+        timeout_seconds=settings.routing_wait_timeout_seconds,
+        cancel_on_timeout=False,
+    )
     provider = await _resolve_provider(request, db, subject_id=subject_id)
     router_prompt = await effective_router_prompt(db)
     state, session_id = await _initial_state(request, store, db, subject_id=subject_id)
@@ -470,6 +533,7 @@ async def _prepare_chat_stream(
     await db.rollback()
 
     async def event_source():
+        nonlocal state, session_id
         # Emitted before the graph starts so a brand-new client can store its
         # session id even if the run fails immediately.
         yield _sse(
@@ -492,6 +556,14 @@ async def _prepare_chat_stream(
         turn_lock = await store.get_turn_lock(session_id)
         async with turn_lock:
             try:
+                precommitted = await _precommit_chat_confirmation(
+                    db, request=request, subject_id=subject_id, session_id=session_id,
+                    user_message_id=user_message_id, store=store,
+                )
+                if precommitted:
+                    state['confirmation_receipt'] = {'module': precommitted[0], 'cycle_id': precommitted[1]}
+                # The graph reads the module published by precommit directly.
+                # Never re-adopt while holding the same session's turn lock.
                 # Ask for the running state as well as custom token events.
                 # LangGraph 1.2.11 can complete a graph while yielding no
                 # custom events in some production runtimes. The final values

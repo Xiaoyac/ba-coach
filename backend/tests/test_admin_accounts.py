@@ -136,6 +136,50 @@ def test_grant_rejects_missing_accounts_and_demotion_payloads(
     assert demotion.status_code == 422
 
 
+def test_admin_can_delete_another_account_and_cannot_delete_self(
+    client: TestClient, admin_headers: dict[str, str]
+) -> None:
+    created = client.post(
+        "/api/auth/register",
+        json={
+            "username": "deletecandidate",
+            "password": "correct-horse-battery",
+            "email": "deletecandidate@example.com",
+            "nickname": "待删除用户",
+            "tag": "81023",
+            "birth_date": "1998-01-01",
+        },
+    )
+    assert created.status_code == 201, created.text
+    target_id = next(
+        item["id"] for item in client.get(
+            "/api/admin/accounts", params={"query": "deletecandidate"}, headers=admin_headers
+        ).json()["accounts"]
+    )
+    deleted = client.delete(f"/api/admin/accounts/{target_id}", headers=admin_headers)
+    assert deleted.status_code == 204, deleted.text
+    assert client.get(
+        "/api/admin/accounts", params={"query": "deletecandidate"}, headers=admin_headers
+    ).json()["accounts"] == []
+    assert client.delete("/api/admin/accounts/999999", headers=admin_headers).status_code == 404
+
+    # The route is explicitly destructive but an administrator cannot revoke
+    # the session that is authorizing the request.
+    current_id = next(
+        item["id"] for item in client.get(
+            "/api/admin/accounts", params={"query": "directoryadmin"}, headers=admin_headers
+        ).json()["accounts"]
+    )
+    self_delete = client.delete(f"/api/admin/accounts/{current_id}", headers=admin_headers)
+    assert self_delete.status_code == 409
+
+
+def test_regular_account_cannot_delete_an_account(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    assert client.delete("/api/admin/accounts/1", headers=auth_headers).status_code == 403
+
+
 def test_same_nickname_can_use_distinct_user_chosen_tags(
     client: TestClient, admin_headers: dict[str, str]
 ) -> None:

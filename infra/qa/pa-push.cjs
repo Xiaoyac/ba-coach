@@ -36,8 +36,9 @@ exports.run=async function(browser,baseUrl='http://127.0.0.1:3000') {
             upcoming:[{goal_id:'fake',start_at:'2026-09-18T08:00:00Z',due_at:'2026-09-18T08:30:00Z'}]});
           if(p==='/api/push/checks'&&options.method==='POST') {
             if(f.checks.length)return json({detail:'请隔5分钟再测试，每24小时最多5次。'},429);
-            const c={id:'a'.repeat(64),device_id:id,state:'queued',due_at:new Date(Date.now()+60000).toISOString(),
-              expires_at:new Date(Date.now()+660000).toISOString(),displayed_at:null,had_open_window:null,http_status:null};
+            const body=JSON.parse(options.body);f.lastDelay=body.delay_seconds;
+            const c={id:'a'.repeat(64),device_id:id,state:'queued',due_at:new Date(Date.now()+body.delay_seconds*1000).toISOString(),
+              expires_at:new Date(Date.now()+(body.delay_seconds+600)*1000).toISOString(),displayed_at:null,had_open_window:null,http_status:null};
             f.checks=[c];return json(c,202);
           }
           if(p==='/api/push/checks')return json({items:f.checks});
@@ -76,13 +77,29 @@ exports.run=async function(browser,baseUrl='http://127.0.0.1:3000') {
         await modal.getByRole('button',{name:'关闭此浏览器提醒',exact:true}).waitFor();
         assert.equal(await page.evaluate(()=>window.pushFixture.devices.length),1);
         await modal.getByText('已识别的近期提醒时间',{exact:true}).waitFor();
-        await modal.getByRole('button',{name:'一分钟后测试通知',exact:true}).click();
-        await modal.getByText(/已预约。现在可以关闭本站所有标签页/).waitFor();
-        await modal.getByRole('button',{name:'一分钟后测试通知',exact:true}).click();
+        const delay=modal.getByRole('spinbutton',{name:'测试延迟（秒）'});
+        assert.equal(await delay.inputValue(),'5');
+        await delay.fill('0');
+        assert.equal(await modal.getByRole('button',{name:'发送测试通知',exact:true}).isDisabled(),true);
+        await delay.fill('600');
+        assert.equal(await modal.getByRole('button',{name:'发送测试通知',exact:true}).isDisabled(),false);
+        await delay.fill('10');
+        await modal.getByRole('button',{name:'发送测试通知',exact:true}).click();
+        assert.equal(await page.evaluate(()=>window.pushFixture.lastDelay),10);
+        await modal.getByText(/已预约。预计/).waitFor();
+        await modal.getByRole('button',{name:'发送测试通知',exact:true}).click();
         await modal.getByRole('alert').getByText(/请隔5分钟再测试/).waitFor();
         await page.evaluate(()=>{window.pushFixture.checks[0].state='accepted';});
-        await modal.getByRole('button',{name:'查看测试结果',exact:true}).click();
+        // The open modal must refresh delivery status without another click.
         await modal.getByText(/推送服务已接收，等待浏览器确认/).waitFor();
+        await page.evaluate(()=>{window.pushFixture.checks[0].state='unreachable';});
+        await modal.getByRole('button',{name:'查看测试结果',exact:true}).click();
+        await modal.getByText(/服务器连接浏览器推送服务失败/).waitFor();
+        await modal.getByText(/服务器连接浏览器推送服务失败/).scrollIntoViewIfNeeded();
+        await page.screenshot({path:path.join(out,`${width}-${theme}-${mode}-connection-failed.png`),scale:'css'});
+        await page.evaluate(()=>{window.pushFixture.checks[0].state='timeout';});
+        await modal.getByRole('button',{name:'查看测试结果',exact:true}).click();
+        await modal.getByText(/服务器连接或发送超时/).waitFor();
         await page.evaluate(()=>{const c=window.pushFixture.checks[0];c.displayed_at=new Date().toISOString();c.had_open_window=true;});
         await modal.getByRole('button',{name:'查看测试结果',exact:true}).click();
         await modal.getByText(/当时仍有本站窗口/).waitFor();
@@ -93,7 +110,7 @@ exports.run=async function(browser,baseUrl='http://127.0.0.1:3000') {
           await page.evaluate(()=>{const f=window.pushFixture;f.devices=[];Object.assign(f.checks[0],{state:'failed',displayed_at:null,http_status:410});});
           await modal.getByRole('button',{name:'查看测试结果',exact:true}).click();
           await modal.getByText(/推送服务拒绝了请求/).waitFor();
-          assert.equal(await modal.getByRole('button',{name:'一分钟后测试通知',exact:true}).isDisabled(),true);
+          assert.equal(await modal.getByRole('button',{name:'发送测试通知',exact:true}).isDisabled(),true);
           await page.evaluate(()=>{const f=window.pushFixture;f.devices=[{id:f.checks[0].device_id,this_session:true}];});
           await modal.getByRole('button',{name:'查看测试结果',exact:true}).click();
           await modal.getByRole('button',{name:'关闭此浏览器提醒',exact:true}).waitFor();

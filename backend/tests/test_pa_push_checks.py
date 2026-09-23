@@ -1,6 +1,6 @@
 """Persistent diagnostics with synthetic accounts and intercepted transport only."""
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -118,3 +118,88 @@ async def test_api_ownership_receipt_validation_and_no_secret_reads(setup,monkey
         assert (await client.post('/api/push/checks/receipt',json=payload)).status_code==204
         assert (await client.post('/api/push/checks/receipt',json={**payload,'token':'x'*43})).status_code==404
         assert (await client.post('/api/push/checks/receipt',json={**payload,'had_open_window':'false'})).status_code==422
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('delay',[1,5,30,60,600])
+async def test_selected_delay_is_durable_and_expiry_starts_at_due_time(setup,delay):
+    async with setup() as db:
+        row=await schedule_check(db,CALLER,'device',delay_seconds=delay,at=AT)
+    from app.pa_schedule import utc
+    assert datetime.fromisoformat(row['due_at']) == utc(AT)+timedelta(seconds=delay)
+    assert datetime.fromisoformat(row['expires_at']) == utc(AT)+timedelta(seconds=delay+600)
+    calls=[]
+    await tick_checks(setup,at=AT+timedelta(seconds=delay-1),sender=lambda *a:calls.append(a) or 201)
+    assert not calls
+    await tick_checks(setup,at=AT+timedelta(seconds=delay),sender=lambda *a:calls.append(a) or 201)
+    await tick_checks(setup,at=AT+timedelta(seconds=delay+1),sender=lambda *a:calls.append(a) or 201)
+    assert len(calls)==1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('delay',[0,-1,601,1.5,'5',True,None])
+async def test_delay_rejected_by_api_before_enqueue(setup,monkeypatch,delay):
+    app=FastAPI();app.include_router(route.router,prefix='/api')
+    async def dep():
+        async with setup() as db:yield db
+    app.dependency_overrides[get_db]=dep
+    app.dependency_overrides[require_caller]=lambda:CALLER
+    monkeypatch.setattr(route,'available',lambda:True)
+    async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client:
+        assert (await client.post('/api/push/checks',json={'device_id':'device','delay_seconds':delay})).status_code==422
+    async with setup() as db:
+        assert await db.scalar(select(func.count()).select_from(checks))==0
+
+
+@pytest.mark.asyncio
+async def test_api_passes_selected_delay(setup,monkeypatch):
+    app=FastAPI();app.include_router(route.router,prefix='/api')
+    async def dep():
+        async with setup() as db:yield db
+    app.dependency_overrides[get_db]=dep
+    app.dependency_overrides[require_caller]=lambda:CALLER
+    monkeypatch.setattr(route,'available',lambda:True)
+    import app.pa_push_checks as module
+    monkeypatch.setattr(module,'now',lambda:AT)
+    from app.pa_schedule import utc
+    async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client:
+        response=await client.post('/api/push/checks',json={'device_id':'device','delay_seconds':5})
+        assert response.status_code==202
+        assert datetime.fromisoformat(response.json()['due_at'])==utc(AT)+timedelta(seconds=5)
+
+
+@pytest.mark.asyncio
+async def test_connection_failure_is_visible_without_retry_or_secret_leak(setup):
+    from requests.exceptions import ConnectTimeout
+    await enqueue(setup);calls=[]
+    def fail(*args):
+        calls.append(args)
+        raise ConnectTimeout('sensitive endpoint must never be exposed')
+    await tick_checks(setup,at=AT+timedelta(minutes=1),sender=fail)
+    await tick_checks(setup,at=AT+timedelta(minutes=2),sender=fail)
+    assert len(calls)==1
+    async with setup() as db:
+        row=(await db.execute(select(checks))).mappings().one()
+        assert row['state']=='unreachable' and row['http_status'] is None and row['displayed_at'] is None
+        from app.pa_push_checks import public_check
+        assert 'sensitive' not in str(public_check(row))
+
+
+@pytest.mark.asyncio
+async def test_total_send_timeout_settles_but_accepts_late_valid_receipt(setup,monkeypatch):
+    import app.pa_push_checks as module
+    monkeypatch.setattr(module,'CHECK_SEND_TIMEOUT_SECONDS',0.01)
+    calls=[]
+    async def slow_transport(fn,*args):
+        calls.append(args)
+        await asyncio.sleep(1)
+        return 201
+    monkeypatch.setattr(module.asyncio,'to_thread',slow_transport)
+    row=await enqueue(setup)
+    await tick_checks(setup,at=AT+timedelta(minutes=1))
+    await tick_checks(setup,at=AT+timedelta(minutes=2))
+    assert len(calls)==1
+    async with setup() as db:
+        assert await db.scalar(select(checks.c.state))=='timeout'
+        await record_receipt(db,row['id'],calls[0][1]['receipt_token'],False,at=AT+timedelta(minutes=2))
+        assert await db.scalar(select(checks.c.displayed_at)) is not None

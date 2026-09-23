@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Sequence
 
@@ -9,6 +10,8 @@ import openai
 
 from ..config import Settings
 from ..schemas import Message
+from .deadline import timeout
+from ..generation_policy import main_thinking_options
 from .base import (
     Completion,
     LLMProvider,
@@ -48,6 +51,8 @@ class DoubaoProvider(LLMProvider):
         self._client = openai.AsyncOpenAI(
             api_key=settings.doubao_api_key,
             base_url=settings.doubao_base_url,
+            timeout=settings.provider_request_timeout_seconds,
+            max_retries=settings.provider_max_retries,
         )
 
     @staticmethod
@@ -60,15 +65,20 @@ class DoubaoProvider(LLMProvider):
         self, *, system: SystemPrompt, messages: list[Message]
     ) -> Completion:
         try:
-            response = await self._client.chat.completions.create(
-                model=self.model,
-                max_tokens=self._settings.doubao_max_tokens,
-                messages=self._payload(system, messages),
-                extra_body={
-                    "thinking": {"type": "enabled"},
-                    "reasoning_effort": self._settings.doubao_reasoning_effort,
-                },
+            timeout_seconds = getattr(
+                self._settings, "provider_request_timeout_seconds", 60.0
             )
+            async with timeout(timeout_seconds):
+                response = await self._client.chat.completions.create(
+                    model=self.model,
+                    max_tokens=self._settings.doubao_max_tokens,
+                    messages=self._payload(system, messages),
+                    extra_body=main_thinking_options(self._settings, self.name, messages),
+                )
+        except (TimeoutError, asyncio.TimeoutError, openai.APITimeoutError) as exc:
+            raise ProviderError(
+                f"Doubao request timed out after {getattr(self._settings, 'provider_request_timeout_seconds', 60.0):g}s"
+            ) from exc
         except openai.APIStatusError as exc:
             raise ProviderError(_api_error_message(exc)) from exc
         except openai.APIConnectionError as exc:
@@ -101,49 +111,54 @@ class DoubaoProvider(LLMProvider):
     ) -> AsyncIterator[StreamDelta]:
         stream = None
         try:
-            stream = await self._client.chat.completions.create(
-                model=self.model,
-                max_tokens=self._settings.doubao_max_tokens,
-                messages=self._payload(system, messages),
-                stream=True,
-                stream_options={"include_usage": True},
-                extra_body={
-                    "thinking": {"type": "enabled"},
-                    "reasoning_effort": self._settings.doubao_reasoning_effort,
-                },
+            timeout_seconds = getattr(
+                self._settings, "provider_request_timeout_seconds", 60.0
             )
-            usage_payload: dict[str, int] = {}
-            finish_reason: str | None = None
-            async for chunk in stream:
-                if chunk.usage is not None:
-                    usage_payload = {
-                        "input_tokens": chunk.usage.prompt_tokens or 0,
-                        "output_tokens": chunk.usage.completion_tokens or 0,
-                        "reasoning_tokens": (
-                            getattr(
-                                getattr(chunk.usage, "completion_tokens_details", None),
-                                "reasoning_tokens",
-                                0,
-                            )
-                            or 0
-                        ),
-                    }
-                if not chunk.choices:
-                    continue
-                choice = chunk.choices[0]
-                finish_reason = choice.finish_reason or finish_reason
-                delta = choice.delta
-                reasoning = getattr(delta, "reasoning_content", None)
-                if reasoning:
-                    yield StreamDelta(kind="reasoning", text=reasoning)
-                if delta and delta.content:
-                    yield StreamDelta(kind="content", text=delta.content)
-            yield StreamDelta(
-                kind="usage",
-                usage=usage_payload,
-                finish_reason=finish_reason,
-                request_id=getattr(stream, "_request_id", None),
-            )
+            async with timeout(timeout_seconds):
+                stream = await self._client.chat.completions.create(
+                    model=self.model,
+                    max_tokens=self._settings.doubao_max_tokens,
+                    messages=self._payload(system, messages),
+                    stream=True,
+                    stream_options={"include_usage": True},
+                    extra_body=main_thinking_options(self._settings, self.name, messages),
+                )
+                usage_payload: dict[str, int] = {}
+                finish_reason: str | None = None
+                async for chunk in stream:
+                    if chunk.usage is not None:
+                        usage_payload = {
+                            "input_tokens": chunk.usage.prompt_tokens or 0,
+                            "output_tokens": chunk.usage.completion_tokens or 0,
+                            "reasoning_tokens": (
+                                getattr(
+                                    getattr(chunk.usage, "completion_tokens_details", None),
+                                    "reasoning_tokens",
+                                    0,
+                                )
+                                or 0
+                            ),
+                        }
+                    if not chunk.choices:
+                        continue
+                    choice = chunk.choices[0]
+                    finish_reason = choice.finish_reason or finish_reason
+                    delta = choice.delta
+                    reasoning = getattr(delta, "reasoning_content", None)
+                    if reasoning:
+                        yield StreamDelta(kind="reasoning", text=reasoning)
+                    if delta and delta.content:
+                        yield StreamDelta(kind="content", text=delta.content)
+                yield StreamDelta(
+                    kind="usage",
+                    usage=usage_payload,
+                    finish_reason=finish_reason,
+                    request_id=getattr(stream, "_request_id", None),
+                )
+        except (TimeoutError, asyncio.TimeoutError, openai.APITimeoutError) as exc:
+            raise ProviderError(
+                f"Doubao stream timed out after {getattr(self._settings, 'provider_request_timeout_seconds', 60.0):g}s"
+            ) from exc
         except openai.APIStatusError as exc:
             raise ProviderError(_api_error_message(exc)) from exc
         except openai.APIConnectionError as exc:
@@ -157,16 +172,22 @@ class DoubaoProvider(LLMProvider):
         self, *, system: str, user: str, max_tokens: int | None = None
     ) -> Completion:
         try:
-            response = await self._client.chat.completions.create(
-                model=self._settings.doubao_router_model or self.model,
-                max_tokens=max_tokens or self._settings.router_max_tokens,
-                temperature=0,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                extra_body={"thinking": {"type": "disabled"}},
+            timeout_seconds = getattr(
+                self._settings, "router_request_timeout_seconds", 12.0
             )
+            if (max_tokens or 0) > 512:
+                timeout_seconds = getattr(self._settings, "background_model_timeout_seconds", 30.0)
+            async with timeout(timeout_seconds):
+                response = await self._client.chat.completions.create(
+                    model=self._settings.doubao_router_model or self.model,
+                    max_tokens=max_tokens or self._settings.router_max_tokens,
+                    temperature=0,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    extra_body={"thinking": {"type": "disabled"}},
+                )
             choice = response.choices[0]
             usage = response.usage
             return Completion(
@@ -210,18 +231,32 @@ class DoubaoProvider(LLMProvider):
     ) -> Completion:
         """Thinking-enabled call used only by the post-hoc module router."""
         model = self._settings.doubao_router_model or self.model
+        if reasoning_effort is None:
+            reasoning_effort = getattr(self._settings, "module_router_reasoning_effort", None)
+        if reasoning_effort == "provider_default":
+            reasoning_effort = None
+        if reasoning_effort == "disabled":
+            # Safety-mode accounts can exhaust the native reasoning quota even
+            # when ordinary completion quota remains.  Keep routing available
+            # with the same structured JSON call, but honestly expose no
+            # reasoning channel instead of failing the whole conversation.
+            return await self._router_completion(system=system, user=user, max_tokens=max_tokens)
         try:
             client = self._client.with_options(max_retries=0) if reasoning_effort is not None else self._client
-            response = await client.chat.completions.create(
-                model=model,
-                max_tokens=max_tokens or self._settings.router_reasoning_max_tokens,
-                **({"reasoning_effort": reasoning_effort} if reasoning_effort else {}),
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                extra_body={"thinking": {"type": "enabled"}},
+            timeout_seconds = getattr(
+                self._settings, "background_model_timeout_seconds", 30.0
             )
+            async with timeout(timeout_seconds):
+                response = await client.chat.completions.create(
+                    model=model,
+                    max_tokens=max_tokens or self._settings.router_reasoning_max_tokens,
+                    **({"reasoning_effort": reasoning_effort} if reasoning_effort else {}),
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    extra_body={"thinking": {"type": "enabled"}},
+                )
             choice = response.choices[0]
             usage = response.usage
             return Completion(

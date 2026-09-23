@@ -1,5 +1,5 @@
 """Versioned registry shared by routing, persistence, DMS and documentation."""
-VERSION = "workflow-20260917-m4-v1"
+VERSION = "workflow-20260920-m4-waiting-execution-v2"
 STEP_REGISTRY = {
  "module_1": (
   ("core_problem_example", "具体经历或低披露选择", "milestone_1：同一事件的情境、主要体验、实际行为、实际结果齐全；用户明确不愿披露/分析可选择低披露，不用虚构补齐。"),
@@ -14,7 +14,7 @@ STEP_REGISTRY = {
  "module_3": (
   ("recording_explained", "记录说明", "已说明记录内容、用途和操作方式。"),
   ("recording_plan_agreed", "记录计划", "用户同意实际可行的记录办法，未同意的建议不算。"),
-  ("execution_contract_reached", "执行契约", "用户同意执行本轮目标及记录安排；进入 M4 还须真实执行反馈。")),
+  ("execution_contract_reached", "执行契约", "用户同意执行本轮目标及记录安排；确认后周期进入 M4 的 waiting_execution 等待态，但只有真实执行反馈才完成 M4 的 execution_reviewed。")),
  "module_4": (
   ("execution_reviewed", "执行与情境", "milestone_1：焦点PA实际开始、完成程度/时长明确，A实际PA且情绪改善，B未开始且明确障碍，C窗口已过排除A/B。未知不分类。"),
   ("abc_chain_completed", "ABC 核对", "milestone_2：当前事件ABC简洁总结获用户明确确认；纠正后旧确认失效，未知不编造。"),

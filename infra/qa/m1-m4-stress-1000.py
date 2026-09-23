@@ -1,10 +1,12 @@
-"""Local-only M1 -> M4 adversarial stress acceptance.
+"""Local-only four-module plumbing smoke; NOT end-to-end programme acceptance.
 
 This harness deliberately uses an in-memory session store, a deterministic
 provider and the project's real graph/contracts/validator. It never loads
 `.env`, production credentials, a production database or the public site.
 
-Each cycle runs four graph turns plus contract and behavior-rule checks. The
+Each batch (historically named cycle) forces four graph turns plus standalone
+contract and behavior-rule checks. No real model, V2 persistence, automatic
+transition, or mediator integration is exercised. The
 default is 1,000 cycles; `--workers` adds concurrent pressure without sharing
 sessions. Every failure is retained with a compact input/output fingerprint,
 not private transcript text.
@@ -178,7 +180,7 @@ def behavior_checks():
     findings = []
     for module, reply in bad:
         result = validate_answer(reply=reply, module=module, evidence_ids=[], workflow={"available": True, "current_module": module, "plan_confirmed": False})
-        if result["status"] == "passed":
+        if result["status"] != "blocked":
             findings.append({"kind": "validator_failed_to_block", "module": module, "fingerprint": digest(reply)})
     panel = validate_answer(reply="请去目标面板确认并保存目标。", module="module_2", evidence_ids=[], workflow={"available": True, "current_module": "module_2", "plan_confirmed": False})
     if panel["status"] != "blocked":
@@ -255,7 +257,8 @@ async def main():
     elapsed = time.perf_counter() - started
     latencies.sort()
     p95 = latencies[min(len(latencies) - 1, math.ceil(len(latencies) * .95) - 1)] if latencies else None
-    report = {"scope": "local synthetic only", "cycles_requested": args.cycles, "cycles_completed": args.cycles,
+    report = {"scope": "synthetic forced-module plumbing, NOT end-to-end programme acceptance",
+              "cycles_requested": args.cycles, "cycles_completed": len(latencies),
               "full_graph_turns": args.cycles * 4, "concurrency_workers": args.workers,
               "elapsed_seconds": round(elapsed, 3), "throughput_cycles_per_second": round(args.cycles / elapsed, 3),
               "latency_ms": {"min": round(min(latencies), 3) if latencies else None,
@@ -267,7 +270,8 @@ async def main():
               "behavior_rule_failures": behavior_failures, "failures": failures,
               "status": "passed" if not failures and not behavior_failures else "failed",
               "notes": ["No .env loaded; no production DB/API/website; no user data.",
-                        "M1/M2/M3/M4 contracts and real graph turn plumbing were exercised.",
+                        "Four forced-module graph turns per batch; contract fixtures are evaluated independently.",
+                        "Does not exercise automatic M1-to-M4 transitions, V2 persistence, or the mediator.",
                         "Agent response quality is checked against deterministic safety/workflow rules, not subjective counseling quality."]}
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     Path(args.output).write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

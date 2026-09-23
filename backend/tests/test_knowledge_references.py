@@ -38,6 +38,8 @@ async def test_capture_matches_actual_prompt(context, provider, mode):
     result = await get_graph().ainvoke({"user_input": "你好" if mode == "gated" else "行动和情绪有什么关系？", "forced_module": "module_2"}, context=context)
     snapshot = result["telemetry"]["knowledge_references"]
     assert snapshot["available"] is True
+    assert snapshot["mediator_guidance"] == ("根据证据回应。" if mode in ("approved", "rejected") else None)
+    assert snapshot["mediator_cautions"] == []
     if mode in ("empty", "gated", "timeout", "disabled"):
         assert snapshot["mediator_reasoning_content"] is None
     assert len(snapshot["recalled"]) == (0 if mode in ("empty", "gated") else 2)
@@ -75,6 +77,9 @@ def test_durable_snapshot_owned_lazy_and_deleted(client, auth_headers, register,
     monkeypatch.setattr(chat, "get_knowledge_base", lambda: kb)
     from app.config import get_settings
     get_settings().knowledge_intent_gate_enabled = False
+    # Native mediator reasoning is diagnostic-only now; explicitly opt in so
+    # this snapshot test continues to verify the lazy reasoning side channel.
+    get_settings().knowledge_mediator_include_reasoning = True
     provider.route_result = '{"selected_ids":["one"],"guidance":"根据证据回应。"}'
     original = provider.route_detailed
     async def mediator_with_thought(**kwargs):
@@ -97,6 +102,7 @@ def test_durable_snapshot_owned_lazy_and_deleted(client, auth_headers, register,
     snapshot = result.json()
     assert snapshot["available"] and len(snapshot["recalled"]) == 2
     assert snapshot["mediator_reasoning_content"] == "PRIVATE_MEDIATOR_THOUGHT_SENTINEL"
+    assert snapshot["mediator_guidance"] == "根据证据回应。"
     assert snapshot["mediator_model"] == "mediator-test"
     assert snapshot["mediator_duration_ms"] >= 0
     assert "PRIVATE_MEDIATOR_THOUGHT_SENTINEL" not in caplog.text
@@ -124,3 +130,17 @@ def test_durable_snapshot_owned_lazy_and_deleted(client, auth_headers, register,
     assert client.get(path, headers=auth_headers).json() == snapshot
     assert client.delete(f"/api/conversations/{sid}", headers=auth_headers).status_code == 204
     assert client.get(path, headers=auth_headers).status_code == 404
+
+
+def test_guidance_is_distinct_from_reasoning_and_old_snapshots_are_not_backfilled():
+    from app.knowledge_references import KnowledgeReferences, reference_snapshot
+    old = KnowledgeReferences.model_validate({"version": 2, "available": True,
+        "mediator_reasoning_content": "old native reasoning", "mediator_status": "completed"})
+    assert old.mediator_guidance is None and old.mediator_cautions == []
+    for status, withheld, expected in [("completed", False, "仅解释一般原理"),
+                                       ("fallback", False, None), ("completed", True, None)]:
+        snapshot = reference_snapshot(module="module_2", recalled=KB().chunks, provided=[], retrieval={},
+            mediator={"status": status, "guidance": "仅解释一般原理", "cautions": ["不可当成已确认目标"]},
+            context_withheld=withheld, mediator_reasoning="native reasoning")
+        assert snapshot["mediator_guidance"] == expected
+        assert snapshot["mediator_cautions"] == (["不可当成已确认目标"] if expected else [])

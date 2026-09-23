@@ -25,7 +25,7 @@ sys.path.insert(0, str(BACKEND))
 from app.answer_validator import validate_answer  # noqa: E402
 from app.goal_contract import proposal_evidence  # noqa: E402
 from app.m4_prompts import MODULE_PROMPT as M4_PROMPT, RUNTIME_CONTRACT as M4_RUNTIME  # noqa: E402
-from app.prompts import MODULE_PROMPTS  # noqa: E402
+from app.prompts import build_system_prompt, build_system_segments  # noqa: E402
 
 
 def fingerprint(value: object) -> str:
@@ -170,7 +170,7 @@ def run_goal_audit(repetitions: int) -> dict:
 
 
 def static_prompt_audit() -> dict:
-    m3 = MODULE_PROMPTS["module_3"]
+    m3 = build_system_prompt("module_3")
     findings = []
     # These strings are directly injected into the model system prompt.  They
     # are compared with the current UI contract and therefore are objective,
@@ -190,9 +190,16 @@ def static_prompt_audit() -> dict:
     if "不负责：" in M4_PROMPT and "对次要目标进行独立、完整的复盘" in M4_PROMPT and "独立 secondary 目标被选中后同样享有完整复盘" in M4_RUNTIME:
         findings.append({"code": "m4_secondary_goal_contract_conflict", "severity": "high",
                          "why": "model prompt forbids independent secondary review while runtime contract grants it"})
-    if "primary/secondary" not in MODULE_PROMPTS["module_2"] and "主要目标" not in MODULE_PROMPTS["module_2"]:
+    if "主要目标" not in build_system_prompt("module_2"):
         findings.append({"code": "m2_goal_kind_not_explicit", "severity": "medium",
                          "why": "M2 prompt does not explain primary/secondary goal choice; extraction contract must carry it"})
+    for builder in (build_system_prompt, build_system_segments):
+        for override in (None, "管理员自定义提示词"):
+            raw = builder("module_3", module_prompt=override)
+            effective = raw if isinstance(raw, str) else "\n".join(s.text for s in raw)
+            missing = [s for s in ("左侧", "记录今日", "查看历史", "想做的事情完成程度", "整体心情", "4项选填") if s not in effective]
+            if missing:
+                findings.append({"code": "missing_current_ui_guidance", "builder": builder.__name__, "missing": missing})
     return {"finding_count": len(findings), "findings": findings}
 
 
@@ -232,7 +239,7 @@ def main() -> int:
         "output": str(output),
     }
     print(json.dumps(summary, ensure_ascii=False))
-    return 0
+    return 0 if report["status"] == "clean" else 1
 
 
 if __name__ == "__main__":

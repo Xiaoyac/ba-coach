@@ -110,26 +110,59 @@ class InMemorySessionStore(SessionStore):
         module: str | None,
         memory: dict[str, str] | None = None,
     ) -> Session:
-        async with self._lock:
-            self._prune_locked()
-            existing = self._sessions.get(session_id)
-            if existing is not None:
-                return existing
-            # Seed with the tail of the persisted transcript, trimmed the same
-            # way `append` trims — a resumed session must not re-enter the
-            # graph carrying more history than a live one ever would.
-            history = list(messages)
-            if len(history) > self._max_messages:
-                overflow = len(history) - self._max_messages
-                history = history[overflow + (overflow % 2) :]
-            session = Session(
-                session_id=session_id,
-                messages=history,
-                module=module,
-                memory=dict(memory or {}),
-            )
-            self._sessions[session_id] = session
-            return session
+        # ``adopt`` is called on every V2 request so a persisted runtime state
+        # can rehydrate a process-local session.  It is also called immediately
+        # after ``create_conversation`` has inserted the opening message.  In
+        # that case the id is already present and the old implementation simply
+        # returned the object, silently dropping the durable module/memory
+        # snapshot.  A following turn then defaulted to module 1.
+        #
+        # Do not wait for the turn lock while holding ``self._lock``.  Graph
+        # nodes hold the turn lock and call ``append``/``set_module`` (which
+        # need ``self._lock``), so that lock ordering would deadlock under a
+        # concurrent request.  Waiting first gives an active turn a chance to
+        # publish its own state; the live state wins over a stale DB snapshot.
+        turn_lock = await self.get_turn_lock(session_id)
+        async with turn_lock:
+            async with self._lock:
+                self._prune_locked()
+                existing = self._sessions.get(session_id)
+                if existing is not None:
+                    changed = False
+                    # Never replace a live transcript with the caller's
+                    # persisted copy: another request may have appended a
+                    # user/assistant pair while this session was in memory.
+                    # Rehydrate only missing state and merge missing memory
+                    # keys; values already produced by the live graph win.
+                    if existing.module is None and module is not None:
+                        existing.module = module
+                        changed = True
+                    if memory:
+                        merged_memory = dict(memory)
+                        merged_memory.update(existing.memory)
+                        if merged_memory != existing.memory:
+                            existing.memory = merged_memory
+                            changed = True
+                    if changed:
+                        existing.updated_at = time.time()
+                    return existing
+
+                # Seed with the tail of the persisted transcript, trimmed the
+                # same way ``append`` trims — a resumed session must not
+                # re-enter the graph carrying more history than a live one
+                # ever would.
+                history = list(messages)
+                if len(history) > self._max_messages:
+                    overflow = len(history) - self._max_messages
+                    history = history[overflow + (overflow % 2) :]
+                session = Session(
+                    session_id=session_id,
+                    messages=history,
+                    module=module,
+                    memory=dict(memory or {}),
+                )
+                self._sessions[session_id] = session
+                return session
 
     async def get(self, session_id: str) -> Session | None:
         async with self._lock:

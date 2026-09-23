@@ -59,7 +59,7 @@ from ..providers.base import LLMProvider, ProviderError, as_text
 from ..reasoning import ThinkingTagStreamGuard, normalize_reasoning_channels
 from ..retrieval import DatabaseKnowledgeBase
 from ..retrieval_intent import decide_retrieval
-from ..router_agent import decide_target_module_with_reasoning, extract_pa_card
+from ..router_agent import decide_target_module_with_reasoning, extract_pa_card, format_routing_reasoning
 from ..schemas import Message
 from ..workflow_state import (
     apply_router_decision,
@@ -72,6 +72,13 @@ logger = logging.getLogger(__name__)
 from ..workflow_contract import VERSION as WORKFLOW_CONTRACT_VERSION
 
 MEMORY_EXCERPT_CHARS = 200
+# Keep a small, deterministic anchor for the beginning of a conversation.
+# The live transcript is intentionally bounded for latency, but dropping the
+# opening trigger makes later turns sound as if the coach has forgotten what
+# the user was talking about. This is not an LLM summary and adds no call.
+CONTEXT_ANCHOR_MESSAGES = 12
+CONTEXT_ANCHOR_ITEM_CHARS = 360
+CONTEXT_ANCHOR_TOTAL_CHARS = 2600
 ROUTER_TRANSCRIPT_CHARS = 16_000
 
 _MODULE_NUMBER = {
@@ -474,7 +481,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
     """
 
     async def module_node(state: AgentState, runtime: Runtime[GraphContext]) -> dict:
-        from ..answer_validator import validate_answer, SAFE_REPLY
+        from ..answer_validator import validate_answer, SAFE_REPLY, INTEGRITY_CODES, recovery_reply
         from ..reply_workflow import read_reply_workflow, workflow_prompt, truthful_workflow_reply
         authoritative = (runtime.context.settings.database_schema_version == "v2" and
                          bool(state.get("subject_id")) and not (state.get("memory") or {}).get("sandbox_mode"))
@@ -632,6 +639,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 subject_id=state.get("subject_id"), provider=context.router_provider.name,
                 model_name=mediator_metrics.get("model"), duration_ms=mediator_metrics["duration_ms"],
                 usage=mediator_metrics.get("usage"), error_code=mediator_metrics["reason"] if mediator_metrics["status"] == "fallback" else None,
+                finish_reason=mediator_metrics.get("finish_reason"),
                 prompt_version=mediator_metrics.get("prompt_sha256"),
                 event_metadata={k:v for k,v in mediator_metrics.items() if k not in ("guidance","cautions","usage")})
         system = build_system_segments(
@@ -651,6 +659,35 @@ def make_module_node(module_name: str, config: ModuleConfig):
         authority = await reply_authority()
         if authority is not None:
             system.append(SystemPromptSegment(workflow_prompt(authority), cacheable=False))
+        # Retrieval guidance and the server-owned workflow contract are added
+        # after build_system_segments(). Re-assert editable admin prompts now
+        # so both global and module overrides remain the final instructions
+        # seen by the model.
+        from ..prompts import append_admin_prompt_overrides
+        append_admin_prompt_overrides(
+            system, module_name=module_name,
+            global_prompt=global_prompt, module_prompt=module_prompt
+        )
+        # If a pure acknowledgement could not commit because the generated
+        # summary was not verifiable, display the actual complete draft. This
+        # introduces a reviewable version, never a confirmation or transition.
+        from ..dialogue_confirmation import affirmative
+        card = (authority or {}).get('confirmation_summary')
+        show_confirmation_card = False
+        if authoritative and card and module_name in {'module_2', 'module_3'}:
+            show_confirmation_card = affirmative(user_input)
+            if not show_confirmation_card:
+                from ..confirmation_intent import may_redisplay_unchanged_plan
+                show_confirmation_card = await may_redisplay_unchanged_plan(context.router_provider,
+                    user_text=user_input, proposal_text=card['text'], module=module_name)
+        if show_confirmation_card:
+            if context.stream:
+                _emit({'type': 'delta', 'text': card['text']})
+            return {'retrieved_knowledge': [], 'provider': 'workflow_state',
+                    'model': 'BA Coach 状态机', 'final_response': card['text'],
+                    'reasoning_content': '', 'usage': {}, 'error': None,
+                    'telemetry': {'main_generation_duration_ms': 0,
+                        'rendered_confirmation': {k: card[k] for k in ('record_id', 'record_hash')}}}
         telemetry = dict(state.get("telemetry") or {})
         telemetry["retrieval"] = retrieval_metrics
         telemetry["knowledge_mediator"] = mediator_metrics
@@ -671,6 +708,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
             "provider": context.provider.name,
             "model": context.provider.model,
             "error": None,
+            "reply_held": False,
         }
 
         # Declared outside the try so a mid-stream failure can still recover
@@ -766,20 +804,84 @@ def make_module_node(module_name: str, config: ModuleConfig):
             update["reasoning_content"] = disclosed_reasoning
             update["error"] = str(exc)
             update["usage"] = {}
-            telemetry["error_code"] = "provider_error"
+            telemetry["error_code"] = (
+                "provider_timeout" if "timed out" in str(exc).casefold()
+                else "provider_error"
+            )
+            if telemetry["error_code"] == "provider_timeout":
+                telemetry["finish_reason"] = "timeout"
+
+        receipt = state.get('confirmation_receipt') or {}
+        if update.get('error') and receipt.get('module') == module_name:
+            receipt_text = {
+                'module_3': '活动计划已确认并保存。接下来我们一起商量怎样记录活动和感受。',
+                'module_4': '记录约定已确认并保存。现在等你尝试后回来反馈，完成、部分完成或没有开始都可以如实告诉我。',
+            }.get(module_name)
+            if receipt_text:
+                telemetry['confirmation_receipt_recovery'] = telemetry.get('error_code')
+                update.update(final_response=receipt_text, reasoning_content='', error=None,
+                              model='BA Coach 状态机')
+                pending_output.clear()
+                emit_output({'type': 'delta', 'text': receipt_text})
+
+        # A reasoning budget exhausted without a visible answer is a generation
+        # failure, not inappropriate user input or a semantic validator rejection.
+        if not update.get("error") and not update.get("final_response", "").strip():
+            from ..reply_recovery import recover_empty_reply, GENERATION_INTERRUPTED_REPLY
+            recovered, recovery = await recover_empty_reply(
+                provider=context.provider, system=system, messages=messages,
+                elapsed_seconds=perf_counter() - generation_started,
+                total_timeout_seconds=context.settings.provider_request_timeout_seconds,
+                finish_reason=telemetry.get("finish_reason"), usage=update.get("usage", {}))
+            telemetry["reply_recovery"] = recovery
+            pending_output.clear()  # never disclose the abandoned answer's reasoning
+            update["reasoning_content"] = ""
+            recovery_usage = recovery.get("usage", {})
+            original_usage = update.get("usage", {})
+            update["usage"] = {key: original_usage.get(key, 0) + recovery_usage.get(key, 0)
+                               for key in original_usage.keys() | recovery_usage.keys()}
+            telemetry["usage"] = update["usage"]
+            if recovered:
+                normalized = normalize_reasoning_channels(unwrap_chat_reply(recovered.text), "")
+                update["final_response"] = normalized.reply
+                update["model"] = recovered.model
+                telemetry["finish_reason"] = recovered.finish_reason
+                telemetry["provider_request_id"] = recovered.request_id
+                telemetry["time_to_first_content_token_ms"] = int((perf_counter() - generation_started) * 1000)
+            if update.get("final_response", "").strip():
+                emit_output({"type": "delta", "text": update["final_response"]})
+            else:
+                update["final_response"] = GENERATION_INTERRUPTED_REPLY
+                update["error"] = "回复生成中断，请稍后重试，无需重新解释"
+                telemetry["error_code"] = "reasoning_budget_exhausted" if recovery.get("original_finish_reason") == "length" else "empty_completion"
+                emit_output({"type": "delta", "text": update["final_response"]})
 
         if context.settings.answer_validator_enabled or authoritative:
             authority = await reply_authority()  # recheck after generation, including other-chat updates
             validation = validate_answer(reply=update.get("final_response", ""), module=module_name,
-                evidence_ids=[str(k.id) for k in guided_knowledge], workflow=authority)
+                evidence_ids=[str(k.id) for k in guided_knowledge], workflow=authority,
+                current_user=user_input)
             telemetry["answer_validator"] = validation
-            _emit({"type": "trace", "node": "answer_validator", "detail": validation})
             block_codes = {f['code'] for f in validation['findings'] if f['severity'] == 'block'}
-            if block_codes and block_codes <= {'uncommitted_workflow_claim', 'panel_confirmation_instruction'} and not update.get('error'):
-                update['final_response'] = truthful_workflow_reply(authority)
+            if block_codes and not block_codes.intersection(INTEGRITY_CODES) and not update.get('error'):
+                workflow_only = block_codes <= {'uncommitted_workflow_claim', 'panel_confirmation_instruction', 'confirmation_claim'}
+                update['final_response'] = (truthful_workflow_reply(authority or {'available': False})
+                    if workflow_only else recovery_reply(module_name))
                 update['reasoning_content'] = ''
+                # Correcting a premature success claim must not discard the
+                # user's independently valid activity selection. Only the
+                # replacement reply reaches persistence/extraction; the bad
+                # assistant draft is never evidence. Other safety/integrity
+                # failures keep the existing full progression hold.
+                preserve_user_evidence = bool(workflow_only and authoritative
+                    and (authority or {}).get('available')
+                    and module_name in {'module_2', 'module_3'})
+                update['reply_held'] = not preserve_user_evidence
                 validation['status'] = 'corrected'
-                validation['replacement_source'] = 'database_workflow'
+                validation['replacement_source'] = 'database_workflow' if workflow_only else 'module_safe_recovery'
+                validation['original_status'] = 'blocked'
+                validation['progression_held'] = not preserve_user_evidence
+                validation['user_evidence_retained'] = preserve_user_evidence
                 if context.stream:
                     _emit({'type':'delta','text':update['final_response']})
             elif validation["status"] == "blocked":
@@ -793,6 +895,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
             else:
                 for event in pending_output:
                     _emit(event)
+            _emit({"type": "trace", "node": "answer_validator", "detail": validation})
         else:
             telemetry["answer_validator"] = {"status": "disabled", "llm_calls": 0}
 
@@ -1024,6 +1127,12 @@ async def route_next_module_node(
     """
     current = state.get("extracted_intent", DEFAULT_MODULE)
 
+    if state.get("reply_held"):
+        explanation = "模块判断结果：维持当前模块。\n\n本轮原始回复未通过行为规范校验，已展示安全提示；本轮不调用路由、不抽取目标或推进流程。"
+        _emit({"type": "routing_reasoning", "text": explanation, "model": "规则引擎"})
+        return {"next_module": current, "routing_reasoning_content": explanation,
+                "router_model_name": "规则引擎", "routing_pending": False}
+
     if state.get("error"):
         # Nothing happened this turn worth reasoning about — hold position
         # rather than spend a second model call on a turn that already failed.
@@ -1179,6 +1288,9 @@ async def _extract_module_data(
 ) -> dict:
     """Extract and audit validated module data without writing a record."""
     started = perf_counter()
+    if module == "module_1" and evidence_turns is not None:
+        from ..m1_contract import indexed_transcript
+        transcript = indexed_transcript(evidence_turns)
     raw, completion = await extract_module_record_detailed(
         provider, module=module, transcript=transcript, max_tokens=max_tokens
     )
@@ -1208,7 +1320,8 @@ async def _extract_module_data(
             ("clinical_" + module + ("_20260914" if module == "module_1" else "_20260917" if module == "module_4" else "_v1")).encode("utf-8")
         ).hexdigest()[:16],
         event_metadata={"module": module, **({"contract_version": data["m1_contract"]["version"],
-            "contract_path": data["m1_contract"]["path"], "missing_fields": data["m1_contract"]["missing_fields"]}
+            "contract_path": data["m1_contract"]["path"], "missing_fields": data["m1_contract"]["missing_fields"],
+            "validation_issues": data["m1_contract"].get("validation_issues", [])}
             if "m1_contract" in data else {})},
     )
     return data
@@ -1314,6 +1427,7 @@ def _dispatch_transition_jobs(
         not subject_id
         or current == target
         or state.get("error")
+        or state.get("reply_held")
         or (state.get("memory") or {}).get("sandbox_mode") == "true"
     ):
         return
@@ -1359,17 +1473,80 @@ def _dispatch_transition_jobs(
 
 
 # One pending route per session. The strong task reference prevents garbage
-# collection; the keyed map also lets a very fast next user turn wait for the
-# preceding decision instead of entering the old module by racing it.
+# collection; the keyed map lets a very fast next user turn wait briefly for
+# the preceding decision. A replacement evicts/cancels the old task, and the
+# task identity is checked again before durable publication.
 _routing_tasks: dict[str, asyncio.Task] = {}
 
 
-async def wait_for_pending_routing(session_id: str | None) -> None:
+async def wait_for_pending_routing(
+    session_id: str | None,
+    *,
+    timeout_seconds: float | None = None,
+    cancel_on_timeout: bool = False,
+) -> bool:
+    """Wait for a delayed router, optionally with a bounded chat budget.
+
+    State-changing callers use the default unbounded wait: deleting a
+    conversation or confirming a goal must not race a durable router commit.
+    Chat endpoints use a short budget without cancelling immediately. A new
+    durable reply replaces the pending task safely. Callers explicitly asking
+    for cancellation first remove task identity to prevent late publication.
+
+    Returns ``True`` when the task completed before the deadline and ``False``
+    when the bounded wait expired. No pending task counts as completed.
+    """
     if not session_id:
-        return
+        return True
     task = _routing_tasks.get(session_id)
-    if task is not None:
-        await asyncio.shield(task)
+    if task is None:
+        return True
+    wait_started = perf_counter()
+    if timeout_seconds is None:
+        while task is not None:
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                # A replacement cancels the old router, not this caller.
+                # Actual caller cancellation must still propagate.
+                if not task.cancelled() or _routing_tasks.get(session_id) is task:
+                    raise
+            newer = _routing_tasks.get(session_id)
+            if newer is task:
+                break
+            task = newer
+        logger.info("background router wait completed session=%s pending_router_wait_ms=%d",
+                    session_id, round((perf_counter() - wait_started) * 1000))
+        return True
+    try:
+        # Shield first so timeout does not implicitly cancel the task while we
+        # remove it from the slot and mark it stale below.
+        await asyncio.wait_for(asyncio.shield(task), timeout=timeout_seconds)
+        logger.info("background router wait completed session=%s pending_router_wait_ms=%d",
+                    session_id, round((perf_counter() - wait_started) * 1000))
+        return True
+    except asyncio.CancelledError:
+        if task.cancelled() and _routing_tasks.get(session_id) is not task:
+            return False
+        raise
+    except asyncio.TimeoutError:
+        if cancel_on_timeout and _routing_tasks.get(session_id) is task:
+            # Remove the identity before cancelling.  _run_background_routing
+            # checks this slot both before and inside its DB lock, so even a
+            # provider that delays cancellation cannot commit stale state.
+            _routing_tasks.pop(session_id, None)
+            if not task.done():
+                task.cancel()
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=0.5)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+        logger.warning(
+            "background router wait timed out; %s session=%s timeout_seconds=%s pending_router_wait_ms=%d",
+            "cancelled stale task" if cancel_on_timeout else "leaving task for safe replacement",
+            session_id, timeout_seconds, round((perf_counter() - wait_started) * 1000),
+        )
+        return False
 
 
 async def _run_background_routing(
@@ -1378,15 +1555,46 @@ async def _run_background_routing(
     *,
     assistant_message_id: int | None,
 ) -> None:
+    if state.get("reply_held") or state.get("error"):
+        return
     session_id = state["session_id"]
+    current_task = asyncio.current_task()
+
+    def _still_current() -> bool:
+        """Return false after a bounded chat wait superseded this task.
+
+        The provider call is deliberately detached from the request, so a
+        cancellation can arrive just after it returns.  Checking the keyed
+        task identity around the durable commit closes that small race and
+        prevents an old turn from changing the module for a newer turn.
+        """
+        return current_task is not None and _routing_tasks.get(session_id) is current_task
+
     current = state.get("extracted_intent", DEFAULT_MODULE)
     started = perf_counter()
     try:
         reply = state.get("final_response", "")
+        rendered_anchored = False
+        rendered = (state.get('telemetry') or {}).get('rendered_confirmation')
+        # Workflow cards normally carry an explicit id/hash marker.  A model
+        # can also reproduce the deterministic card verbatim without that
+        # telemetry, so give the durable anchor a chance for M2/M3 replies;
+        # anchor_rendered_summary still requires the latest assistant row,
+        # complete source-validated draft and exact rendered body.
+        can_probe_rendered_card = current in {'module_2', 'module_3'}
+        if (context.sessionmaker is not None and assistant_message_id is not None
+                and state.get('subject_id') and (rendered or can_probe_rendered_card)):
+            from ..dialogue_confirmation import anchor_rendered_summary
+            async with context.sessionmaker() as anchor_db:
+                rendered_anchored = await anchor_rendered_summary(
+                    anchor_db, session_id=session_id, user_id=state['subject_id'],
+                    assistant_message_id=assistant_message_id, **(rendered or {}))
+                await anchor_db.commit()
         m1_turns = None
-        if (current in {"module_1", "module_4"} and context.settings.database_schema_version == "v2"
+        if (current in {"module_1", "module_2", "module_3", "module_4"} and context.settings.database_schema_version == "v2"
                 and context.sessionmaker is not None and state.get("subject_id")):
-            # M1 evidence can span more than the short-term 40-message window.
+            # Choice/confirmation evidence can span more than the short-term
+            # generation history. Extraction uses the owned durable transcript.
             # Read only this user's persisted conversation, with trusted roles.
             from sqlalchemy import select
             from ..models import Conversation, ConversationMessage
@@ -1394,7 +1602,7 @@ async def _run_background_routing(
                 rows = (await evidence_db.execute(select(ConversationMessage).join(
                     Conversation, Conversation.id == ConversationMessage.conversation_id).where(
                     Conversation.session_id == session_id, Conversation.subject_id == state["subject_id"])
-                    .order_by(ConversationMessage.position))).scalars().all()
+                    .order_by(ConversationMessage.position, ConversationMessage.id))).scalars().all()
                 if rows and rows[-1].id == assistant_message_id:
                     if current == "module_4":
                         from ..m4_contract import cycle_messages
@@ -1406,6 +1614,7 @@ async def _run_background_routing(
         if (context.settings.database_schema_version == "v2" and current in {"module_1", "module_2", "module_3", "module_4"}
                 and context.sessionmaker is not None and state.get("subject_id")
                 and (current == "module_1" or state.get("active_cycle_id"))
+                and not rendered_anchored
                 and not state.get("error")
                 and (state.get("memory") or {}).get("sandbox_mode") != "true"):
             # A draft is a prerequisite for confirmation, not a consequence of
@@ -1440,6 +1649,9 @@ async def _run_background_routing(
             max_tokens=context.settings.router_reasoning_max_tokens,
             completed_steps=(state.get("module_steps") or {}).get(current, []),
         )
+        if not _still_current():
+            logger.info("discarding superseded background router session=%s", session_id)
+            return
         new_goal_data = None
         if (context.settings.database_schema_version == "v2" and current == "module_2"
                 and context.sessionmaker is not None and state.get("subject_id")
@@ -1449,8 +1661,9 @@ async def _run_background_routing(
                 new_goal_data = await _extract_module_data(
                     context.provider, context.sessionmaker,
                     subject_id=state["subject_id"], module=current,
-                    transcript=_format_transcript(
-                        state.get("chat_history") or [], state["user_input"], reply),
+                    transcript=("\n".join(f"{role}：{content}" for role, content in m1_turns)
+                        if m1_turns is not None else _format_transcript(
+                            state.get("chat_history") or [], state["user_input"], reply)),
                     max_tokens=context.settings.extraction_max_tokens,
                     session_id=session_id,
                 )
@@ -1458,15 +1671,8 @@ async def _run_background_routing(
                 logger.exception("new-goal extraction failed for session %s", session_id)
         target = decision.target_module
         requested_target = target
-        result_line = (
-            f"模块判断结果：维持 {current}，本轮不跳转。"
-            if target == current
-            else f"模块判断结果：{current} → {target}。"
-        )
-        thought = decision.reasoning_content.strip() or (
-            "路由模型没有返回独立的 reasoning_content；最终模块判断仍已通过规则校验。"
-        )
-        routing_reasoning = f"{result_line}\n\n{thought}"
+        routing_reasoning = format_routing_reasoning(decision, current)
+        routing_diagnostics = {}
         duration_ms = int((perf_counter() - started) * 1000)
         source_cycle_id = state.get("active_cycle_id")
         active_cycle_id = source_cycle_id
@@ -1476,6 +1682,9 @@ async def _run_background_routing(
         # call above never holds the user's turn lock.
         turn_lock = await context.store.get_turn_lock(session_id)
         async with turn_lock:
+            if not _still_current():
+                logger.info("discarding superseded background router before commit session=%s", session_id)
+                return
             if (
                 state.get("subject_id")
                 and assistant_message_id is not None
@@ -1497,15 +1706,17 @@ async def _run_background_routing(
                             created = await create_goal_from_agent_dialogue(
                                 route_db, session_id=session_id, user_id=state["subject_id"],
                                 data=new_goal_data, completed_steps=decision.completed_steps,
-                                assistant_message_id=assistant_message_id)
+                                assistant_message_id=assistant_message_id,
+                                diagnostics=routing_diagnostics)
                             if created:
                                 active_cycle_id = created["cycle_id"]
                         target, active_cycle_id = await record_steps(route_db, session_id=session_id,
                             user_id=state["subject_id"], module=current, requested_target=target,
                             steps=decision.completed_steps, assistant_message_id=assistant_message_id,
-                            revoked_steps=decision.revoked_steps, revocation_evidence=decision.revocation_evidence)
-                        if target != requested_target:
-                            routing_reasoning = f"后台核验后的实际阶段：{target}。讨论及确认均在聊天中完成；没有完整、当前有效的用户同意证据时不推进。"
+                            revoked_steps=decision.revoked_steps, revocation_evidence=decision.revocation_evidence,
+                            diagnostics=routing_diagnostics)
+                        routing_reasoning = format_routing_reasoning(decision, current, target,
+                            diagnostics=routing_diagnostics)
                     else:
                         active_cycle_id = await apply_router_decision(
                             route_db, session_id=session_id, subject_id=state["subject_id"],
@@ -1539,6 +1750,11 @@ async def _run_background_routing(
                         workflow_decision={
                             "schema_version": 1, "registry_version": WORKFLOW_CONTRACT_VERSION,
                             "from_module": current, "to_module": target,
+                            "requested_target": requested_target,
+                            "routing_diagnostics": routing_diagnostics,
+                            "router_error_code": decision.error_code,
+                            "json_recovery": decision.json_recovery,
+                            "native_reasoning_present": bool(decision.reasoning_content.strip()),
                             "completed_steps": decision.completed_steps,
                             "decision_message_id": assistant_message_id,
                             "evidence_status": "router_inferred_not_individually_verified",
@@ -1583,15 +1799,19 @@ def schedule_background_routing(
     assistant_message_id: int | None,
 ) -> None:
     """Start the delayed Router Agent after the visible reply is durable."""
-    if not state.get("routing_pending"):
+    if not state.get("routing_pending") or state.get("reply_held"):
         return
     session_id = state["session_id"]
     previous = _routing_tasks.get(session_id)
     if previous is not None and not previous.done():
-        # A next request normally awaits this task before reaching here. Keep
-        # this guard for direct graph/route callers and avoid replacing a live
-        # decision with a second one.
-        return
+        # A next request normally waits briefly for this task before reaching
+        # here.  Direct graph callers (and a request that timed out that
+        # brief wait) can still schedule a replacement while the provider is
+        # unwinding.  Cancel and evict the old task first: its identity checks
+        # in _run_background_routing then make any late result harmless.
+        _routing_tasks.pop(session_id, None)
+        previous.cancel()
+        logger.info("replacing in-flight background router session=%s", session_id)
     task = _spawn_background(
         _run_background_routing(
             dict(state), context, assistant_message_id=assistant_message_id
@@ -1636,7 +1856,7 @@ async def summarizer_node(state: AgentState, runtime: Runtime[GraphContext]) -> 
 
     # Nothing below can be attributed without a subject, and a failed turn has
     # no reliable content to extract from.
-    if not subject_id or state.get("error"):
+    if not subject_id or state.get("error") or state.get("reply_held"):
         return {}
 
     # Administrator sandbox turns are deliberately isolated from the real BA
@@ -1724,10 +1944,12 @@ async def summarizer_node(state: AgentState, runtime: Runtime[GraphContext]) -> 
 def _derive_memory(state: AgentState) -> dict[str, str]:
     """Update durable memory from the finished turn.
 
-    Deliberately cheap and deterministic: turn counter, last module, and a
-    short excerpt of what the user said. An LLM-written running summary is the
-    obvious upgrade — see the TODO below — but it costs a second model call
-    per turn, so it is opt-in rather than default.
+    Deliberately cheap and deterministic: turn counter, last module, a short
+    excerpt of what the user said, and a bounded beginning-of-session anchor.
+    The anchor protects early facts (for example, the original conflict that
+    led to a user saying they were avoiding it) after the rolling transcript
+    window has discarded those messages. It is not an LLM summary and costs
+    no extra model call.
     """
     memory = dict(state.get("memory") or {})
     memory["turn_count"] = str(int(memory.get("turn_count", "0")) + 1)
@@ -1745,9 +1967,32 @@ def _derive_memory(state: AgentState) -> dict[str, str]:
         excerpt = excerpt[: MEMORY_EXCERPT_CHARS - 1] + "…"
     memory["last_user_message"] = excerpt
 
-    # TODO: for a rolling narrative summary, call
-    # `context.provider.complete(...)` here with a summarisation prompt and
-    # store the result under "summary". Budget for the extra call per turn.
+    # Capture the first few substantive exchanges once. The current turn's
+    # reply is included because the first request itself has no assistant
+    # response yet. Keep user text verbatim but bounded; the prompt labels the
+    # block as background and the current conversation always takes priority.
+    if not memory.get("conversation_anchor"):
+        anchor_messages = [
+            message for message in (state.get("chat_history") or [])
+            if message.content and message.content.strip()
+        ]
+        anchor_messages.extend(
+            message for message in (
+                Message(role="user", content=state.get("user_input", "")),
+                Message(role="assistant", content=state.get("final_response", "")),
+            )
+            if message.content and message.content.strip()
+        )
+        lines: list[str] = []
+        for message in anchor_messages[:CONTEXT_ANCHOR_MESSAGES]:
+            content = " ".join(message.content.split())[:CONTEXT_ANCHOR_ITEM_CHARS]
+            if content:
+                role = "用户" if message.role == "user" else "教练"
+                lines.append(f"{role}：{content}")
+        anchor = "\n".join(lines)[:CONTEXT_ANCHOR_TOTAL_CHARS]
+        if anchor:
+            memory["conversation_anchor"] = anchor
+
     return memory
 
 

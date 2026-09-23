@@ -1,13 +1,18 @@
 import pytest
 from sqlalchemy import insert, select, update
 from app.database_v2_schema import metadata as schema
+from app.models import ConversationMessage
 from test_goal_overview import goal_api
 from test_cycle_program_0914 import seed_review, confirmation
 
 
 async def action(db, value):
+    # Bind the follow-up action to the actual decision utterance produced by
+    # seed_review.  M4 confirmation now rejects synthetic source quotes.
+    source = (await db.execute(select(ConversationMessage).where(
+        ConversationMessage.id == 18))).scalar_one()
     await db.execute(insert(schema.tables['pa_review_details']), {'review_id': 'review-draft',
-        'action': value, 'source_message_id': 1, 'source_quote': '用户明确选择'})
+        'action': value, 'source_message_id': source.id, 'source_quote': source.content})
     goals = schema.tables['pa_goals']
     await db.execute(update(goals).where(goals.c.id == 'g1').values(current_plan_record_id='cycle-plan'))
     await db.commit()

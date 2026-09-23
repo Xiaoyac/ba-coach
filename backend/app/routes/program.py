@@ -104,16 +104,21 @@ async def get_program(session_id: str, user_id=Depends(require_subject_id), db=D
     if pending and state["current_module"] == "module_4":
         details_table = schema.tables["pa_review_details"]
         review_action = (await db.execute(select(details_table.c.action).where(details_table.c.review_id == pending["id"]))).scalar_one_or_none()
-    from ..plan_contract import missing_plan_fields
-    missing = missing_plan_fields(pending) if pending and state["current_module"] == "module_2" else []
-    if pending and state["current_module"] == "module_4":
-        from ..m4_contract import missing_fields
-        missing = missing_fields(pending, session_id=session_id, cycle_id=state["active_cycle_id"])
-        if not review_action:
+    missing, readiness = [], None
+    # A paused/completed runtime has no open confirmation window.  Do not
+    # evaluate its historical draft as if it were the current active module;
+    # doing so exposed stale extraction/readiness errors after a successful
+    # M4 transition even though the cycle and goal were already closed.
+    if (state["current_module"] in {"module_2", "module_3", "module_4"}
+            and state.get("flow_status") not in {"paused", "completed"}):
+        from ..program_confirmation import confirmation_readiness
+        readiness = await confirmation_readiness(db, conversation=conversation,
+            state=state, user_id=user_id, session_id=session_id, pending=pending)
+        missing = list(readiness["missing_fields"])
+        if not readiness["extraction_fresh"]:
+            missing.append("extraction_refresh")
+        if pending and state["current_module"] == "module_4" and not review_action:
             missing.append("review_followup")
-    if pending and state["current_module"] in {"module_2", "module_4"} and not await module_extraction_is_current(
-            db, conversation_id=conversation.id, state=state, module=state["current_module"]):
-        missing.append("extraction_refresh")
     m1_contract = None
     if state["current_module"] == "module_1":
         from ..m1_contract import missing_m1_fields, contract_for
@@ -134,8 +139,10 @@ async def get_program(session_id: str, user_id=Depends(require_subject_id), db=D
             "activity_records": await public_activities(db, user_id, conversation_id=conversation.id),
             "draft": public_draft, "record_hash": record_hash(pending) if pending else None,
             "m1_contract": m1_contract,
-            "can_confirm": bool(pending and not missing and state["last_transition_reason"] == "awaiting_record_confirmation"),
+            "can_confirm": bool(pending and not missing and (readiness is None or readiness["ready"])
+                                and state["last_transition_reason"] == "awaiting_record_confirmation"),
             "missing_fields": missing,
+            "readiness": {k: readiness[k] for k in ("ready", "module", "missing_fields", "reasons")} if readiness else None,
             "m1_reusable": (await initial_module(db, user_id=user_id)) == "module_2"}
 
 

@@ -160,6 +160,7 @@ def run() -> dict:
             workflow=workflow,
         )
         flagged = bool(outcome.get("findings"))
+        blocked = outcome["status"] == "blocked"
         result = {
             "id": case["id"],
             "module": case["module"],
@@ -168,10 +169,11 @@ def run() -> dict:
             "actual_status": outcome["status"],
             "actual_findings": outcome["findings"],
             "flagged": flagged,
+            "blocked": blocked,
             "rule": case["rule"],
             "classification": (
                 "validator_blind_spot"
-                if case["should_flag"] and not flagged
+                if case["should_flag"] and not blocked
                 else "unexpected_flag"
                 if not case["should_flag"] and flagged
                 else "covered"
@@ -182,7 +184,7 @@ def run() -> dict:
     blind_spots = [r for r in results if r["classification"] == "validator_blind_spot"]
     unexpected_flags = [r for r in results if r["classification"] == "unexpected_flag"]
     report = {
-        "schema_version": "response-quality-audit-v1",
+        "schema_version": "response-quality-audit-v2-hard-block",
         "scope": "local synthetic deterministic validator audit",
         "network_calls": 0,
         "provider_calls": 0,
@@ -191,7 +193,7 @@ def run() -> dict:
         "covered_count": sum(r["classification"] == "covered" for r in results),
         "blind_spot_count": len(blind_spots),
         "unexpected_flag_count": len(unexpected_flags),
-        "status": "findings" if blind_spots else "passed",
+        "status": "findings" if blind_spots or unexpected_flags else "passed",
         "elapsed_seconds": round(time.perf_counter() - started, 4),
         "blind_spots": blind_spots,
         "unexpected_flags": unexpected_flags,
@@ -216,4 +218,4 @@ def run() -> dict:
 
 
 if __name__ == "__main__":
-    run()
+    raise SystemExit(0 if run()["status"] == "passed" else 1)

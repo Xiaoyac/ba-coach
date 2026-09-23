@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Sequence
 
@@ -9,6 +10,7 @@ import anthropic
 
 from ..config import Settings
 from ..schemas import Message
+from .deadline import timeout
 from .base import (
     Completion,
     LLMProvider,
@@ -34,7 +36,11 @@ class ClaudeProvider(LLMProvider):
         self.model = settings.claude_model
         # AsyncAnthropic also picks the key up from the environment on its own;
         # passing it explicitly keeps the failure mode above readable.
-        self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        self._client = anthropic.AsyncAnthropic(
+            api_key=settings.anthropic_api_key,
+            timeout=settings.provider_request_timeout_seconds,
+            max_retries=settings.provider_max_retries,
+        )
 
     def _system_blocks(self, system: SystemPrompt) -> list[dict]:
         """Turn system segments into cache-annotated text blocks.
@@ -78,9 +84,18 @@ class ClaudeProvider(LLMProvider):
         self, *, system: SystemPrompt, messages: list[Message]
     ) -> Completion:
         try:
-            response = await self._client.messages.create(
-                **self._request_kwargs(system, messages)
+            timeout_seconds = getattr(
+                self._settings, "provider_request_timeout_seconds", 60.0
             )
+            async with timeout(timeout_seconds):
+                response = await self._client.messages.create(
+                    **self._request_kwargs(system, messages)
+                )
+        except (TimeoutError, asyncio.TimeoutError, anthropic.APITimeoutError) as exc:
+            raise ProviderError(
+                "Claude request timed out after "
+                f"{getattr(self._settings, 'provider_request_timeout_seconds', 60.0):g}s"
+            ) from exc
         except anthropic.APIStatusError as exc:  # 4xx / 5xx from the API
             raise ProviderError(f"Claude API error {exc.status_code}: {exc.message}") from exc
         except anthropic.APIConnectionError as exc:
@@ -111,14 +126,23 @@ class ClaudeProvider(LLMProvider):
         self, *, system: SystemPrompt, messages: list[Message]
     ) -> AsyncIterator[StreamDelta]:
         try:
-            async with self._client.messages.stream(
-                **self._request_kwargs(system, messages)
-            ) as stream:
-                async for chunk in stream.text_stream:
-                    yield StreamDelta(kind="content", text=chunk)
-                final = await stream.get_final_message()
-                if final.stop_reason == "refusal":
-                    raise ProviderError("The model declined this request.")
+            timeout_seconds = getattr(
+                self._settings, "provider_request_timeout_seconds", 60.0
+            )
+            async with timeout(timeout_seconds):
+                async with self._client.messages.stream(
+                    **self._request_kwargs(system, messages)
+                ) as stream:
+                    async for chunk in stream.text_stream:
+                        yield StreamDelta(kind="content", text=chunk)
+                    final = await stream.get_final_message()
+                    if final.stop_reason == "refusal":
+                        raise ProviderError("The model declined this request.")
+        except (TimeoutError, asyncio.TimeoutError, anthropic.APITimeoutError) as exc:
+            raise ProviderError(
+                "Claude stream timed out after "
+                f"{getattr(self._settings, 'provider_request_timeout_seconds', 60.0):g}s"
+            ) from exc
         except anthropic.APIStatusError as exc:
             raise ProviderError(f"Claude API error {exc.status_code}: {exc.message}") from exc
         except anthropic.APIConnectionError as exc:
@@ -141,12 +165,18 @@ class ClaudeProvider(LLMProvider):
         contract; `classify` turns that into `default` itself.
         """
         try:
-            response = await self._client.messages.create(
-                model=self._settings.claude_router_model,
-                max_tokens=max_tokens or self._settings.router_max_tokens,
-                system=system,
-                messages=[{"role": "user", "content": user}],
+            timeout_seconds = getattr(
+                self._settings, "router_request_timeout_seconds", 12.0
             )
+            if (max_tokens or 0) > 512:
+                timeout_seconds = getattr(self._settings, "background_model_timeout_seconds", 30.0)
+            async with timeout(timeout_seconds):
+                response = await self._client.messages.create(
+                    model=self._settings.claude_router_model,
+                    max_tokens=max_tokens or self._settings.router_max_tokens,
+                    system=system,
+                    messages=[{"role": "user", "content": user}],
+                )
             if response.stop_reason == "refusal":
                 return ""
             return "".join(

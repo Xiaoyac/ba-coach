@@ -16,10 +16,12 @@ the turn that already completed successfully.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from time import perf_counter
 
 from .providers.base import LLMProvider
 from .reasoning import normalize_reasoning_channels
@@ -55,7 +57,7 @@ ROUTER_AGENT_PROMPT = """\
 模块1（BA心理教育）：建立信任、理解实际行为与状态关系（可低披露）、科普BA基础知识。
 模块2（目标设定）：仅当模块1完整结束后才允许进入；PA概念介绍，用户确认意向，生成PA目标卡片。
 模块3（建立契约）：必须记忆库存在本轮完整PA目标卡片；介绍记录规则，建立行动契约。
-模块4（回顾与分析）：必须记忆库存在本轮完整PA目标卡片；接收PA执行反馈，开展复盘分析。
+模块4（回顾与分析）：必须记忆库存在本轮完整PA目标卡片；模块3确认后可先进入 waiting_execution 等待态，收到PA执行反馈后才进入实际复盘。
 
 ## 判断依据
 - 必须综合阅读输入中的“本 Session 对话记录”，不能只根据最后一轮判断；模块一的多个完成条件通常分散在不同轮次。
@@ -67,7 +69,7 @@ ROUTER_AGENT_PROMPT = """\
 - current_module=1；必须满足服务器 M1 三里程碑契约。个性化与明确低披露两种路线都允许，但都需要 BA 教育、基本理解、核心疑问已解决及明确目标设定意愿；不得在 M1 越权开展 PA 介绍、活动建议或具体目标设定；
 - current_module=4；复盘流程结束，用户提出调整、更换 PA 目标，并准备开启新一轮行动循环。
 2.跳转至模块三：current_module=2，且已经得到完整可落地PA目标卡片，准备开始执行PA目标；
-3.跳转至模块四：current_module=3，且建立PA目标执行契约，用户开始执行PA目标并产生PA目标执行反馈（完成、未完成、执行受阻）或执行过程描述（执行后产生的PA记录或每日记录内容）；
+3.跳转至模块四 waiting_execution：current_module=3，且已建立PA目标执行契约。此转移只表示等待执行，不代表已有执行反馈；收到完成、未完成、执行受阻或执行过程描述后，才允许把模块4的 execution_reviewed 步骤标记完成并开始复盘；
 4.不符合以上任意跳转条件 → target_module = current_module（若为空，则target_module = 1）；
 
 # 注意事项
@@ -114,7 +116,7 @@ _VALID_MOVES: dict[str, set[str]] = {
     "4": {"4", "2"},
 }
 
-_PA_CARD_MARKER = "当前PA目标"
+_PA_CARD_RE = re.compile(r"当前(?:核心\s*)?PA\s*目标")
 
 
 @dataclass(frozen=True)
@@ -131,6 +133,36 @@ class RouterDecision:
     error_code: str | None = None
     revoked_steps: list[str] = field(default_factory=list)
     revocation_evidence: str | None = None
+    json_recovery: dict = field(default_factory=dict)
+
+
+def format_routing_reasoning(decision, current, applied_target=None, *, diagnostics=None):
+    """Never replace native reasoning with a database-veto notice."""
+    applied = applied_target or decision.target_module
+    result = (f"模块判断结果：维持 {applied}，本轮不跳转。" if applied == current
+              else f"模块判断结果：{current} → {applied}。")
+    notices = []
+    if decision.error_code:
+        notices.append(f"路由判断未成功（{decision.error_code}），模型没有提供可用决定；最终阶段由服务器契约核验，不将失败标记为正常判断。")
+    if decision.json_recovery:
+        notices.append("路由首次输出达到长度上限；已进行一次限时的结构化判断恢复，状态："
+                       + decision.json_recovery["status"] + "。该恢复不额外生成深度思考。")
+    if applied != decision.target_module:
+        notices.append(f"Router建议：{decision.target_module}；后台核验后的实际阶段：{applied}。"
+                       "模型建议不是数据库已执行的切换；下方保留原始模型思考，不能把它当作最终状态。")
+    if diagnostics and diagnostics.get("block_reasons"):
+        notices.append("本轮未跳转原因：" + "；".join(diagnostics["block_reasons"]) + "。")
+    elif diagnostics and diagnostics.get("policy") == "router_evidence_reconciled":
+        notices.append("已采纳 Router 的推进建议，并从真实对话中补正理解／同意证据。")
+    goal_creation = (diagnostics or {}).get("goal_creation") if diagnostics else None
+    if goal_creation and goal_creation.get("status") == "blocked":
+        notices.append("目标创建未执行：" + goal_creation.get("message", "当前目标证据尚未通过核验")
+                       + f"（{goal_creation.get('reason_code', 'unknown')}）。")
+    elif goal_creation and goal_creation.get("status") == "created":
+        notices.append("已根据用户明确选择和当前轮次证据创建目标草稿。")
+    thought = decision.reasoning_content.strip() or (
+        "路由模型未返回独立 reasoning_content；有无思考文本不等于判断是否成功，请结合上述状态。")
+    return "\n\n".join([result, *notices, thought])
 
 
 def extract_pa_card(text: str) -> str | None:
@@ -142,8 +174,8 @@ def extract_pa_card(text: str) -> str | None:
     """
     if not text:
         return None
-    index = text.find(_PA_CARD_MARKER)
-    return text[index:].strip() if index != -1 else None
+    marker = _PA_CARD_RE.search(text)
+    return text[marker.start():].strip() if marker else None
 
 
 def _clamp(
@@ -260,6 +292,7 @@ async def decide_target_module_with_reasoning(
     system_prompt: str | None = None,
     max_tokens: int | None = None,
     completed_steps: list[str] | None = None,
+    recovery_timeout_seconds: float = 6.0,
 ) -> RouterDecision:
     """Return the next module together with the router's thought trace.
 
@@ -288,6 +321,41 @@ async def decide_target_module_with_reasoning(
         completion.text, completion.reasoning_content
     )
     raw = normalized.reply
+    recovery = {}
+    if completion.finish_reason in ("length", "max_tokens"):
+        # A thinking budget exhausted before JSON is not a successful route.
+        # Recover once with the same full input, no native reasoning and a
+        # small output budget; never allow an unbounded retry loop.
+        started = perf_counter()
+        recovery = {"status": "failed", "original_finish_reason": completion.finish_reason,
+                    "original_request_id": completion.request_id}
+        original = completion
+        raw = ""
+        try:
+            recovered = await asyncio.wait_for(provider.route_detailed(
+                system=(system_prompt or ROUTER_AGENT_PROMPT) + "\n仅返回完整判断JSON，不要解释，不要增加输出字段。",
+                user=user_message, max_tokens=512, include_reasoning=False), timeout=recovery_timeout_seconds)
+            recovery["request_id"] = recovered.request_id
+            totals = {key: (original.usage or {}).get(key, 0) + (recovered.usage or {}).get(key, 0)
+                      for key in set(original.usage or {}) | set(recovered.usage or {})}
+            completion = replace(original, usage=totals)
+            candidate = normalize_reasoning_channels(recovered.text, recovered.reasoning_content).reply
+            try:
+                payload = json.loads(candidate.strip().removeprefix("```json").removesuffix("```").strip())
+            except (ValueError, TypeError):
+                payload = None
+            valid_shape = (isinstance(payload, dict) and isinstance(payload.get("completed_steps"), list)
+                           and all(isinstance(step, str) for step in payload["completed_steps"]))
+            if (recovered.finish_reason not in ("length", "max_tokens") and valid_shape
+                    and _parse_target_module(candidate) in _SHORT_TO_FULL):
+                raw = candidate
+                completion = replace(completion, text=candidate, finish_reason=recovered.finish_reason)
+                recovery["status"] = "recovered"
+        except asyncio.TimeoutError:
+            recovery["status"] = "timeout"
+        except Exception:  # recovery failure still holds position, not the HTTP reply
+            recovery["status"] = "provider_error"
+        recovery["duration_ms"] = round((perf_counter() - started) * 1000)
     if not raw:
         logger.warning("router agent returned nothing; keeping module_%s", current_short)
         return RouterDecision(
@@ -298,7 +366,8 @@ async def decide_target_module_with_reasoning(
             usage=completion.usage,
             finish_reason=completion.finish_reason,
             request_id=completion.request_id,
-            error_code="empty_completion",
+            error_code="router_json_recovery_failed" if recovery else "empty_completion",
+            json_recovery=recovery,
         )
 
     proposed = _parse_target_module(raw)
@@ -317,6 +386,7 @@ async def decide_target_module_with_reasoning(
             finish_reason=completion.finish_reason,
             request_id=completion.request_id,
             error_code="invalid_router_json",
+            json_recovery=recovery,
         )
 
     revoked_steps, revocation_evidence = [], None
@@ -350,6 +420,7 @@ async def decide_target_module_with_reasoning(
         finish_reason=completion.finish_reason,
         request_id=completion.request_id,
         error_code=None,
+        json_recovery=recovery,
     )
 
 
@@ -360,4 +431,5 @@ __all__ = [
     "decide_target_module",
     "decide_target_module_with_reasoning",
     "extract_pa_card",
+    "format_routing_reasoning",
 ]

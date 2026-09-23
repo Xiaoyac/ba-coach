@@ -42,3 +42,11 @@ export async function grantAdminRole(accountId: number): Promise<AdminAccountIte
   if (!res.ok) throw new Error(await detail(res, "授予管理员权限失败"));
   return res.json() as Promise<AdminAccountItem>;
 }
+
+export async function deleteAdminAccount(accountId: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/admin/accounts/${accountId}`, {
+    method: "DELETE",
+    headers: apiHeaders(),
+  });
+  if (!res.ok) throw new Error(await detail(res, "删除账号失败"));
+}

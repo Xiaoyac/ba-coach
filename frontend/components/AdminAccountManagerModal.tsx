@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   fetchAdminAccounts,
   grantAdminRole,
+  deleteAdminAccount,
   type AdminAccountItem,
 } from "@/lib/adminAccounts";
 import { CloseMark, UsersMark } from "@/components/icons";
@@ -31,8 +32,10 @@ export default function AdminAccountManagerModal({
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [grantingId, setGrantingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [grantTarget, setGrantTarget] = useState<AdminAccountItem | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AdminAccountItem | null>(null);
 
   async function load(search = query, signal?: AbortSignal) {
     setLoading(true);
@@ -59,11 +62,11 @@ export default function AdminAccountManagerModal({
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !grantTarget) onClose();
+      if (event.key === "Escape" && !grantTarget && !deleteTarget) onClose();
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [grantTarget, onClose]);
+  }, [deleteTarget, grantTarget, onClose]);
 
   async function handleGrant(account: AdminAccountItem) {
     setGrantTarget(account);
@@ -82,6 +85,20 @@ export default function AdminAccountManagerModal({
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setGrantingId(null);
+    }
+  }
+
+  async function performDelete(account: AdminAccountItem) {
+    setDeleteTarget(null);
+    setDeletingId(account.id);
+    setError(null);
+    try {
+      await deleteAdminAccount(account.id);
+      setAccounts((prev) => prev.filter((item) => item.id !== account.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -202,15 +219,27 @@ export default function AdminAccountManagerModal({
                         注册：{formatDate(account.created_at)} · 最近登录：{formatDate(account.last_login_at)}
                       </p>
                     </div>
-                    {account.role === "user" && (
-                      <button
-                        type="button"
-                        disabled={grantingId !== null}
-                        onClick={() => void handleGrant(account)}
-                        className="shrink-0 rounded-xl border border-accent-edge bg-accent-wash px-3.5 py-2 text-xs text-accent-ink transition-all duration-300 hover:bg-panel disabled:cursor-wait disabled:opacity-50"
-                      >
-                        {grantingId === account.id ? "正在授予…" : "授予管理员"}
-                      </button>
+                    {!isCurrent && (
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        {account.role === "user" && (
+                          <button
+                            type="button"
+                            disabled={grantingId !== null || deletingId !== null}
+                            onClick={() => void handleGrant(account)}
+                            className="rounded-xl border border-accent-edge bg-accent-wash px-3.5 py-2 text-xs text-accent-ink transition-all duration-300 hover:bg-panel disabled:cursor-wait disabled:opacity-50"
+                          >
+                            {grantingId === account.id ? "正在授予…" : "授予管理员"}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          disabled={grantingId !== null || deletingId !== null}
+                          onClick={() => setDeleteTarget(account)}
+                          className="rounded-xl border border-alert-edge bg-alert-wash px-3.5 py-2 text-xs text-alert-ink transition-all duration-300 hover:bg-panel disabled:cursor-wait disabled:opacity-50"
+                        >
+                          {deletingId === account.id ? "正在删除…" : "删除账号"}
+                        </button>
+                      </div>
                     )}
                   </article>
                 );
@@ -220,7 +249,7 @@ export default function AdminAccountManagerModal({
         </div>
 
         <footer className="shrink-0 border-t border-line px-5 py-3 text-[0.68rem] leading-relaxed text-ink-faint sm:px-6">
-          权限授予会立即生效；此页面不提供降级操作，以避免误触移除管理员权限。
+          授予管理员会立即生效。删除会永久移除账号及其对话、目标和记录；当前登录账号不能删除。
         </footer>
       </section>
 
@@ -234,6 +263,18 @@ export default function AdminAccountManagerModal({
         onCancel={() => setGrantTarget(null)}
         onConfirm={() => {
           if (grantTarget) void performGrant(grantTarget);
+        }}
+      />
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="永久删除账号？"
+        description={`${deleteTarget?.display_id ?? deleteTarget?.username ?? "该账号"} 及其对话、目标和记录将被永久删除，无法恢复。`}
+        confirmLabel="永久删除"
+        cancelLabel="取消"
+        busy={deletingId !== null}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) void performDelete(deleteTarget);
         }}
       />
     </div>

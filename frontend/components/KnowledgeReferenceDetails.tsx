@@ -43,13 +43,22 @@ export default function KnowledgeReferenceDetails({ messageId, pending, view = "
   if (!data.recalled.length) return <p role="status" className="font-mono text-ink">null</p>;
   if (view === "mediator") return <div className="space-y-3">
     <div className="space-y-1">
-      <p className="font-medium text-accent-ink">中介节点深度思考</p>
+      <p className="font-medium text-accent-ink">中介节点使用建议内容</p>
       <p>处理状态：{label(data.mediator_status)} · {label(data.mediator_reason)}</p>
       <p>中介处理总耗时：{data.mediator_duration_ms == null ? "未记录" : `${(data.mediator_duration_ms / 1000).toFixed(1)} 秒`}</p>
-      <p>总耗时包含请求、生成和解析，不等于纯思考时长。</p>
+      <p>本轮召回 {data.recalled.length} 段 · 传给回复模型 {data.provided.length} 段</p>
     </div>
-    <p className="whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">{data.mediator_reasoning_content || "null"}</p>
-    {!data.mediator_reasoning_content && <p>本轮未返回或未保存独立思考内容；不使用中介建议替代。</p>}
+    <p className="whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">{data.mediator_guidance || "null"}</p>
+    {!!data.mediator_cautions?.length && <section className="space-y-1">
+      <h4 className="font-medium text-ink">注意事项</h4>
+      <ul className="list-disc space-y-1 pl-5">
+        {data.mediator_cautions.map((item, index) => <li key={index} className="whitespace-pre-wrap [overflow-wrap:anywhere]">{item}</li>)}
+      </ul>
+    </section>}
+    {!data.mediator_guidance && <p>{data.mediator_status === "completed"
+      ? "本条历史回复未保存中介使用建议，不会重新调用模型补填；新回复可查看实际建议。"
+      : "本轮没有可用的中介使用建议，请结合上方处理状态查看原因。"}</p>}
+    {data.mediator_guidance && <p className="text-ink-faint">这是中介给回复模型的知识使用建议，不是独立思考内容，也不代表回复最终实际引用。</p>}
     {data.mediator_model && <p>模型：{data.mediator_model}</p>}
   </div>;
 

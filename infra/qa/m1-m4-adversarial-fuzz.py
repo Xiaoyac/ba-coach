@@ -62,10 +62,8 @@ def check_m2_mutations(rounds):
                'selection_quote': body, 'activity_quote': activity,
                'direction_quote': body if kind == 'primary' else None}
         if proposal_evidence(raw, [msg], activity) is not None:
-            # These are intentionally retained as product findings: the
-            # contract currently accepts a quoted suggestion/past event as a
-            # selection. They are not treated as harness failures so the rest
-            # of the fail-closed fuzz run can complete.
+            # Retain the original buckets for comparison, but both categories
+            # fail the final run. A product bug is not a passing harness run.
             if '助手说' in body or '做过' in body:
                 failures.append({'kind': 'product_m2_false_goal_creation', 'round': i, 'case': body})
             else:
@@ -118,7 +116,7 @@ def check_response_rules(rounds):
         module, reply = templates[i % len(templates)]
         result = validate_answer(reply=reply, module=module, evidence_ids=[], workflow={
             'available': True, 'current_module': module, 'plan_confirmed': False})
-        if result['status'] == 'passed':
+        if result['status'] != 'blocked':
             failures.append({'kind': 'response_rule_not_flagged', 'round': i, 'module': module})
     return failures
 
@@ -138,14 +136,15 @@ async def main():
                            'm4_quote_and_order_mutation': rounds * 2, 'agent_response_rules': rounds},
               'product_finding_count': len(product_findings), 'harness_failure_count': len(harness_failures),
               'product_findings': product_findings[:200], 'harness_failures': harness_failures[:200],
-              'status': 'passed' if not harness_failures else 'failed',
+              'status': 'passed' if not failures else 'failed',
               'elapsed_seconds': round(time.perf_counter() - started, 3),
               'notes': ['All mutations are expected to fail closed.', 'No production reads/writes or model calls.']}
     out = ROOT / '.test-tmp' / 'm1-m4-adversarial-fuzz-report.json'
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     print(json.dumps({'status': report['status'], 'rounds_each': rounds,
                       'product_finding_count': len(product_findings), 'harness_failure_count': len(harness_failures), 'report': str(out)}, ensure_ascii=False))
-    if harness_failures:
+    if failures:
         raise SystemExit(1)
 
 

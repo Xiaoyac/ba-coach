@@ -6,7 +6,7 @@ from typing import Any, Mapping
 import re
 import unicodedata
 
-GATE_VERSION = "rules-v1"
+GATE_VERSION = "rules-v2-confirmation"
 
 _GREETINGS = frozenset({"你好", "您好", "嗨", "哈喽", "早上好", "下午好", "晚上好", "hello", "hi"})
 _ACKS = frozenset({"好", "好的", "好呀", "嗯", "嗯嗯", "明白了", "我明白了", "知道了", "我知道了",
@@ -66,6 +66,9 @@ def decide_retrieval(state: Mapping[str, Any], *, enabled: bool = True) -> Retri
         return RetrievalIntent(True, "substantive_or_unknown")
     if text in _GREETINGS:
         return RetrievalIntent(False, "greeting")
+    from .generation_policy import is_dialogue_confirmation
+    if is_dialogue_confirmation(state):
+        return RetrievalIntent(False, "dialogue_confirmation")
     # Whole utterance match: "谢谢，但我不想活了" must never match a social prefix.
     atoms = [part.strip() for part in re.split(r"[,，。;；!！]+", text) if part.strip()]
     if atoms and all(part in _ACKS | _PAUSES for part in atoms):

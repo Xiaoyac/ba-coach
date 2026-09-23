@@ -7,11 +7,16 @@ target="/opt/bacoach/releases/$release_id"
 previous=$(readlink -f /opt/bacoach/current)
 [[ "$previous" == /opt/bacoach/releases/* && ! -e "$target" ]] || exit 2
 switched=false
+push_was_active=false
+if systemctl is-active --quiet bacoach-pa-push.service; then push_was_active=true; fi
 rollback() {
   code=$?
   if [[ $code -ne 0 && "$switched" == true ]]; then
     ln -sfn "$previous" /opt/bacoach/current
     systemctl restart bacoach-backend bacoach-frontend || true
+  fi
+  if [[ $code -ne 0 && "$push_was_active" == true ]]; then
+    systemctl restart bacoach-pa-push.service || true
   fi
   exit "$code"
 }
@@ -31,6 +36,7 @@ source /etc/bacoach/workbench-safety.env
 set +a
 cd "$target/backend"
 .venv/bin/python scripts/check_knowledge_mediator.py --configuration-only
+if [[ "$push_was_active" == true ]]; then systemctl stop bacoach-pa-push.service; fi
 ln -sfn "$target" /opt/bacoach/current
 switched=true
 systemctl restart bacoach-backend
@@ -39,5 +45,10 @@ curl --fail --silent http://127.0.0.1:8000/health
 systemctl restart bacoach-frontend
 for _ in {1..30}; do curl --fail --silent http://127.0.0.1:3000/ >/dev/null && break; sleep 1; done
 curl --fail --silent http://127.0.0.1:3000/ >/dev/null
+if [[ "$push_was_active" == true ]]; then
+  systemctl start bacoach-pa-push.service
+  sleep 2
+  systemctl is-active --quiet bacoach-pa-push.service
+fi
 trap - EXIT
 echo "DEPLOYED=$target PREVIOUS=$previous"

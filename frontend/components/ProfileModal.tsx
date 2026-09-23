@@ -282,7 +282,7 @@ export default function ProfileModal({
               <div role="radiogroup" aria-label="对话模型" className="grid grid-cols-2 gap-2">
                 {(
                   [
-                    ["deepseek", "DeepSeek", "当前主要模型"],
+                    ["deepseek", "Qwen-Max", "当前主要模型"],
                     ["doubao", "豆包 Doubao", "火山方舟"],
                   ] as const
                 ).map(([provider, label, description]) => {

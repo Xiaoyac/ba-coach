@@ -50,7 +50,7 @@ export default function ReasoningDetails({ message, replyPending, routingPending
             {channel.pending && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-label="生成中" />}
           </button>
         ))}
-        {([{key: "knowledge", label: "对话参考 chunk"}, {key: "mediator", label: "中介节点深度思考"}] as const).map(channel =>
+        {([{key: "knowledge", label: "对话参考 chunk"}, {key: "mediator", label: "中介节点使用建议内容"}] as const).map(channel =>
           <button key={channel.key} id={`${id}-${channel.key}-button`} type="button"
             onClick={() => setActive(value => value === channel.key ? null : channel.key)}
             aria-expanded={active === channel.key} aria-controls={`${id}-${channel.key}-panel`}

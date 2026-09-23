@@ -41,19 +41,30 @@ async def main(once=False, check=False):
                 for table in metadata.tables.values(): await db.execute(select(table).limit(0))
             print('READY: key and schema checks passed; no notifications sent')
             return
-        while True:
-            try: print(json.dumps({'checks': await tick_checks(get_sessionmaker())}), flush=True)
-            except Exception as exc:
-                print(json.dumps({'check_worker_error': type(exc).__name__}), flush=True)
-                if once: raise SystemExit(1)
-            try: print(json.dumps(await tick(get_sessionmaker())), flush=True)
-            except Exception as exc:
-                # Never leak endpoint/auth details through exception text.
-                print(json.dumps({'worker_error': type(exc).__name__}), flush=True)
-                if once: raise SystemExit(1)
-            if once: break
-            await asyncio.sleep(30)
+        if once:
+            await iteration(tick_checks, 'checks', once=True)
+            await iteration(tick, 'activities', once=True)
+        else:
+            # Short user-selected checks must not wait for the 30-second activity
+            # scanner (or its network timeouts). Both retain durable DB claims.
+            await asyncio.gather(scan(tick_checks, 'checks', 2), scan(tick, 'activities', 30))
     finally: await dispose_db()
+
+
+async def iteration(run, name, *, once=False):
+    try:
+        counts = await run(get_sessionmaker())
+        if once or any(counts.values()):
+            print(json.dumps({name: counts}), flush=True)
+    except Exception as exc:
+        print(json.dumps({name + '_worker_error': type(exc).__name__}), flush=True)
+        if once: raise SystemExit(1)
+
+
+async def scan(run, name, seconds):
+    while True:
+        await iteration(run, name)
+        await asyncio.sleep(seconds)
 
 
 if __name__ == '__main__':

@@ -81,5 +81,6 @@ def test_m3_instruction_survives_admin_override_without_affecting_other_modules(
         assert "自定义提示词" in prompt
         assert ("# 每日记录的网页操作引导" in prompt) == (module == "module_3")
         if module == "module_3":
-            for text in ("记录今日", "打开每日记录", "保存今日记录", "不等于0分", "可选", "不把日记表单当作"):
+            for text in ("记录今日", "打开每日记录", "保存今日记录", "三项均必填", "4项选填", "不把日记表单当作"):
                 assert text in prompt
+            assert "不适用" not in prompt

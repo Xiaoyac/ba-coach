@@ -41,7 +41,12 @@ async def seed_review(db, *, decision, with_contract=True):
         "cycle_id": "reviewed-cycle", "module_2_steps": ["activity_selected"],
         "module_3_steps": ["recording_agreed"], "module_4_steps": ["old_review"],
     })
-    decision_quote = "我决定继续按这个计划。" if decision == 1 else "我决定调整计划。"
+    decision_quote = {
+        1: "我决定继续按这个计划。",
+        2: "我决定更换目标。",
+        3: "我决定调整计划。",
+        4: "我决定暂停目标。",
+    }[decision]
     summary = "总结：晚饭后散步十分钟，完成十分钟，做完后感觉轻松。"
     education = "BA教育：先行动，再观察感受和结果。"
     review_summary = "复盘：本次已完成，下一步按决定执行。"
