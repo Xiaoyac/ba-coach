@@ -79,35 +79,6 @@ CONTEXT_ANCHOR_ITEM_CHARS = 360
 CONTEXT_ANCHOR_TOTAL_CHARS = 2600
 ROUTER_TRANSCRIPT_CHARS = 16_000
 
-_MODULE_NUMBER = {
-    "module_1": "一",
-    "module_2": "二",
-    "module_3": "三",
-    "module_4": "四",
-}
-_MODULE_STATUS_QUESTION = re.compile(
-    r"(?:现在|当前|目前)?(?:是|在|处于|进行到)?(?:第)?(?:几|哪个|什么)(?:个)?模块"
-    r"|(?:现在|当前|目前)?(?:是|在|处于|进行到)?模块(?:是)?(?:几|哪个|什么)"
-    r"|(?:现在|当前|目前)(?:进行到|处于|在)(?:第)?(?:几|哪个|什么)(?:个)?(?:模块|阶段)"
-    r"|(?:现在|当前|目前)(?:是|在|处于)(?:第)?(?:几|哪个|什么)(?:个)?阶段",
-    re.IGNORECASE,
-)
-
-
-def authoritative_module_status_reply(user_input: str, module: str) -> str | None:
-    """Answer direct workflow-state questions without asking an LLM to guess."""
-    compact = re.sub(r"\s+", "", user_input)
-    if len(compact) > 80 or not _MODULE_STATUS_QUESTION.search(compact):
-        return None
-    number = _MODULE_NUMBER.get(module)
-    if number is None:
-        return None
-    return (
-        f"当前是模块{number}（{module}），本条回复也由模块{number}处理。"
-        "本轮结束后是否进入下一模块，会由路由 Agent 根据完整对话另行判断。"
-    )
-
-
 def unwrap_chat_reply(text: str) -> str:
     """Hide an internal ``{"chat_reply": ...}`` envelope from end users.
 
@@ -275,8 +246,7 @@ async def extract_memory_node(
         # Session metadata accumulates across turns; the request's own metadata
         # was merged into it by the route before the graph ran.
         "metadata": dict(session.metadata),
-        # What route_next_module_node decided at the end of the last turn —
-        # None for a session that has never completed a turn yet.
+        # Persisted session module used as the starting point for pre-reply routing.
         "current_module": session.module,
         "module_steps": module_steps,
         "active_cycle_id": active_cycle_id,
@@ -286,20 +256,11 @@ async def extract_memory_node(
 async def analyze_intent_node(
     state: AgentState, runtime: Runtime[GraphContext]
 ) -> dict:
-    """Decide which module handles this turn.
+    """Initialize the module before the pre-reply routing stage.
 
-    Precedence: explicit pin > the module route_next_module_node decided at
-    the end of the *previous* turn (see router_agent.py) > default.
-
-    This is deliberately not a per-message guess any more — no keyword
-    heuristic, no generic "which module fits this text" classifier. The
-    program's actual state machine (BA education must finish before goal
-    setting, a PA card is required before modules 3/4, module 1 is never
-    re-entered, …) is enforced once, post-hoc, by the router agent; a
-    pre-turn classifier with no knowledge of those rules could — and
-    reliably would, on the right keywords — route somewhere the rules
-    forbid. Reading the persisted decision back is what keeps this node and
-    that one from disagreeing with each other.
+    Explicit test pins take precedence over the persisted session module and
+    default. The pre-reply router subsequently evaluates the current input;
+    this initializer does not decide a formal business transition.
     """
 
     def decided(module: str, routed_by: str) -> dict:
@@ -1879,9 +1840,8 @@ async def update_memory_and_format_node(
 
     memory = _derive_memory(state)
     await context.store.set_memory(session_id, memory)
-    # next_module (route_next_module_node's decision), not extracted_intent
-    # (this turn's own module) — that is what analyze_intent_node reads back
-    # as current_module on the turn after this one.
+    # Preserve this turn's pre-reply module selection for session continuity.
+    # The post-reply bookkeeping node does not choose a new module.
     await context.store.set_module(
         session_id, state.get("next_module", state.get("extracted_intent", DEFAULT_MODULE))
     )
