@@ -7,7 +7,7 @@ import re
 from datetime import datetime, date, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-BUFFER = timedelta(minutes=15)
+BUFFER = timedelta(hours=1)
 MAX_LATENESS = timedelta(minutes=30)
 
 

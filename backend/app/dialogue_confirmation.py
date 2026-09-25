@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from fastapi import HTTPException
 from sqlalchemy import select, update
 from .database_v2_schema import metadata as schema
-from .models import ConversationMessage
+from .models import Conversation, ConversationMessage
 from .program_confirmation import draft, record_hash, validate_confirmation, commit_confirmation
 from .v2_repository import V2Conflict, V2NotFound, now
 
@@ -25,6 +25,7 @@ _CONFIRMATION_FIELDS = (
     "activity_content", "schedule_text", "scheduled_start_at", "timezone",
     "location", "duration_minutes", "frequency_rule", "companion",
     "potential_barriers", "barrier_coping_plan",
+    "difficulty_rating", "difficulty_original", "difficulty_evidence",
 )
 
 _M3_CONFIRMATION_FIELDS = (
@@ -200,12 +201,14 @@ def summary_present(module, text, record):
         # allowing the UI/agent to split “下周一中午十二点半” into date and
         # time lines. This prevents a hidden plan from being confirmed but
         # accepts ordinary formatting and punctuation changes.
-        if not all(compact(record[k]) in body for k in ("activity_content", "location")):
+        if compact(record["activity_content"]) not in body:
             return False
-        if str(record["duration_minutes"]) not in body:
+        if record.get("location") and compact(record["location"]) not in body:
+            return False
+        if record.get("duration_minutes") is not None and str(record["duration_minutes"]) not in body:
             return False
         frequency = record.get("frequency_rule") or {}
-        if not compact(frequency.get("text")) or compact(frequency["text"]) not in body:
+        if frequency.get("text") and compact(frequency["text"]) not in body:
             return False
         from .plan_contract import _barrier_normalized
         if any(compact(x) not in body
@@ -248,9 +251,15 @@ def render_confirmation_summary(module, record, *, question=True):
         lines.extend([
             f"活动：{record['activity_content']}",
             f"时间：{record.get('schedule_text') or _format_schedule(record.get('scheduled_start_at'))}",
-            f"地点：{record['location']}",
-            f"时长：{record['duration_minutes']}分钟",
-            f"频率：{freq}",
+        ])
+        if record.get("location"):
+            lines.append(f"地点：{record['location']}")
+        if record.get("duration_minutes") is not None:
+            lines.append(f"时长：{record['duration_minutes']}分钟")
+        if freq:
+            lines.append(f"频率：{freq}")
+        lines.extend([
+            f"执行难度（自评）：{record['difficulty_rating']}/10",
             f"潜在障碍：{'、'.join(str(item) for item in barriers) or '暂未发现'}",
             "应对方案：" + "；".join(
                 f"{item.get('barrier', '')}：{item.get('plan', '')}" for item in coping
@@ -307,8 +316,8 @@ def _schedule_visible(record, body):
     return time_ok
 
 
-async def advance_from_dialogue(db, *, session_id, user_id, assistant_message_id):
-    """Called under the turn/profile/runtime locks, in the routing transaction."""
+async def advance_from_dialogue(db, *, session_id, user_id, assistant_message_id, allow_transition=True):
+    """Refresh display evidence; commit only when the calling boundary allows it."""
     conversation, state = await runtime_for(db, session_id)
     if (not conversation or conversation.subject_id != user_id or not state
             or state["flow_status"] in {"paused", "completed"}
@@ -404,7 +413,7 @@ async def advance_from_dialogue(db, *, session_id, user_id, assistant_message_id
             and previous.get("assistant_message_id") == rows[0].id
             and previous.get("fingerprint") == fingerprint(pending)
             and marker_ok)
-    if accepted and state["last_transition_reason"] == "awaiting_record_confirmation":
+    if allow_transition and accepted and state["last_transition_reason"] == "awaiting_record_confirmation":
         payload = SimpleNamespace(record_id=pending["id"], record_hash=record_hash(pending), row_version=state["row_version"])
         try:
             async with db.begin_nested():
@@ -495,6 +504,22 @@ async def precommit_user_confirmation(db, *, session_id, user_id,
             profiles = schema.tables['user_profile']
             await db.execute(select(profiles.c.uuid).where(
                 profiles.c.uuid == user_id).with_for_update())
+            # The classifier runs without holding write locks. Use current
+            # locking reads after it returns: under MySQL REPEATABLE READ a
+            # second ordinary SELECT could still see the pre-classifier
+            # transcript, and begin_turn only locks Conversation.
+            conversation = (await db.execute(select(Conversation).where(
+                Conversation.id == conversation.id, Conversation.subject_id == user_id)
+                .with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
+            if conversation is None:
+                return None
+            latest = (await db.execute(select(ConversationMessage).where(
+                ConversationMessage.conversation_id == conversation.id).order_by(
+                    ConversationMessage.position.desc(), ConversationMessage.id.desc())
+                .limit(1).with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
+            if latest is None or latest.id != user.id or latest.role != "user":
+                return None
+            user = latest
             rt = schema.tables['conversation_runtime_states']
             state = (await db.execute(select(rt).where(
                 rt.c.conversation_id == conversation.id).with_for_update())).mappings().one()
@@ -550,18 +575,9 @@ async def anchor_rendered_summary(
             ConversationMessage.position.desc(), ConversationMessage.id.desc()).limit(1))).scalar_one_or_none()
     if latest is None or latest.id != assistant_message_id:
         return False
-    # A deterministic card can replace fragile wording checks, but it cannot
-    # skip the M2 discussion that makes the activity an intentional choice.
-    # Keep the first three M2 progress gates (PA understanding, intention and
-    # activity selection) authoritative; only the card confirmation itself is
-    # allowed to open the final awaiting boundary.
-    if state["current_module"] == "module_2" and state.get("last_transition_reason") != "awaiting_record_confirmation":
-        progress_table = schema.tables["pa_cycle_progress"]
-        progress = (await db.execute(select(progress_table).where(
-            progress_table.c.cycle_id == state["active_cycle_id"]))).mappings().one_or_none()
-        required = {"pa_concept_understood", "values_or_intention_explored", "activity_selected"}
-        if not progress or not required.issubset(set(progress["module_2_steps"] or [])):
-            return False
+    # Router selects the reply module; it no longer supplies a parallel list
+    # of coaching micro-steps. Display readiness comes from the sourced draft
+    # and the exact current card/version checked below.
     assistant = (await db.execute(select(ConversationMessage).where(
         ConversationMessage.id == assistant_message_id,
         ConversationMessage.conversation_id == conversation.id,

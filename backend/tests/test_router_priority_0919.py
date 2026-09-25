@@ -59,9 +59,13 @@ def test_real_invitation_with_quoted_prior_plan_is_not_a_quoted_invitation():
 @pytest.mark.parametrize("case", ["valid", "later_neutral", "unrelated_no", "quoted_no", "missing_education",
     "unresolved", "declined", "education_invitation", "later_withdrawal", "later_question",
     "wrong_hash", "stale", "wrong_session", "router_stay", "missing_steps", "revoked"])
-async def test_router_can_repair_evidence_but_cannot_bypass_real_blockers(goal_api, case):
+async def test_router_cannot_replace_missing_semantic_understanding_with_keywords(goal_api, case):
     _, db, _ = goal_api
     turns, raw = scenario(case)
+    # Even a positive Router vote and a literal "没有" are not an extractor's
+    # contextual understanding assessment. Do not recreate an understanding
+    # passphrase in program code.
+    raw["understanding_quote"] = None
     last_id = 400 + len(turns) - 1
     await db.execute(insert(ConversationMessage), [dict(id=400+i, conversation_id=1, position=i,
         role=role, content=body) for i, (role, body) in enumerate(turns)])
@@ -86,22 +90,15 @@ async def test_router_can_repair_evidence_but_cannot_bypass_real_blockers(goal_a
         revocation_evidence="用户纠正证据" if case == "revoked" else None,
         assistant_message_id=last_id, diagnostics=diagnostics)
     await db.commit()
-    success = case in {"valid", "later_neutral"}
-    expected = "module_2" if success else "module_1"
+    expected = "module_1"
     assert target == expected and cycle is None
     _, runtime = await runtime_for(db, "chat-a")
     assert runtime["current_module"] == expected
     assert before == (await db.execute(select(func.count()).select_from(schema.tables["pa_goals"]))).scalar_one()
     record = (await db.execute(select(schema.tables["module_one_record"]))).mappings().one()
-    if success:
-        assert record["confirmation_message_id"] == 413
-        assert record["record_status"] == "confirmed"
-        assert record["event_experience"]["_m1_contract"]["evidence"]["understanding"]["turn"] == 11
-        assert diagnostics == {"policy": "router_evidence_reconciled", "block_reasons": []}
-    else:
-        assert record["record_status"] == "draft"
-        if case != "router_stay":
-            assert diagnostics["block_reasons"]
+    assert record["record_status"] == "draft"
+    if case != "router_stay":
+        assert diagnostics["block_reasons"]
     logs = schema.tables["ai_decision_logs"]
     decision = (await db.execute(select(logs.c.decision_value).where(logs.c.decision_type == "step_completion"))).scalar_one()
     assert decision["applied_target"] == expected
@@ -109,6 +106,7 @@ async def test_router_can_repair_evidence_but_cannot_bypass_real_blockers(goal_a
 
 def test_source_tampering_and_pure_function_do_not_mutate_original():
     turns, raw = scenario()
+    raw["consent_quote"] = None
     contract = normalize(raw, _data(), turns, "chat-a")
     contract["assistant_message_id"] = 99
     original = deepcopy(contract)

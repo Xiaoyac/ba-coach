@@ -31,6 +31,8 @@ class AgentState(TypedDict, total=False):
     # ---- Input, set by the caller ------------------------------------
     session_id: str
     user_input: str
+    user_message_id: int | None
+    turn_started_monotonic: float
     metadata: dict[str, str]
     # Pin a module and bypass analyze_intent_node entirely.
     forced_module: str | None
@@ -45,14 +47,17 @@ class AgentState(TypedDict, total=False):
     chat_history: list[Message]
     # Durable facts carried across sessions, loaded by extract_memory_node.
     memory: dict[str, str]
-    # The module persisted on the session from the *last* turn's
-    # route_next_module_node decision (or None for a brand-new session),
-    # loaded by extract_memory_node. This — not a per-message guess — is what
-    # analyze_intent_node uses to pick this turn's module.
+    # Committed business module, refreshed before the current-turn router.
     current_module: str | None
-    # Module chosen by analyze_intent_node: "module_1".."module_4".
+    routing_state: dict[str, Any]
+    transition_from_module: str
+    knowledge_task: str
+    recording_status: str
+    recording_decision_scope: str | None
+    knowledge_task: str
+    # Reply module after the pre-reply decision has been verified/committed.
     extracted_intent: str
-    # How it was chosen: explicit | sticky | default.
+    # How it was chosen: explicit | pre_reply_router | fallback.
     routed_by: str
     # Recent Memos entries for this subject, loaded by recall_memory_node —
     # only on this session's first turn or the turn it first enters module 4
@@ -82,17 +87,14 @@ class AgentState(TypedDict, total=False):
     retrieved_knowledge: list[KnowledgeChunk]
 
     # ---- Post-processing -----------------------------------------------
-    # Set by route_next_module_node: which module should handle the *next*
-    # turn. Persisted onto the session by update_memory_and_format_node —
-    # this turn's own response is already driven by extracted_intent above,
-    # this only ever affects the turn after it.
+    # Actual committed module after this turn; next input is routed anew.
     next_module: str
-    # Post-hoc Router Agent thought trace and the exact router model. This is
+    # Pre-reply Router Agent thought trace and the exact router model. This is
     # separate from the main reply reasoning above it in the disclosure UI.
     routing_reasoning_content: str
     router_model_name: str
-    # True only for an ordinary successful turn whose Router Agent will run
-    # after the visible response has already completed.
+    # Compatibility name: true when post-reply extraction is pending.
+    # The background job no longer invokes another module router.
     routing_pending: bool
     # A deterministic replacement was delivered, not an accepted model reply.
     # Do not extract facts, route, or summarize from a rejected generation.

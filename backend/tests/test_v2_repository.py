@@ -24,8 +24,8 @@ async def db():
             {"id": 1, "subject_id": "a", "session_id": "chat-a", "title": "a"},
             {"id": 2, "subject_id": "b", "session_id": "chat-b", "title": "b"}])
         await session.execute(insert(ConversationMessage.__table__), [
-            {"id": 1, "conversation_id": 1, "position": 0, "role": "user", "content": "我确认"},
-            {"id": 2, "conversation_id": 2, "position": 0, "role": "user", "content": "我确认"},
+            {"id": 1, "conversation_id": 1, "position": 0, "role": "user", "content": "这个安排难度是4分，我确认。"},
+            {"id": 2, "conversation_id": 2, "position": 0, "role": "user", "content": "这个安排难度是4分，我确认。"},
             {"id": 3, "conversation_id": 1, "position": 1, "role": "assistant", "content": "已确认"}])
         await session.commit()
         yield session
@@ -85,7 +85,8 @@ async def test_versions_are_append_only_and_confirmation_is_owned(db):
     cycle = await start_cycle(db, user_id="a", goal_id=goal)
     fields = {"activity_content": "散步十分钟", "schedule_text": "晚饭后", "location": "小区", "duration_minutes": 10,
               "frequency_rule": {"schema_version": 1, "text": "每天"}, "potential_barriers": ["下雨"],
-              "barrier_coping_plan": [{"barrier": "下雨", "plan": "在室内走"}]}
+              "barrier_coping_plan": [{"barrier": "下雨", "plan": "在室内走"}],
+              "difficulty_rating": 4, "difficulty_evidence": {"rating": {"value": 4, "message_id": 1, "quote": "这个安排难度是4分，我确认。", "score_text": "4"}}}
     plan = await append_plan_draft(db, user_id="a", goal_id=goal, fields=fields)
     for message in (2, 3):
         with pytest.raises(V2Conflict):
@@ -115,7 +116,8 @@ async def test_waiting_requires_confirmed_contract(db):
     cycle = await start_cycle(db, user_id="a", goal_id=goal)
     plan = await append_plan_draft(db, user_id="a", goal_id=goal, fields={"activity_content": "散步", "schedule_text": "晚上",
         "location": "小区", "duration_minutes": 10, "frequency_rule": {"schema_version": 1, "text": "每天"},
-        "potential_barriers": ["下雨"], "barrier_coping_plan": [{"barrier": "下雨", "plan": "室内走"}]})
+        "potential_barriers": ["下雨"], "barrier_coping_plan": [{"barrier": "下雨", "plan": "室内走"}],
+        "difficulty_rating": 4, "difficulty_evidence": {"rating": {"value": 4, "message_id": 1, "quote": "这个安排难度是4分，我确认。", "score_text": "4"}}})
     await confirm_plan(db, user_id="a", goal_id=goal, cycle_id=cycle, plan_id=plan, message_id=1)
     with pytest.raises(V2Conflict):
         await transition_cycle(db, user_id="a", goal_id=goal, cycle_id=cycle, target="waiting_execution")

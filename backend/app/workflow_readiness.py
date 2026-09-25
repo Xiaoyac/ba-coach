@@ -94,6 +94,8 @@ def _missing_m2_fields(record: dict[str, Any]) -> list[str]:
         "frequency_rule": record.get("frequency_rule"),
         "potential_barriers": record.get("potential_barriers"),
         "barrier_coping_plan": record.get("barrier_coping_plan"),
+        "difficulty_rating": record.get("difficulty_rating"),
+        "difficulty_evidence": record.get("difficulty_evidence"),
     }
     return missing_plan_fields(required)
 
@@ -145,15 +147,11 @@ def evaluate_readiness(
         if module == "module_2":
             missing_fields.extend(_missing_m2_fields(record))
         elif module == "module_3":
-            for field in ("record_requirement", "feedback_mechanism"):
-                if not _present(record.get(field)):
-                    missing_fields.append(field)
-            if not _present(record.get("negotiated_record_plan")):
-                # Keep a dedicated code: this was historically collapsed into
-                # a generic missing field and made M3 failures hard to explain.
+            from .m3_contract import missing_fields as m3_missing_fields
+            missing_fields.extend(m3_missing_fields(record, session_id=session_id, cycle_id=cycle_id))
+            if "negotiated_record_plan" in missing_fields:
                 reasons.append(_reason(NEGOTIATED_RECORD_PLAN_MISSING,
                                        field="negotiated_record_plan"))
-                missing_fields.append("negotiated_record_plan")
         else:
             missing_fields.extend(_m4_missing_fields(record, m4_missing_fields))
             if missing_fields:

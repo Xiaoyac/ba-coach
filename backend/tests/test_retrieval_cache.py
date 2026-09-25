@@ -447,12 +447,16 @@ async def test_cache_hit_still_calls_current_mediator_and_timeout_withholds(cont
         mediated.append(payload)
         if len(mediated) == 2:
             raise asyncio.TimeoutError
-        return Completion(text=json.dumps({"selected_ids": ["kb:901"], "guidance": "Use cautiously."}), model="stub")
+        candidate = next(c for c in payload["knowledge"] if c["id"] == "kb:901")
+        return Completion(text=json.dumps({"decision":"use", "selections":[{
+            "id":"kb:901", "quote":candidate["text"][:40], "application":"Use cautiously."}], "note":""}), model="stub")
     provider.route_detailed = mediate
     node = make_module_node("module_1", ModuleConfig())
     first = await node(state, Runtime(context=context))
     assert "RAW_CACHE_SENTINEL" in as_text(provider.systems[-1])
-    second = await node({**state, "profile_context": ["今天新增膝盖疼痛"]}, Runtime(context=context))
+    second = await node({**state, "knowledge_context": {"facts":[{
+        "source":"user_activity_constraints", "source_kind":"user_statement",
+        "confirmation":"unconfirmed", "values":{"constraint_text":"今天新增膝盖疼痛"}}]}}, Runtime(context=context))
     assert first["telemetry"]["retrieval"]["exact_cache"]["cache"] == "miss"
     assert second["telemetry"]["retrieval"]["exact_cache"]["cache"] == "hit"
     assert len(mediated) == 2 and kb.provider.calls == 2

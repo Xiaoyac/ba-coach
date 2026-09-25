@@ -60,6 +60,7 @@ def test_describe_graph(client: TestClient) -> None:
     # The crisis branch shares the gate's fan-out with the four modules.
     assert {e["target"] for e in conditional} == {
         "crisis",
+        "pre_reply_router",
         "module_1",
         "module_2",
         "module_3",
@@ -77,8 +78,8 @@ def test_chat_mints_session_id(client: TestClient) -> None:
     assert body["session_id"]
     assert body["reply"] == "saw 1 messages"
     assert body["reply_module"] in {"module_1", "module_2", "module_3", "module_4"}
-    assert body["next_module"] is None
-    assert body["routing_pending"] is True
+    assert body["next_module"] == body["reply_module"]
+    assert body["routing_pending"] is False
     assert body["model"] == "stub-1"
 
 
@@ -95,8 +96,8 @@ def test_json_chat_returns_router_reasoning_separately(
     provider.route_result = '{"target_module":"1"}'
     provider.route_reasoning_result = "先核对模块一的退出条件，再决定维持当前模块。"
     body = client.post("/api/chat", json={"message": "hello"}).json()
-    assert body["routing_reasoning_content"] == ""
-    assert body["router_model_name"] == ""
+    assert provider.route_reasoning_result in body["routing_reasoning_content"]
+    assert body["router_model_name"] == "stub-router-1"
 
 
 def test_json_chat_reply_envelope_is_not_exposed(
@@ -125,7 +126,7 @@ def test_history_accumulates_across_turns(client: TestClient, provider) -> None:
 
     assert second["session_id"] == session_id
     assert second["reply"] == "saw 3 messages"
-    assert [m.content for m in provider.seen[-1]] == ["one", "saw 1 messages", "two"]
+    assert [m.content for m in provider.seen[-1]] == ["one", "saw 1 messages", "<user_message>two</user_message>"]
 
 
 def test_unknown_session_id_starts_fresh(client: TestClient) -> None:
@@ -314,7 +315,7 @@ def test_stream_reply_is_persisted(client: TestClient, provider) -> None:
     follow_up = client.post(
         "/api/chat", json={"message": "again", "session_id": session_id}
     ).json()
-    assert [m.content for m in provider.seen[-1]] == ["hi", "hello", "again"]
+    assert [m.content for m in provider.seen[-1]] == ["hi", "hello", "<user_message>again</user_message>"]
     assert follow_up["session_id"] == session_id
 
 
@@ -379,7 +380,7 @@ def test_stream_repairs_provider_thinking_tags_before_any_user_visible_delta(
     assert detail["messages"][-1]["reasoning_content"] == reasoning
 
 
-def test_stream_appends_router_reasoning_after_visible_reply_and_persists_it(
+def test_stream_routes_before_visible_reply_and_persists_decision(
     client: TestClient, auth_headers, provider
 ) -> None:
     provider.route_result = '{"target_module":"1"}'
@@ -390,7 +391,7 @@ def test_stream_appends_router_reasoning_after_visible_reply_and_persists_it(
         events = sse_events("".join(response.iter_text()))
 
     kinds = [name for name, _ in events]
-    assert "routing_reasoning" not in kinds
+    assert kinds.index("routing_reasoning") < kinds.index("delta")
     assert "done" in kinds
 
     session_id = events[0][1]["session_id"]

@@ -22,6 +22,9 @@ class KnowledgeReferences(BaseModel):
     mediator_status: str | None = None
     mediator_reason: str | None = None
     mediator_reasoning_content: str | None = None
+    mediator_decision: str | None = None
+    mediator_selections: list[dict[str, str]] = Field(default_factory=list)
+    mediator_note: str | None = None
     mediator_guidance: str | None = None
     mediator_cautions: list[str] = Field(default_factory=list)
     mediator_model: str | None = None
@@ -38,11 +41,16 @@ def reference_snapshot(*, module, recalled, provided, retrieval, mediator, conte
             score=c.score if c.score is not None and math.isfinite(c.score) else None,
             score_type=c.score_type) for c in chunks]
     return KnowledgeReferences(
-        version=3, available=True, module=module,
+        version=4, available=True, module=module,
         retrieval_outcome=retrieval.get("outcome", "disabled"),
         gate_reason=(retrieval.get("gate") or {}).get("reason"),
         mediator_status=mediator.get("status"), mediator_reason=mediator.get("reason"),
         mediator_reasoning_content=mediator_reasoning if recalled else None,
+        mediator_decision=mediator.get("decision") if not context_withheld else None,
+        mediator_selections=(mediator.get("selections") or [] if not context_withheld
+                             and mediator.get("status") == "completed" else []),
+        mediator_note=(mediator.get("note") if not context_withheld
+                       and mediator.get("status") == "completed" else None),
         # Store only the validated advice actually available to the module.
         # Historical v1/v2 snapshots remain empty: never regenerate guidance.
         mediator_guidance=(mediator.get("guidance") if recalled and not context_withheld

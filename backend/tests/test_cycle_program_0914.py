@@ -14,6 +14,9 @@ async def seed_review(db, *, decision, with_contract=True):
     # The shared V2 fixture intentionally does not include unrelated analytics
     # models, but confirmation records the completed-cycle counter.
     await db.run_sync(lambda sync: InteractionStatus.__table__.create(sync.connection(), checkfirst=True))
+    await db.execute(insert(ConversationMessage), {
+        "id": 1, "conversation_id": 1, "position": -1, "role": "user",
+        "content": "我确认这个散步计划和记录安排。"})
     plans = schema.tables["module_two_record"]
     cycles = schema.tables["pa_cycles"]
     await db.execute(insert(plans), {
@@ -124,7 +127,7 @@ async def test_decision_one_continues_same_goal_plan_and_contract(goal_api):
     response = await client.post("/api/program/chat-a/confirm", json=payload)
     assert response.status_code == 200, response.text
     runtime = response.json()["runtime"]
-    assert runtime["current_module"] == "module_4"
+    assert runtime["current_module"] == "module_3"
     assert runtime["flow_status"] == "waiting_execution"
     assert runtime["active_goal_id"] == "g1"
     assert runtime["active_cycle_id"] != "reviewed-cycle"
@@ -171,10 +174,14 @@ async def test_decision_three_starts_m2_with_a_new_editable_baseline_and_cannot_
 
 
 @pytest.mark.asyncio
-async def test_decision_one_without_confirmed_contract_rolls_back_confirmation(goal_api):
+async def test_decision_one_cycle_creation_failure_rolls_back_confirmation(goal_api, monkeypatch):
+    from app.v2_repository import V2Conflict
     client, db, _ = goal_api
     await seed_review(db, decision=1, with_contract=False)
     payload = await confirmation(client)
+    async def unavailable(*args, **kwargs):
+        raise V2Conflict("simulated cycle creation failure")
+    monkeypatch.setattr("app.v2_repository.start_cycle", unavailable)
 
     response = await client.post("/api/program/chat-a/confirm", json=payload)
     assert response.status_code == 409

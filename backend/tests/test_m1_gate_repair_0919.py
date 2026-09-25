@@ -24,7 +24,7 @@ def test_short_consent_does_not_borrow_scope_from_execution_or_education():
         assert not consent_is_current([("assistant", invitation), ("user", "我愿意")], 1)
 
 
-def test_duplicate_education_is_reported_as_a_missing_topic():
+def test_extractor_marks_a_semantically_missing_topic_without_quote_counting():
     turns = [
         ("user", "昨晚回家很焦虑，刷手机没有学习，后来更焦虑。"),
         ("assistant", "当学习前刷手机，可能暂时缓解压力，却减少学习后的掌控感。"),
@@ -61,7 +61,7 @@ def test_duplicate_education_is_reported_as_a_missing_topic():
         "methods_quote": {"turn": 3},
         "education_quotes": [
             {"turn": 4, "quote": turns[4][1]},
-            {"turn": 5, "quote": turns[5][1]},
+            None,  # The second core meaning was never explained.
             {"turn": 6, "quote": turns[6][1]},
             {"turn": 7, "quote": turns[7][1]},
             {"turn": 8, "quote": turns[8][1]},
@@ -73,10 +73,12 @@ def test_duplicate_education_is_reported_as_a_missing_topic():
     result = normalize(raw, data, turns, "gate-test")
     assert not result["education_evidence_complete"]
     assert EDUCATION_TOPICS[1] in result["education_missing_topics"]
-    assert {"field": "education_1", "reason": "duplicate_evidence", "same_as": "education_0"} in result["validation_issues"]
+    assert not any(issue["reason"] == "duplicate_evidence" for issue in result["validation_issues"])
     assert "ba_understanding" in result["missing_fields"]
     # This is an internal evidence problem, not a reason to ask for consent again.
-    assert "不要重问目标意愿" in __import__("app.m1_contract", fromlist=["dialogue_status"]).dialogue_status(result)["next_action"]
+    status = __import__("app.m1_contract", fromlist=["dialogue_status"]).dialogue_status(result)
+    assert status["goal_consent_expressed"]
+    assert "next_action" not in status
 
 
 def test_newly_referenced_education_requires_a_new_understanding_quote():

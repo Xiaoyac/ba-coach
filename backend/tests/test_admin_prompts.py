@@ -135,7 +135,9 @@ def test_saved_override_is_used_by_the_next_model_turn(
     system = as_text(provider.systems[-1])
     assert "GLOBAL OVERRIDE SENTINEL" in system
     assert "MODULE ONE OVERRIDE SENTINEL" in system
-    assert system.rfind("MODULE ONE OVERRIDE SENTINEL") < system.rfind("GLOBAL OVERRIDE SENTINEL")
+    assert system.count("GLOBAL OVERRIDE SENTINEL") == 1
+    assert system.count("MODULE ONE OVERRIDE SENTINEL") == 1
+    assert system.index("GLOBAL OVERRIDE SENTINEL") < system.index("MODULE ONE OVERRIDE SENTINEL")
 
 
 def test_saved_web_override_changes_the_agent_reply(
@@ -193,9 +195,9 @@ def test_saved_router_override_is_used_by_the_next_routing_call(
 
     response = client.post(
         "/api/chat",
-        json={"message": "hello", "module": "module_1"},
+        json={"message": "hello"},
         headers=auth_headers,
     )
     assert response.status_code == 200, response.text
     assert any("ROUTER OVERRIDE SENTINEL" in system for system in provider.route_systems)
-    assert any("服务器强制的跨轮判定契约" in system for system in provider.route_systems)
+    assert any("路由接口边界" in system for system in provider.route_systems)

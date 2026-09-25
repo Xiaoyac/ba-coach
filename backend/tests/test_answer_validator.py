@@ -26,8 +26,9 @@ def test_provider_protocol_markup_is_not_a_successful_answer(reply):
 
 
 @pytest.mark.parametrize("module,reply",[("module_1","从明天开始每天跑步"),("module_2","我们已经确定了"),("module_2","好的，计划就这么定了"),("module_2","目标卡定下来了"),("module_3","改成游泳"),("module_4","你本周坚持了五天")])
-def test_explicit_unverified_module_violations_block(module,reply):
-    assert validate_answer(reply=reply,module=module,evidence_ids=[])["status"]=="blocked"
+def test_quality_diagnostics_do_not_block_but_false_commit_still_does(module,reply):
+    expected = "blocked" if module == "module_2" else "review"
+    assert validate_answer(reply=reply,module=module,evidence_ids=[])["status"] == expected
 
 
 @pytest.mark.parametrize("reply", [

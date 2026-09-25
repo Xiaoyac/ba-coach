@@ -93,7 +93,7 @@ def test_each_selection_starts_a_fresh_isolated_module(
     )
     assert turn.status_code == 200, turn.text
     assert turn.json()["reply_module"] == "module_3"
-    assert turn.json()["routed_by"] == "sticky"
+    assert turn.json()["routed_by"] == "sandbox"
 
     async def read_state() -> tuple[ConversationRuntimeState, str | None]:
         async with db_sessionmaker() as db:

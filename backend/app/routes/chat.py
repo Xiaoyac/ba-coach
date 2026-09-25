@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 from uuid import uuid4
+from time import perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -277,44 +278,9 @@ async def _initial_state(
         "metadata": dict(session.metadata),
         "forced_module": _validate_module(request),
         "subject_id": subject_id,
+        "turn_started_monotonic": perf_counter(),
     }
     return state, session.session_id
-
-
-async def _precommit_chat_confirmation(
-    db: AsyncSession,
-    *,
-    request: ChatRequest,
-    subject_id: str | None,
-    session_id: str,
-    user_message_id: int | None,
-    store: SessionStore,
-) -> tuple[str, str | None] | None:
-    """Commit a verified M2/M3 confirmation before generating its reply.
-
-    Normal turns still use the detached Router. A confirmation turn is a
-    state-changing command: the next reply must be generated from the state
-    that actually committed, otherwise it can promise a plan that the
-    database later rejects. Explicit module pins and legacy storage retain
-    their existing behaviour until they migrate to the V2 authority.
-    """
-    if not subject_id or user_message_id is None or request.module:
-        return None
-    if get_settings().database_schema_version != "v2":
-        return None
-    from ..dialogue_confirmation import precommit_user_confirmation
-    result = await precommit_user_confirmation(
-        db, session_id=session_id, user_id=subject_id,
-        user_message_id=user_message_id,
-        confirmation_provider=get_provider(get_settings().router_provider_name),
-    )
-    if not result:
-        return None
-    await db.commit()
-    next_module, next_cycle = result
-    await store.set_module(session_id, next_module)
-    await store.set_memory(session_id, {})
-    return next_module, next_cycle
 
 
 def _context(
@@ -359,6 +325,7 @@ async def chat(
     db: AsyncSession = Depends(get_db),
     subject_id: str | None = Depends(optional_subject_id),
 ) -> ChatResponse:
+    request_started = perf_counter()
     settings = get_settings()
     await wait_for_pending_routing(
         request.session_id,
@@ -378,20 +345,12 @@ async def chat(
         session_id=session_id,
         user_text=request.message,
     )
+    state["user_message_id"] = user_message_id
+    state["turn_started_monotonic"] = request_started
     context = _context(provider, store, stream=False, router_prompt=router_prompt)
 
     turn_lock = await store.get_turn_lock(session_id)
     async with turn_lock:
-        precommitted = await _precommit_chat_confirmation(
-            db, request=request, subject_id=subject_id, session_id=session_id,
-            user_message_id=user_message_id, store=store,
-        )
-        if precommitted:
-            state['confirmation_receipt'] = {'module': precommitted[0], 'cycle_id': precommitted[1]}
-        # _precommit_chat_confirmation already publishes the committed module
-        # and memory to the store. The graph loads that store in extract_memory.
-        # Re-adopting the session here would acquire this non-reentrant turn
-        # lock a second time and hang every successful confirmation.
         final_state = await get_graph().ainvoke(
             state,
             context=context,
@@ -445,12 +404,8 @@ async def chat(
         provider=final_state.get("provider", provider.name),
         model=final_state.get("model", provider.model),
         reply_module=final_state["extracted_intent"],
-        next_module=(
-            None
-            if final_state.get("routing_pending")
-            else final_state.get("next_module")
-        ),
-        routing_pending=bool(final_state.get("routing_pending")),
+        next_module=final_state.get("next_module"),
+        routing_pending=False,
         routed_by=final_state["routed_by"],
         usage=final_state.get("usage", {}),
     )
@@ -507,6 +462,7 @@ async def _prepare_chat_stream(
     request: ChatRequest, store: SessionStore, db: AsyncSession,
     subject_id: str | None, control: GenerationControl,
 ) -> StreamingResponse:
+    request_started = perf_counter()
     settings = get_settings()
     await wait_for_pending_routing(
         request.session_id,
@@ -522,6 +478,8 @@ async def _prepare_chat_stream(
         session_id=session_id,
         user_text=request.message,
     )
+    state["user_message_id"] = user_message_id
+    state["turn_started_monotonic"] = request_started
     context = _context(
         provider, store, stream=True, router_prompt=router_prompt
     )
@@ -553,17 +511,10 @@ async def _prepare_chat_stream(
         final_state: AgentState | None = None
         saw_done = False
         saw_error = False
+        first_visible_at = None
         turn_lock = await store.get_turn_lock(session_id)
         async with turn_lock:
             try:
-                precommitted = await _precommit_chat_confirmation(
-                    db, request=request, subject_id=subject_id, session_id=session_id,
-                    user_message_id=user_message_id, store=store,
-                )
-                if precommitted:
-                    state['confirmation_receipt'] = {'module': precommitted[0], 'cycle_id': precommitted[1]}
-                # The graph reads the module published by precommit directly.
-                # Never re-adopt while holding the same session's turn lock.
                 # Ask for the running state as well as custom token events.
                 # LangGraph 1.2.11 can complete a graph while yielding no
                 # custom events in some production runtimes. The final values
@@ -595,6 +546,8 @@ async def _prepare_chat_stream(
                         logger.debug("graph trace: %s", event)
                         continue
                     if kind == "delta":
+                        if event.get("text") and first_visible_at is None:
+                            first_visible_at = perf_counter()
                         reply_parts.append(event.get("text", ""))
                     elif kind == "reasoning_delta":
                         reasoning_parts.append(event.get("text", ""))
@@ -658,6 +611,7 @@ async def _prepare_chat_stream(
             # If only the tail vanished, send just that missing suffix.
             if final_reply and final_reply != streamed_reply:
                 if not streamed_reply:
+                    first_visible_at = first_visible_at or perf_counter()
                     yield _sse("delta", {"text": final_reply})
                 elif final_reply.startswith(streamed_reply):
                     yield _sse("delta", {"text": final_reply[len(streamed_reply) :]})
@@ -695,13 +649,9 @@ async def _prepare_chat_stream(
                         "next_module": (
                             None
                             if final_state is None
-                            or final_state.get("routing_pending")
                             else final_state.get("next_module")
                         ),
-                        "routing_pending": bool(
-                            final_state is not None
-                            and final_state.get("routing_pending")
-                        ),
+                        "routing_pending": False,
                         "routed_by": (
                             final_state.get("routed_by")
                             if final_state is not None
@@ -718,6 +668,14 @@ async def _prepare_chat_stream(
             # The user row was committed before generation. Appending the
             # reply before releasing the turn lock means the next device reads
             # a complete first turn from the live session and the database.
+            if final_state is not None and first_visible_at is not None:
+                metrics = dict(final_state.get("telemetry") or {})
+                metrics["time_to_first_visible_content_ms"] = round((first_visible_at - state["turn_started_monotonic"]) * 1000, 3)
+                metrics["first_visible_measurement"] = "server_sse_release"
+                metrics["execution_timeline"] = [*(metrics.get("execution_timeline") or []), {
+                    "stage": "response_display", "start_ms": metrics["time_to_first_visible_content_ms"],
+                    "duration_ms": 0, "status": "released", "after_display": False}]
+                final_state["telemetry"] = metrics
             async with get_sessionmaker()() as final_db:
                 assistant_message_id = await _persist_assistant_message(
                     final_db,

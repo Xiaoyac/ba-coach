@@ -143,10 +143,9 @@ class AssessmentSubmission(BaseModel):
     # IANA name, e.g. "Asia/Shanghai". Unknown values fall back to UTC.
     timezone: str | None = Field(default=None, max_length=64)
 
-    # A day with no activities logged is a skip, not a submission — the POST
-    # body has to carry at least one card. The cap is a denial-of-service
-    # bound, not a clinical judgement.
-    activities: list[ActivityLogIn] = Field(..., min_length=1, max_length=50)
+    # The daily summary is an independent record. Activity cards are optional,
+    # but every supplied card still has to satisfy ActivityLogIn validation.
+    activities: list[ActivityLogIn] = Field(..., max_length=50)
     summary: DailySummaryIn
 
 

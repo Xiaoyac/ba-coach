@@ -140,21 +140,35 @@ async def continue_reviewed_cycle(db: AsyncSession, *, user_id: str, goal_id: st
     plan = (await db.execute(select(plans.c.id).where(
         plans.c.id == source["module_two_record_id"], plans.c.goal_id == goal_id,
         plans.c.record_status == "confirmed"))).scalar_one_or_none()
-    contract = (await db.execute(select(contracts.c.id).where(
+    contract_row = (await db.execute(select(contracts).where(
         contracts.c.id == source["module_three_record_id"], contracts.c.goal_id == goal_id,
         contracts.c.module_two_record_id == plan, contracts.c.record_status == "confirmed"
-    ))).scalar_one_or_none() if plan else None
-    if not plan or not contract:
-        raise V2Conflict("继续前需要同一目标下已确认的计划及对应记录约定")
+    ))).mappings().one_or_none() if plan else None
+    if not plan:
+        raise V2Conflict("继续前需要同一目标下已确认的计划")
+    contract = None
+    if contract_row and contract_row["confirmation_message_id"] is not None:
+        try:
+            await check_user_message(db, user_id=user_id,
+                                     message_id=contract_row["confirmation_message_id"])
+        except V2Conflict:
+            # An absent/foreign/assistant source cannot become a reusable
+            # recording agreement, even if an old row says confirmed.
+            pass
+        else:
+            # Preserve genuinely confirmed legacy arrangements: the additive
+            # recording_status=unknown default does not revoke old consent.
+            contract = contract_row["id"]
     progress = metadata.tables["pa_cycle_progress"]
     prior = (await db.execute(select(progress).where(progress.c.cycle_id == cycle_id))).mappings().one_or_none()
     successor = await start_cycle(db, user_id=user_id, goal_id=goal_id, conversation_id=conversation_id)
     await db.execute(update(cycles).where(cycles.c.id == successor).values(
         module_two_record_id=plan, module_three_record_id=contract,
-        status="waiting_execution", started_at=now(), updated_at=now()))
+        status="waiting_execution" if contract else "planning",
+        started_at=now() if contract else None, updated_at=now()))
     await db.execute(update(progress).where(progress.c.cycle_id == successor).values(
         module_2_steps=list(prior["module_2_steps"] or []) if prior else [],
-        module_3_steps=list(prior["module_3_steps"] or []) if prior else [],
+        module_3_steps=list(prior["module_3_steps"] or []) if prior and contract else [],
         module_4_steps=[], module_4_scenario=None))
     return successor
 
@@ -162,7 +176,7 @@ async def continue_reviewed_cycle(db: AsyncSession, *, user_id: str, goal_id: st
 PLAN_WRITABLE_FIELDS = {"pa_understanding_status", "pa_willingness_status", "core_values",
     "core_values_impact", "activity_content", "schedule_text", "scheduled_start_at",
     "timezone", "location", "duration_minutes", "frequency_rule", "companion",
-    "potential_barriers", "barrier_coping_plan"}
+    "potential_barriers", "barrier_coping_plan", "difficulty_rating", "difficulty_original", "difficulty_evidence"}
 
 
 async def resume_paused_goal(db, *, user_id, goal_id, conversation_id, retained=False):
@@ -240,7 +254,7 @@ async def confirm_plan(db: AsyncSession, *, user_id: str, goal_id: str, cycle_id
     from .plan_contract import missing_plan_fields
     missing = missing_plan_fields(plan)
     if missing:
-        raise V2Conflict("计划信息尚未完整，请继续明确活动、时间、地点、时长、频率及障碍应对：" + ", ".join(missing))
+        raise V2Conflict("计划的必需信息或用户评分来源尚未齐全：" + ", ".join(missing))
     await db.execute(update(plans).where(plans.c.id == plan_id).values(
         record_status="confirmed", confirmation_status="confirmed", confirmation_message_id=message_id,
         updated_at=now()))

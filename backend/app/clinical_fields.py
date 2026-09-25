@@ -63,7 +63,7 @@ MODULE_ONE: tuple[Spec, ...] = (
     Spec(
         "attempted_relief_methods",
         "json",
-        "简单字符串数组，保留尝试过/正在做/想到过及实际效果；null=未知或不愿谈，[]=用户明确没有，禁止把未提及写成 []",
+        "可选个性化材料，不门控M1完成。简单字符串数组，保留尝试过/正在做/想到过及实际效果；null=未知或不愿谈，[]=用户明确没有，禁止把未提及写成 []",
     ),
     Spec(
         "exception_positive_scene",
@@ -87,6 +87,9 @@ MODULE_TWO: tuple[Spec, ...] = (
     Spec("target_activity_location", "varchar", "在哪里做（Where）", 255),
     Spec("target_activity_duration_minutes", "int", "计划时长，单位分钟，整数"),
     Spec("target_activity_companion", "varchar", "和谁一起（Who），独自完成写「独自」", 32),
+    Spec("difficulty_rating", "int", "用户对当前计划的0–10执行难度自评分；只能提取用户明确给出的数字，不能代打分。初始>=6时调整后重新评分，最终<=5才能完成M2；缺少用户评分为null"),
+    Spec("difficulty_original", "int", "发生计划调整时保留调整前>=6的用户初始自评，范围6–10；没有高难度调整过程为null，不向用户新增提问"),
+    Spec("difficulty_evidence", "json", '用户自评分来源对象：{"rating":{"message_id":服务器消息ID,"quote":"含评分的用户连续原话","score_text":"原话中的数字或中文数字"},"original":null}。original仅在初始>=6且已发生计划调整时填写同样结构。每个引用来自当前会话真实用户消息，不能引用助手代评；输入没有消息ID时可省略message_id，quote必须能唯一定位用户消息。'),
     Spec("frequency_rule", "json", '明确表达的执行频率或一次性安排，{"schema_version":1,"text":"每周三次"}；“今天试一次”“先做一次”也要原样记录，不得从单独日期推断，未知为 null'),
     Spec("potential_barriers", "json", "可能遇到的障碍，字符串数组；没谈到给 []；只有用户明确表示无障碍时记录该原意，不得把未知写成无障碍"),
     Spec(
@@ -97,20 +100,17 @@ MODULE_TWO: tuple[Spec, ...] = (
     Spec(
         "has_target_card_generated",
         "flag",
-        "本轮是否已经产出完整的 PA 目标卡片（What/When/Where/How/Who 齐备），true 或 false",
+        "本轮是否已向用户展示当前核心PA目标卡片，true或false；活动、近期安排、用户难度及困难/应对属于必要内容，地点/时长/频率/同伴可选；展示不等于用户确认",
     ),
 )
 
 MODULE_THREE: tuple[Spec, ...] = (
     Spec("ai_record_requirement", "text", "教练向用户说明的记录要求"),
-    Spec("user_acceptance_level", "level", f"用户对记录要求的接受程度，{LEVEL_SCALE}"),
+    Spec("user_acceptance_level", "level", f"用户对记录要求的理解/态度证据，不代表最终业务状态recording_status，{LEVEL_SCALE}"),
     Spec("user_acceptance_feeling", "text", "用户对记录这件事表达的感受"),
-    # This field is also the structured snapshot shown in the confirmation
-    # card.  It must be populated for a complete *proposal* before consent;
-    # otherwise the first M3 card cannot be rendered or versioned and the
-    # user's next natural confirmation has nothing authoritative to bind to.
-    # The record becomes final only when the user's confirmation is committed.
-    Spec("negotiated_record_plan", "text", "当前对话中完整、可执行的拟议记录方式与格式；用户确认后才视为最终商定"),
+    Spec("recording_status", "varchar", "最终记录安排的用户决定：unknown/accepted/declined。自然明确接受即可accepted，不重复索要承诺；明确最终拒绝当前记录安排为declined，不把顾虑/犹豫或拒绝PA执行自动当作拒绝记录。按当前上下文语义判断，不按解释次数、关键词或微步骤计数。", 24),
+    Spec("recording_evidence", "json", '当前记录安排的原文证据对象：{"requirement":{"message_id":真实消息ID,"quote":"助手已说明的记录要求"},"decision":{"message_id":真实消息ID,"quote":"用户对当前安排的最新决定原话","status":"accepted/declined/unknown","scope":"current_arrangement/activity_record/daily_summary/all_recording/pa_execution"},"plan":{"message_id":真实消息ID,"quote":"助手提出或用户选择的记录方式"},"feedback":{"message_id":真实消息ID,"quote":"已向用户说明可反馈未完成/受阻等情况的方式"},"limitations":{"message_id":真实消息ID,"quote":"助手已说明缺少记录将使后续复盘信息受限"}}。未知证据为null；message_id仅使用服务器提供ID，未提供时可省略但quote必须唯一定位消息。decision必须是用户原话，requirement/feedback/limitations必须是助手实际说过的原话，plan可以来自双方。accepted需requirement/decision/plan/feedback，declined需decision/limitations/feedback且plan为null。保留用户具体拒绝对象：拒绝活动表不等于取消每日整体总结，拒绝PA不是记录拒绝；scope=pa_execution时recording_status只能unknown。仅凭助手说用户同意/拒绝不能作为用户决定证据，不硬判讲解次数或理解质量。'),
+    Spec("negotiated_record_plan", "text", "当前商定的可执行记录方式与格式；用户自然接受后有效。最终拒绝路径为null，不为补齐字段伪造方式；拒绝活动记录不自动取消每日整体总结"),
     Spec("has_contract_reached", "flag", "是否已就执行契约达成一致，true 或 false"),
     Spec("difficulty_feedback_mechanism", "text", "约定的遇到困难时的反馈机制"),
 )
@@ -186,4 +186,18 @@ RISK_SPECS: tuple[Spec, ...] = (
 
 def prompt_for(specs: tuple[Spec, ...]) -> str:
     """Render a spec tuple as the field list injected into an extraction prompt."""
-    return "\n".join(f"- {s.name}: {s.prompt}" for s in specs)
+    types = {
+        "text": "string 或 null",
+        "varchar": "string 或 null",
+        "json": "按字段定义的 JSON 对象或数组，未知为 null",
+        "level": "integer 0/1/2 或 null",
+        "flag": "boolean 或 null",
+        "datetime": "YYYY-MM-DD HH:MM:SS 字符串或 null",
+        "int": "integer 或 null",
+    }
+    return "\n".join(
+        f"- {s.name}（{types[s.kind]}"
+        + (f"；最长 {s.max_length} 字符" if s.max_length is not None else "")
+        + f"）: {s.prompt}"
+        for s in specs
+    )

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CloseMark, PlusMark } from "@/components/icons";
 import WorkbenchSelect from "@/components/WorkbenchSelect";
 import MessageMarkdown from "@/components/MessageMarkdown";
+import TestRunDiagnostics, { RunTimingSummary } from "@/components/TestRunDiagnostics";
 import styles from "@/components/TestWorkbench.module.css";
 import { downloadEvaluation, evaluationRequest, previewEvaluation,
   type ImportPreview, type TestCase, type TestCaseInput, type TestProvider, type TestRun } from "@/lib/adminEvaluations";
@@ -258,6 +259,7 @@ export default function TestWorkbench({ onClose }: { onClose: () => void }) {
         <header className="flex items-center gap-3 border-b border-line px-5 py-4"><h3 className="mr-auto">{detail.case_snapshot.case_code} · v{detail.case_snapshot.revision} · 运行详情</h3>
           <button className={buttonClass} disabled={busy} onClick={() => void openRun(detail.id)}>刷新结果</button><button className={buttonClass} onClick={() => setDetail(null)}>返回列表</button></header>
         {error && <p role="alert" className="px-5 py-2 text-alert-ink">{error}</p>}
+        <RunTimingSummary metrics={detail.metrics}/>
         <div className="zen-scroll grid min-h-0 flex-1 gap-6 overflow-auto p-5 lg:grid-cols-[1.4fr_1fr]">
           <div><h4 className="mb-3 text-sm text-ink-faint">实际对话 · {labels[detail.status]} · {detail.model ?? detail.provider}</h4>
             {(detail.transcript.length ? detail.transcript : [{role:"user",content:detail.input_text}]).map((m,i) => <div key={i} className={`mb-3 rounded-xl border border-line p-4 ${m.role === "user" ? "bg-mine" : "bg-raised"}`}>
@@ -277,9 +279,7 @@ export default function TestWorkbench({ onClose }: { onClose: () => void }) {
               })}>保存评审</button>
               {detail.reviews?.map(r => <div key={r.id} className="mt-3 border-t border-line pt-2 text-xs text-ink-muted">{r.verdict === "pass" ? "通过" : r.verdict === "fail" ? "未通过" : "待评审"} · 评审人 #{r.reviewer_id} · {new Date(r.created_at).toLocaleString("zh-CN")}<p className="mt-1 whitespace-pre-wrap">{r.notes}</p></div>)}
             </section>
-            <section className="rounded-2xl border border-line bg-panel p-4"><h4 className="mb-3 text-sm font-medium">回答校验 · 共享 Validator</h4>
-              {detail.metrics.telemetry?.answer_validator ? <><p className="text-sm text-accent-ink">{{passed:"程序校验通过（不等于语义正确）",review:"需人工复核",blocked:"已拦截",corrected:"原回复已拦截，展示安全提示（本轮不推进流程）",disabled:"未启用"}[detail.metrics.telemetry.answer_validator.status] ?? detail.metrics.telemetry.answer_validator.status}</p><p className="mt-2 text-xs text-ink-faint">{detail.metrics.telemetry.answer_validator.version} · {detail.metrics.telemetry.answer_validator.duration_ms ?? "—"} ms · 无额外 LLM 调用</p>{detail.metrics.telemetry.answer_validator.findings?.map(f => <p key={f.code} className="mt-2 rounded-lg bg-raised p-2 text-xs">{f.severity === "block" ? "拦截" : "复核"} · {({empty_reply:"回复为空",oversized_reply:"回复过长",unknown_evidence_id:"引用不在本轮证据中",premature_plan:"可能过早制定计划",confirmation_claim:"需确认是否获得用户同意",goal_replacement:"可能替换既定目标",completion_claim:"需核对实际完成记录",clinical_claim_needs_review:"未经证据的诊断或用药表述",guaranteed_outcome:"过度承诺情绪改善",shaming_prescription:"命令或羞辱式建议",unsupported_behavior_label:"缺少依据的行为归因",m3_analysis_boundary:"记录阶段越界做行为分析",uncommitted_workflow_claim:"未经后台确认的保存或切换声明",panel_confirmation_instruction:"错误引导到面板确认目标"} as Record<string,string>)[f.code] ?? f.code}</p>)}</> : <p className="text-xs text-ink-faint">此记录没有校验数据。旧记录不追溯重评，可重新运行用例。</p>}
-            </section>
+            <TestRunDiagnostics metrics={detail.metrics}/>
             <details className="rounded-2xl border border-line p-4"><summary className="cursor-pointer text-sm text-ink-faint">高级信息：运行指标与检索来源</summary><pre className="mt-2 overflow-auto whitespace-pre-wrap break-all rounded-xl bg-raised p-3 text-xs">{JSON.stringify(detail.metrics,null,2)}</pre></details>
           </div>
         </div>

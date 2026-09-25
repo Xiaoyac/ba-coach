@@ -1,4 +1,4 @@
-"""Exercise the real detached router and V2 commit, not only field extraction."""
+"""Background facts preserve the one pre-reply Router decision and trace."""
 import os
 from pathlib import Path
 import subprocess
@@ -41,7 +41,7 @@ async def main():
             await db.execute(insert(Conversation), {'id':1, 'session_id':'synthetic-chat', 'subject_id':'synthetic', 'revision':2})
             await db.execute(insert(ConversationMessage), [
                 {'id':1,'conversation_id':1,'position':0,'role':'user','content':'你好'},
-                {'id':2,'conversation_id':1,'position':1,'role':'assistant','content':'你好，我们慢慢聊。'}])
+                {'id':2,'conversation_id':1,'position':1,'role':'assistant','content':'你好，我们慢慢聊。','routing_reasoning_content':'前置已提交决定','router_model_name':'pre-router'}])
             await db.execute(insert(runtime), {'conversation_id':1,'current_module':module,'memory':{'freshness_marker':'preserve'}})
             await db.commit()
         provider = StubProvider()
@@ -58,8 +58,8 @@ async def main():
         await wait_for_pending_routing('synthetic-chat')
         async with maker() as db:
             row = await db.get(ConversationMessage,2)
-            assert row.routing_reasoning_content and '模块路由测试思考' in row.routing_reasoning_content, 'Router result was never committed'
-            assert row.router_model_name == 'stub-router-1'
+            assert row.routing_reasoning_content == '前置已提交决定', 'Background must preserve the pre-reply trace'
+            assert row.router_model_name == 'pre-router'
             assert row.content == '你好，我们慢慢聊。'
             conv = await db.get(Conversation,1)
             assert conv.revision == 3, 'Live clients need a new revision'
@@ -68,9 +68,14 @@ async def main():
             assert saved['memory']['freshness_marker'] == 'preserve'
             assert 'stale_snapshot' not in saved['memory']
             events = (await db.execute(select(AIExecutionEvent).where(AIExecutionEvent.stage=='module_router'))).scalars().all()
-            assert len(events) == 1
+            assert events == [], 'No second Router call after display'
+            writes = (await db.execute(select(AIExecutionEvent).where(AIExecutionEvent.stage=='post_reply_persistence'))).scalars().all()
+            assert len(writes) == 1
+            assert writes[0].provider is None
+            assert writes[0].event_metadata['execution_timeline'][0]['after_display'] is True
         assert (await store.get('synthetic-chat')).module == module
-        print('PASS', module, 'durable router result, revision and fresh memory')
+        assert not any('target_module' in system for system in provider.route_systems)
+        print('PASS', module, 'pre-reply trace preserved, facts refreshed')
     finally:
         await engine.dispose()
 asyncio.run(main())
@@ -78,7 +83,7 @@ asyncio.run(main())
 
 
 @pytest.mark.parametrize('module', ['module_1', 'module_2', 'module_3', 'module_4'])
-def test_v2_router_commits_without_entering_new_goal_branch(module):
+def test_v2_background_facts_preserve_pre_reply_router(module):
     env = {**os.environ, 'DATABASE_SCHEMA_VERSION':'v2', 'DATABASE_URL':'sqlite+aiosqlite:///:memory:'}
     result = subprocess.run([sys.executable, '-c', SCENARIO, module], cwd=Path(__file__).resolve().parents[1],
                             env=env, capture_output=True, text=True, encoding='utf-8', timeout=45)

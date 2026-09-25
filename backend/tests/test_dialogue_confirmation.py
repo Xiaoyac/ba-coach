@@ -144,6 +144,8 @@ def test_plan_card_confirmation_uses_executable_fields_not_narrative_rewrite():
         "potential_barriers": ["临时工作多"],
         "barrier_coping_plan": [{"barrier": "临时工作多", "plan": "就先走三分钟，不勉强"}],
         "core_values_impact": "原始说法",
+        "difficulty_rating": 4,
+        "difficulty_evidence": {"rating": {"value": 4, "message_id": 1, "quote": "4分", "score_text": "4"}},
     }
     rewritten = {**record, "core_values_impact": "模型重新整理后的同义说法"}
     assert fingerprint(record) == fingerprint(rewritten)
@@ -204,16 +206,17 @@ async def test_m2_requires_same_plan_current_evidence_and_real_consent(goal_api,
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('decision,expected', [(1,'module_4'),(3,'module_2')])
+@pytest.mark.parametrize('decision,expected', [(1,'module_3'),(3,'module_2')])
 async def test_m4_decision_advances_without_web_confirm(goal_api,decision,expected):
     _,db,_=goal_api
     await seed_review(db,decision=decision)
+    message_count = (await db.execute(select(func.count()).select_from(ConversationMessage))).scalar_one()
     target,cycle=await record_steps(db,session_id='chat-a',user_id='a',module='module_4',requested_target='module_4',steps=list(MODULE_STEP_KEYS['module_4']),assistant_message_id=20)
     assert target==expected and cycle!='reviewed-cycle'
     logs=schema.tables['ai_decision_logs']
     log=(await db.execute(select(logs).where(logs.c.decision_type=='user_confirmation'))).mappings().one()
     assert log['evidence_message_ids']==[18] and log['decision_value']['source']=='dialogue'
-    assert (await db.execute(select(func.count()).select_from(ConversationMessage))).scalar_one()==10
+    assert (await db.execute(select(func.count()).select_from(ConversationMessage))).scalar_one()==message_count
 
 
 @pytest.mark.asyncio
@@ -227,12 +230,14 @@ async def test_m2_to_m3_to_execution_uses_real_extraction_and_chat_only(goal_api
     agreement='每天在记录今日中填写活动时间、活动内容和活动后心情'
     await db.execute(insert(ConversationMessage), [
         {'id':23,'conversation_id':1,'position':4,'role':'user','content':'每天记录一次就好'},
-        {'id':24,'conversation_id':1,'position':5,'role':'assistant','content':agreement+'，这个记录方式可以吗？'}])
+        {'id':24,'conversation_id':1,'position':5,'role':'assistant','content':agreement+'，这个记录方式可以吗？遇到困难可以回来聊。'}])
     await db.commit()
     maker=async_sessionmaker(db.bind,expire_on_commit=False)
     payload={'negotiated_record_plan':agreement,'ai_record_requirement':'每天记录',
         'difficulty_feedback_mechanism':'遇到困难可以回来聊','_source_session_id':'chat-a',
-        '_source_assistant_message_id':24}
+        '_source_assistant_message_id':24,'recording_status':'unknown','recording_evidence':{
+            'requirement':{'message_id':24,'quote':agreement}, 'plan':{'message_id':24,'quote':agreement},
+            'feedback':{'message_id':24,'quote':'遇到困难可以回来聊'}}}
     record_id=await persist_record(maker,module='module_3',user_id='a',data=payload,cycle_id='m2-cycle')
     assert record_id
     await record_steps(db,session_id='chat-a',user_id='a',module='module_3',requested_target='module_3',
@@ -243,10 +248,18 @@ async def test_m2_to_m3_to_execution_uses_real_extraction_and_chat_only(goal_api
     await db.commit()
     if fresh:
         await persist_record(maker,module='module_3',user_id='a',cycle_id='m2-cycle',
-            data={**payload,'user_acceptance_feeling':'愿意尝试','_source_assistant_message_id':26})
-    result=await record_steps(db,session_id='chat-a',user_id='a',module='module_3',requested_target='module_4',
-        steps=list(MODULE_STEP_KEYS['module_3']),assistant_message_id=26)
-    assert result[0]==('module_4' if fresh else 'module_3')
+            data={**payload,'user_acceptance_feeling':'愿意尝试','_source_assistant_message_id':26,
+                'recording_status':'accepted','recording_evidence':{**payload['recording_evidence'],
+                    'decision':{'message_id':25,'quote':'我同意这样记录','status':'accepted','scope':'current_arrangement'}}})
+    from app.program_confirmation import confirmation_readiness, commit_confirmation, draft
+    conversation,state=await runtime_for(db,'chat-a')
+    pending=await draft(db,state,'a')
+    ready=await confirmation_readiness(db,conversation=conversation,state=state,user_id='a',session_id='chat-a',pending=pending)
+    assert ready['ready'] is fresh
+    if fresh:
+        result=await commit_confirmation(db,conversation=conversation,state=state,user_id='a',pending=pending,
+            message=await db.get(ConversationMessage,25),review_action=None,snapshot_hash=record_hash(pending),boundary_message_id=26)
+        assert result[0]=='module_3'
     row=(await db.execute(select(schema.tables['module_three_record']).where(schema.tables['module_three_record'].c.id==record_id))).mappings().one()
     assert row['record_status']==('confirmed' if fresh else 'draft')
     if fresh:
@@ -271,13 +284,15 @@ async def test_m3_confirmation_only_keeps_displayed_record_agreement_after_rewri
         {'id': 23, 'conversation_id': 1, 'position': 4, 'role': 'user',
          'content': '我愿意每天在记录今日填写这些内容。'},
         {'id': 24, 'conversation_id': 1, 'position': 5, 'role': 'assistant',
-         'content': agreement + '，这样记录可以吗？'},
+         'content': agreement + '，这样记录可以吗？遇到困难回来聊天'},
     ])
     await db.commit()
     maker = async_sessionmaker(db.bind, expire_on_commit=False)
     payload = {'negotiated_record_plan': agreement, 'ai_record_requirement': agreement,
         'difficulty_feedback_mechanism': '遇到困难回来聊天', '_source_session_id': 'chat-a',
-        '_source_assistant_message_id': 24}
+        '_source_assistant_message_id': 24, 'recording_status':'unknown', 'recording_evidence':{
+            'requirement':{'message_id':24,'quote':agreement}, 'plan':{'message_id':24,'quote':agreement},
+            'feedback':{'message_id':24,'quote':'遇到困难回来聊天'}}}
     record_id = await persist_record(maker, module='module_3', user_id='a',
         data=payload, cycle_id='m2-cycle')
     assert record_id
@@ -298,14 +313,20 @@ async def test_m3_confirmation_only_keeps_displayed_record_agreement_after_rewri
         data={'negotiated_record_plan': rewritten, 'ai_record_requirement': rewritten,
             'difficulty_feedback_mechanism': '遇到困难随时回来聊',
             'user_acceptance_feeling': '我确认', '_source_session_id': 'chat-a',
-            '_source_assistant_message_id': 26})
+            '_source_assistant_message_id': 26, 'recording_status':'accepted',
+            'recording_evidence':{**payload['recording_evidence'], 'decision':{
+                'message_id':25,'quote':'对，你整理的记录方式准确，我确认。','status':'accepted','scope':'current_arrangement'}}})
     row = (await db.execute(select(schema.tables['module_three_record'])
         .where(schema.tables['module_three_record'].c.id == record_id))).mappings().one()
     assert row['negotiated_record_plan']['text'] == agreement
     assert row['feedback_mechanism'] == '遇到困难回来聊天'
-    result = await record_steps(db, session_id='chat-a', user_id='a', module='module_3',
-        requested_target='module_4', steps=list(MODULE_STEP_KEYS['module_3']), assistant_message_id=26)
-    assert result[0] == 'module_4'
+    from app.program_confirmation import confirmation_readiness, commit_confirmation
+    conversation,state=await runtime_for(db,'chat-a')
+    ready=await confirmation_readiness(db,conversation=conversation,state=state,user_id='a',session_id='chat-a',pending=row)
+    assert ready['ready']
+    result=await commit_confirmation(db,conversation=conversation,state=state,user_id='a',pending=row,
+        message=await db.get(ConversationMessage,25),review_action=None,snapshot_hash=record_hash(row))
+    assert result[0] == 'module_3'
 
 
 @pytest.mark.asyncio
@@ -323,13 +344,15 @@ async def test_m3_confirmation_can_commit_before_reply_generation(goal_api):
         {'id': 23, 'conversation_id': 1, 'position': 4, 'role': 'user',
          'content': '每天记录一次就好'},
         {'id': 24, 'conversation_id': 1, 'position': 5, 'role': 'assistant',
-         'content': agreement + '，这个记录方式可以吗？'},
+         'content': agreement + '，这个记录方式可以吗？遇到困难回来聊'},
     ])
     await db.commit()
     maker = async_sessionmaker(db.bind, expire_on_commit=False)
     payload = {'negotiated_record_plan': agreement, 'ai_record_requirement': agreement,
         'difficulty_feedback_mechanism': '遇到困难回来聊', '_source_session_id': 'chat-a',
-        '_source_assistant_message_id': 24}
+        '_source_assistant_message_id': 24, 'recording_status':'unknown', 'recording_evidence':{
+            'requirement':{'message_id':24,'quote':agreement}, 'plan':{'message_id':24,'quote':agreement},
+            'feedback':{'message_id':24,'quote':'遇到困难回来聊'}}}
     assert await persist_record(maker, module='module_3', user_id='a', data=payload,
         cycle_id='m2-cycle')
     await record_steps(db, session_id='chat-a', user_id='a', module='module_3',
@@ -339,14 +362,21 @@ async def test_m3_confirmation_can_commit_before_reply_generation(goal_api):
     await db.execute(insert(ConversationMessage), {
         'id': 25, 'conversation_id': 1, 'position': 6, 'role': 'user',
         'content': natural_confirmation})
-    await db.flush()
-    semantic_provider = SemanticConfirmationStub(natural_confirmation)
-    result = await precommit_user_confirmation(
-        db, session_id='chat-a', user_id='a', user_message_id=25,
-        confirmation_provider=semantic_provider)
     await db.commit()
-    assert result and result[0] == 'module_4'
-    assert semantic_provider.calls
+    user_payload={key:value for key,value in payload.items() if key != '_source_assistant_message_id'}
+    await persist_record(maker,module='module_3',user_id='a',cycle_id='m2-cycle',data={**user_payload,
+        '_source_user_message_id':25,'recording_status':'accepted','recording_evidence':{**payload['recording_evidence'],
+            'decision':{'message_id':25,'quote':natural_confirmation,'status':'accepted','scope':'current_arrangement'}}})
+    from app.program_confirmation import confirmation_readiness, commit_confirmation, draft
+    conversation,state=await runtime_for(db,'chat-a')
+    pending=await draft(db,state,'a')
+    ready=await confirmation_readiness(db,conversation=conversation,state=state,user_id='a',session_id='chat-a',
+        pending=pending,confirmation_user_message_id=25)
+    assert ready['ready']
+    result=await commit_confirmation(db,conversation=conversation,state=state,user_id='a',pending=pending,
+        message=await db.get(ConversationMessage,25),review_action=None,snapshot_hash=record_hash(pending),source='dialogue_precommit')
+    await db.commit()
+    assert result and result[0] == 'module_3'
     row = (await db.execute(select(schema.tables['module_three_record'])
         .where(schema.tables['module_three_record'].c.goal_id == 'g1')
         .order_by(schema.tables['module_three_record'].c.created_at.desc()))).mappings().first()
@@ -355,7 +385,7 @@ async def test_m3_confirmation_can_commit_before_reply_generation(goal_api):
     logs = schema.tables['ai_decision_logs']
     log_sources = (await db.execute(select(logs.c.decision_value).where(
         logs.c.decision_type == 'user_confirmation'))).scalars().all()
-    assert any(item['source'] == 'dialogue_precommit_semantic' for item in log_sources)
+    assert any(item['source'] == 'dialogue_precommit' for item in log_sources)
 
 
 @pytest.mark.asyncio
@@ -448,7 +478,7 @@ async def test_rendered_summary_anchor_rejects_stale_background_reply(goal_api):
     row = (await db.execute(select(schema.tables['module_three_record']).where(
         schema.tables['module_three_record'].c.id == record_id))).mappings().one()
     card = render_confirmation_summary('module_3', row)
-    await db.execute(update(ConversationMessage).where(ConversationMessage.id == 24).values(content=card))
+    assert card is None  # An unsourced draft cannot produce a second confirmation demand.
     await db.execute(insert(ConversationMessage), {
         'id': 25, 'conversation_id': 1, 'position': 6, 'role': 'assistant', 'content': '更新后的说明'})
     await db.commit()

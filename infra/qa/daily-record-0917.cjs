@@ -159,6 +159,21 @@ exports.run = async function(browser, baseUrl = 'http://127.0.0.1:3000') {
     assert.equal(body.activities.length,1);assert.equal(body.activities[0].emotion,0);
     for(const key of ['achievement','connection','enjoyment','importance'])assert.equal(body.activities[0][key],null);
     assert.deepEqual(body.summary,{completion_rate:0,completion_not_applicable:false,activity_level:5,overall_mood:0,reflection_note:null});
+    // Daily summary is independently valid; starting an activity makes only
+    // that row subject to its own required fields. Deleting it restores the
+    // summary-only path, including when it is the sole activity card.
+    await entry.click();
+    await dialog.getByRole('radio',{name:'今天总体身体活动程度 5',exact:true}).click();
+    await dialog.getByRole('radio',{name:'回顾今天，你今天整体心情如何？ 0',exact:true}).click();
+    assert.equal(await save.isDisabled(),true,'summary still needs completion rating');
+    await dialog.getByRole('radio',{name:'想做的事情完成程度 0',exact:true}).click();
+    assert.equal(await save.isEnabled(),true,'summary alone can be saved');
+    await dialog.getByRole('textbox',{name:'活动 1 的备注'}).fill('半填记录');
+    assert.equal(await save.isDisabled(),true,'even a note starts activity-row validation');
+    await dialog.getByRole('button',{name:'删除活动 1',exact:true}).click();
+    assert.equal(await save.isEnabled(),true,'removing the only partial activity restores summary-only');
+    await save.click();await dialog.waitFor({state:'hidden'});
+    assert.deepEqual((await page.evaluate(()=>window.fixture.submitted)).activities,[]);
     await entry.click();await dialog.getByRole('button',{name:'查看历史'}).click();
     const history=page.getByRole('dialog',{name:'历史每日记录'});
     await history.getByText('不适用',{exact:true}).waitFor();
@@ -168,7 +183,7 @@ exports.run = async function(browser, baseUrl = 'http://127.0.0.1:3000') {
     await page.keyboard.press('Escape');await history.waitFor({state:'hidden'});
     const fit=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));
     assert.equal(fit.width,fit.scroll);assert.deepEqual(errors,[]);
-    reports.push({width,height,theme,balancedLayout:true,consistentRequired:true,requiredOptional:true,zeroNullHistoricalNA:true,newSummaryCopy:true,partialCard:true,retry:true,historyVersions:true,m3Entry:true,confirmation:true,fit,errors});
+    reports.push({width,height,theme,balancedLayout:true,consistentRequired:true,requiredOptional:true,zeroNullHistoricalNA:true,newSummaryCopy:true,summaryOnly:true,partialCard:true,retry:true,historyVersions:true,m3Entry:true,confirmation:true,fit,errors});
     } finally {await context.close();}
   }
   return reports;

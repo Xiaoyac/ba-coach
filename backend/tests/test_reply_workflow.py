@@ -48,7 +48,7 @@ async def test_authority_corrects_before_delivery(context,provider,monkeypatch,s
 async def test_reply_authority_reads_fresh_m1_dialogue_status(goal_api):
     _, db, _ = goal_api
     contract = {
-        'version': 'm1-20260914-v1', 'session_id': 'chat-a',
+        'version': __import__('app.m1_contract', fromlist=['VERSION']).VERSION, 'session_id': 'chat-a',
         'path': 'personalized', 'missing_fields': ['ba_understanding', 'goal_setting_consent'],
         'completed_steps': ['core_problem_example', 'depression_cycle_formulated'],
         'milestones': {'m1_milestone_1': True, 'm1_milestone_2': True, 'm1_milestone_3': False},
@@ -72,7 +72,7 @@ async def test_reply_authority_reads_fresh_m1_dialogue_status(goal_api):
     assert authority['m4_status'] is None
 
 
-def test_workflow_prompt_requires_real_m1_education_before_consent_or_activity():
+def test_workflow_prompt_does_not_turn_m1_gaps_into_questions():
     prompt = workflow_prompt({
         'available': True, 'current_module': 'module_1',
         'm1_status': {
@@ -81,12 +81,12 @@ def test_workflow_prompt_requires_real_m1_education_before_consent_or_activity()
             'goal_consent_expressed': True,
         },
     })
-    assert '逐项补充 education_missing_topics' in prompt
-    assert '不能只说“我收到/你已理解”' in prompt
-    assert '不能跳去问具体活动或重复索取目标设定同意' in prompt
+    assert 'education_missing_topics' not in prompt
+    assert 'goal_setting_consent' not in prompt
+    assert '字段缺失或尚未保存不代表用户未表达' in prompt
 
 
-def test_workflow_prompt_exposes_m4_first_missing_evidence_action():
+def test_workflow_prompt_omits_m4_missing_field_commands():
     prompt = workflow_prompt({
         'available': True, 'current_module': 'module_4', 'flow_status': 'waiting_execution',
         'm4_status': {
@@ -95,6 +95,6 @@ def test_workflow_prompt_exposes_m4_first_missing_evidence_action():
             'review_decision': 4, 'next_action': '先补实际提供的BA教育及用户理解，再继续后续收尾。',
         },
     })
-    assert 'M4最新证据状态' in prompt
-    assert '按 next_action 只补当前首个缺项' in prompt
-    assert '用户已说结束/暂停也不能跳过前置证据' in prompt
+    assert 'next_action' not in prompt
+    assert 'm4_milestone_3' not in prompt
+    assert 'current_module' in prompt

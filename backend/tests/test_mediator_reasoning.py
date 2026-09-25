@@ -35,7 +35,7 @@ async def test_reasoning_is_separate_and_not_synthesized(context, provider, mode
         assert kwargs["max_tokens"] == 512
         if mode == "timeout":
             raise TimeoutError
-        return Completion(text="invalid" if mode == "invalid" else '{"selected_ids":["one"],"guidance":"GUIDANCE_ONLY"}',
+        return Completion(text="invalid" if mode == "invalid" else '{"decision":"use","selections":[{"id":"one","quote":"evidence","application":"GUIDANCE_ONLY"}],"note":""}',
             model="mediator-model", reasoning_content="" if mode == "empty_reasoning" else "THOUGHT_ONLY")
     provider.route_detailed = complete
     output = {"reasoning_content":"stale"}
@@ -86,7 +86,7 @@ async def test_low_effort_only_applies_to_explicit_mediator_call(provider_type):
 @pytest.mark.parametrize("text,finish,reason", [
     ('', 'stop', 'empty_output'), ('not-json', 'stop', 'invalid_json'),
     ('{}','stop','invalid_schema'),
-    ('{"selected_ids":["unknown"],"guidance":"ok"}', 'stop','invalid_evidence'),
+    ('{"decision":"use","selections":[{"id":"unknown","quote":"evidence","application":"ok"}],"note":""}', 'stop','invalid_evidence'),
     ('{"selected_ids":["one"],"guidance":"ok"}', 'length','output_truncated'),
 ])
 async def test_invalid_results_are_classified_and_never_passed(context, provider, text, finish, reason):
@@ -107,7 +107,7 @@ async def test_compact_input_preserves_full_safety_facts(context, provider):
         assert kwargs["user"] == json.dumps(payload,ensure_ascii=False,separators=(",",":"))
         assert kwargs["reasoning_effort"] is None
         assert kwargs["include_reasoning"] is False
-        return Completion(text='{"selected_ids":[],"guidance":"先澄清约束"}',model="test")
+        return Completion(text='{"decision":"not_needed","selections":[],"note":"当前无需补充知识"}',model="test")
     provider.route_detailed=complete
     state={"user_input":"synthetic","knowledge_context":{"facts":facts}}
     _,_,metrics=await mediate_knowledge(state=state,module="module_2",knowledge=[KnowledgeChunk("one","evidence","test")],provider=provider,settings=context.settings)

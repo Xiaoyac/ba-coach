@@ -11,7 +11,7 @@ from ..config import get_settings
 from ..push_schema import devices, deliveries, checks
 from ..pa_push_checks import public_check, schedule_check, record_receipt
 from ..pa_push import available, validate_subscription, candidates, active_devices, preference_block
-from ..pa_schedule import utc
+from ..pa_schedule import BUFFER, utc
 from ..v2_repository import now
 
 router = APIRouter(prefix='/push', tags=['push'])
@@ -54,7 +54,7 @@ async def status(caller: CallerIdentity = Depends(require_caller), db=Depends(ge
     rows = await active_devices(db, current, caller.subject_id)
     upcoming = await candidates(db, caller.subject_id, current)
     return {'available': True, 'public_key': get_settings().pa_push_vapid_public_key,
-        'buffer_minutes': 15,
+        'buffer_minutes': int(BUFFER.total_seconds() // 60),
         'preference_blocked': await preference_block(db, caller.subject_id),
         'devices': [{'id': d['id'], 'this_session': d['session_id'] == caller.session.id} for d in rows],
         'upcoming': [{'goal_id': c['goal_id'], 'start_at': c['start_at'].isoformat(), 'due_at': c['due_at'].isoformat()}

@@ -11,7 +11,7 @@ from test_goal_overview import goal_api  # shared isolated authenticated harness
 from types import SimpleNamespace
 
 
-def test_recover_omitted_goal_proposal_from_explicit_user_choice():
+def test_omitted_goal_proposal_is_not_reconstructed_with_regex():
     messages = [
         SimpleNamespace(id=1, position=1, role="user", conversation_id=2, content="我希望有改变。"),
         SimpleNamespace(id=2, position=2, role="assistant", conversation_id=2, content="可以试试找朋友一起活动。"),
@@ -19,9 +19,7 @@ def test_recover_omitted_goal_proposal_from_explicit_user_choice():
                        content="我觉得可以，我想约马哥，和他去旁边的万达广场玩鬼抓人，下午有时间，那就周日下午吧。"),
     ]
     recovered = recover_goal_proposal(messages, "和马哥一起玩鬼抓人")
-    assert recovered and recovered["activity_quote"] == "玩鬼抓人"
-    evidence = proposal_evidence(recovered, messages, "和马哥一起玩鬼抓人")
-    assert evidence and evidence["source_message_id"] == 3
+    assert recovered is None  # Retry extraction, never guess a missing choice with regex.
 
 
 def test_goal_choice_survives_repeated_reference_to_the_reviewed_plan():
@@ -49,7 +47,7 @@ def test_goal_choice_survives_repeated_reference_to_the_reviewed_plan():
                         content="我选择按这份安排执行，请创建目标"),
     ]
     raw = {
-        "goal_kind": "secondary",
+        "selection_status": "selected", "selection_role": "core", "goal_kind": "secondary",
         "selection_quote": messages[0].content,
         "activity_quote": "玩鬼抓人",
     }
@@ -66,12 +64,12 @@ def test_goal_choice_is_invalidated_when_plan_reference_also_changes_activity():
         SimpleNamespace(id=3, position=3, role="user", conversation_id=7,
                         content="我选择按这个目标执行，但把活动改成游泳。"),
     ]
-    raw = {"goal_kind": "secondary", "selection_quote": messages[0].content,
+    raw = {"selection_status": "retracted", "selection_role": "core", "goal_kind": "secondary", "selection_quote": messages[0].content,
            "activity_quote": "散步"}
     assert proposal_evidence(raw, messages, "散步") is None
 
 
-def test_recover_short_choice_from_list_when_card_expands_the_activity():
+def test_short_choice_needs_semantic_extraction_even_with_expanded_card():
     messages = [
         SimpleNamespace(id=1, position=1, role="user", conversation_id=7,
                         content="我希望生活更充实一点。"),
@@ -85,10 +83,7 @@ def test_recover_short_choice_from_list_when_card_expands_the_activity():
                         content="可以呀"),
     ]
     recovered = recover_goal_proposal(messages, "今天出门买东西，回来路上多绕楼下最近的一段")
-    assert recovered and recovered["activity_quote"] == "散步"
-    evidence = proposal_evidence(recovered, messages,
-        "今天出门买东西，回来路上多绕楼下最近的一段")
-    assert evidence and evidence["source_message_id"] == 3
+    assert recovered is None  # A card cannot stand in for semantic extraction.
 
 
 def test_recover_short_choice_does_not_promote_generic_agreement():
@@ -148,7 +143,7 @@ def primary_payload():
         "target_activity_content": "每天晚饭后散步",
         "schedule_text": "每天晚饭后", "target_activity_location": "小区",
         "target_activity_duration_minutes": 10,
-        "goal_proposal": {"goal_kind": "primary", "long_term_direction": "让自己更有精力",
+        "goal_proposal": {"selection_status": "selected", "selection_role": "core", "goal_kind": "primary", "long_term_direction": "让自己更有精力",
             "selection_quote": "我选择每天晚饭后散步", "activity_quote": "每天晚饭后散步",
             "direction_quote": "让自己更有精力"},
         "plan_context": {"schedule_kind": "recurring", "schedule_quote": "每天晚饭后",
@@ -165,8 +160,6 @@ async def test_new_primary_goal_requires_source_evidence_but_router_steps_may_be
         {**payload, "goal_proposal": None},
         {**payload, "goal_proposal": {**payload["goal_proposal"],
                                        "selection_quote": "可以考虑每天晚饭后散步"}},
-        {**payload, "goal_proposal": {**payload["goal_proposal"],
-                                       "direction_quote": "并不在用户原话里"}},
     ]
 
     for invalid in invalid_payloads:
@@ -190,13 +183,8 @@ async def test_new_primary_goal_requires_source_evidence_but_router_steps_may_be
 
 
 @pytest.mark.asyncio
-async def test_omitted_goal_proposal_is_recovered_from_complete_plan_and_user_choice(goal_api):
-    """The graph filters a null/omitted proposal before this service runs.
-
-    A complete PA card plus an explicit user choice is enough to recover that
-    omitted side-channel; the router's pa_card_completed bit is confirmation
-    evidence and must not be a prerequisite for creating the draft goal.
-    """
+async def test_missing_goal_proposal_requires_extraction_retry_even_with_complete_plan(goal_api):
+    """A complete card is not a substitute for the extractor's choice assessment."""
     _, db, _ = goal_api
     latest_assistant = await seed_goal_dialogue(db, conversation_id=2, first_id=300)
     payload = primary_payload()
@@ -210,16 +198,12 @@ async def test_omitted_goal_proposal_is_recovered_from_complete_plan_and_user_ch
         db, session_id="new-chat-a", user_id="a", data=payload,
         completed_steps=["activity_selected"], assistant_message_id=latest_assistant,
     )
-    assert created is not None
-    await db.commit()
-    goal = (await db.execute(select(schema.tables["pa_goals"]).where(
-        schema.tables["pa_goals"].c.id == created["goal_id"]))).mappings().one()
-    assert goal["title"] == "每天晚饭后散步"
+    assert created is None  # Missing selection requires another extraction, not a user repetition.
 
 
 @pytest.mark.asyncio
-async def test_unusable_extractor_activity_is_recovered_when_choice_is_source_bound(goal_api):
-    """A non-empty but invented activity quote must not strand a valid card."""
+async def test_unusable_extractor_activity_requires_source_repair(goal_api):
+    """An invented activity quote remains rejected until extraction is repaired."""
     _, db, _ = goal_api
     latest_assistant = await seed_goal_dialogue(db)
     payload = primary_payload()
@@ -235,11 +219,7 @@ async def test_unusable_extractor_activity_is_recovered_when_choice_is_source_bo
         db, session_id="new-chat-a", user_id="a", data=payload,
         completed_steps=["activity_selected"], assistant_message_id=latest_assistant,
     )
-    assert created is not None
-    await db.commit()
-    goal = (await db.execute(select(schema.tables["pa_goals"]).where(
-        schema.tables["pa_goals"].c.id == created["goal_id"]))).mappings().one()
-    assert goal["title"] == "每天晚饭后散步"
+    assert created is None  # Invalid source cannot be repaired by guessing an activity.
 
 
 @pytest.mark.asyncio
@@ -247,7 +227,7 @@ async def test_secondary_goal_is_independent_and_assistant_only_or_stale_evidenc
     _, db, _ = goal_api
     latest_assistant = await seed_goal_dialogue(db)
     payload = primary_payload()
-    payload["goal_proposal"] = {"goal_kind": "secondary", "long_term_direction": "不应保存",
+    payload["goal_proposal"] = {"selection_status": "selected", "selection_role": "core", "goal_kind": "secondary", "long_term_direction": "不应保存",
         "selection_quote": "我选择每天晚饭后散步", "activity_quote": "每天晚饭后散步", "direction_quote": None}
     created = await create_goal_from_agent_dialogue(db, session_id="new-chat-a", user_id="a", data=payload,
         completed_steps=["activity_selected", "values_or_intention_explored"], assistant_message_id=latest_assistant)

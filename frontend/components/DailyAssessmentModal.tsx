@@ -109,7 +109,7 @@ export default function DailyAssessmentModal({
   const missingTimeSlot = filled.some((a) => !validTimeRange(a.time_slot));
   const missingRequired = filled.some(a => !a.activity.trim() || a.emotion === null);
   const missingSummary = summary.activity_level === null || summary.overall_mood === null || summary.completion_rate === null;
-  const canSubmit = filled.length > 0 && !missingTimeSlot && !missingRequired && !missingSummary;
+  const canSubmit = !missingTimeSlot && !missingRequired && !missingSummary;
 
   function patchActivity(index: number, patch: Partial<ActivityLog>) {
     setActivities((prev) =>
@@ -263,7 +263,7 @@ export default function DailyAssessmentModal({
           ) : (
             <fieldset disabled={busy} className="grid min-w-0 items-start gap-6 lg:grid-cols-2 lg:gap-6">
             <section aria-labelledby={`${titleId}-activities`} className="min-w-0 space-y-3">
-              <div className="flex items-baseline justify-between gap-3"><h3 id={`${titleId}-activities`} className="text-base font-semibold">今天做了什么</h3><span className="text-xs text-ink-muted">按活动记录</span></div>
+              <div className="flex items-baseline justify-between gap-3"><h3 id={`${titleId}-activities`} className="text-base font-semibold">今天做了什么</h3><span className="text-xs text-ink-muted">按活动记录（可选）</span></div>
               {activities.map((a, i) => (
                 <ActivityCard
                   key={i}
@@ -271,7 +271,7 @@ export default function DailyAssessmentModal({
                   value={a}
                   onChange={(patch) => patchActivity(i, patch)}
                   onRemove={() => removeActivity(i)}
-                  removable={activities.length > 1}
+                  removable
                 />
               ))}
 
@@ -349,7 +349,7 @@ export default function DailyAssessmentModal({
               查看历史
             </button>
 
-            <p id={`${titleId}-validation`} className="order-first basis-full text-xs leading-relaxed text-ink-muted sm:order-none sm:max-w-[45%] sm:basis-auto">{filled.length === 0 || missingRequired || missingTimeSlot ? "请填写活动时间、内容和做完后的心情" : missingSummary ? "请完成今日三项总体评分" : `已填写 ${filled.length} 项活动`}</p>
+            <p id={`${titleId}-validation`} className="order-first basis-full text-xs leading-relaxed text-ink-muted sm:order-none sm:max-w-[45%] sm:basis-auto">{missingRequired || missingTimeSlot ? "请补全已填写活动的时间、内容和做完后的心情，或删除该活动" : missingSummary ? "请完成今日三项总体评分" : filled.length === 0 ? "可仅保存今日整体总结" : `已填写 ${filled.length} 项活动`}</p>
               <button
                 type="submit"
                 disabled={busy || !canSubmit}
@@ -395,7 +395,7 @@ function ActivityCard({
     <section aria-label={`活动 ${index + 1}`} className="rounded-2xl bg-raised p-4 sm:p-5">
       <div className="mb-3 flex min-h-7 items-center gap-3">
         <h4 className="text-sm font-semibold">活动 {index + 1}</h4>
-        <span className="ml-auto text-xs text-ink-muted">先填写下面 3 项</span>
+        <span className="ml-auto text-xs text-ink-muted">记录活动时需填写下面 3 项</span>
         {removable && (
           <button
             type="button"

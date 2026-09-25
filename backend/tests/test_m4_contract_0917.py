@@ -121,6 +121,35 @@ def test_complete_without_mood_improvement_is_c_and_uses_later_user_correction()
     assert values["phase_c"]["_m4_contract"]["evidence"]["emotion_quote"]["message_id"] == 5
 
 
+@pytest.mark.parametrize("completion_status,expected_result", [("complete", 1), ("partial", 4)])
+def test_reported_execution_does_not_require_known_actual_minutes(completion_status, expected_result):
+    data, messages = _evidence(scenario="C")
+    report = "我按计划完成了散步，但没看具体时间。" if completion_status == "complete" else "我完成了一部分散步，但没看具体时间。"
+    messages[0].content = "我晚饭后去散步了。"
+    messages[1].content = report
+    data["m4_contract"]["phase_a_quote"] = messages[0].content
+    data["m4_contract"]["phase_b_quote"] = report
+    data["phase_b"]["overt"].update(completion_status=completion_status, actual_duration_minutes=None)
+    summary = "总结：晚饭后去散步，具体时长不清楚，做完后情绪没有改善。"
+    next(message for message in messages if message.id == 20).content = summary
+    data["ai_abc_chain_summary"] = data["m4_contract"]["summary_quote"] = summary
+
+    values = normalize(data, messages, session_id="chat-a", cycle_id="cycle-a", assistant_message_id=26)
+
+    assert values["execution_result"] == expected_result
+    assert values["scenario_type"] == "C"
+    assert values["phase_b"]["overt"]["actual_duration_minutes"] is None
+    assert "execution_reviewed" in values["phase_c"]["_m4_contract"]["completed_steps"]
+
+
+@pytest.mark.parametrize("duration", [0, -1, True, "10", 10081])
+def test_invalid_reported_actual_minutes_still_cannot_confirm_execution(duration):
+    data, messages = _evidence()
+    data["phase_b"]["overt"]["actual_duration_minutes"] = duration
+    values = normalize(data, messages, session_id="chat-a", cycle_id="cycle-a", assistant_message_id=26)
+    assert values["execution_result"] is None
+
+
 def test_forged_ids_ai_text_and_unconfirmed_status_cannot_confirm_chain():
     data, messages = _evidence()
     messages = [message for message in messages if message.role != "assistant"]

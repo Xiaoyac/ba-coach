@@ -63,15 +63,29 @@ def _barrier_is_covered(barrier, coping_keys):
 
 def missing_plan_fields(plan):
     missing = []
-    for field in ("activity_content", "schedule_text", "location"):
-        if not isinstance(plan[field], str) or not plan[field].strip():
+    for field in ("activity_content", "schedule_text"):
+        if not isinstance(plan.get(field), str) or not plan[field].strip():
             missing.append(field)
-    if not isinstance(plan["duration_minutes"], int) or not 1 <= plan["duration_minutes"] <= 1440:
+    # Optional details remain optional. If supplied they must still have the
+    # documented shape; absence must not become a mandatory coaching task.
+    if plan.get("location") is not None and not isinstance(plan["location"], str):
+        missing.append("location")
+    if plan.get("duration_minutes") is not None and (
+            type(plan["duration_minutes"]) is not int or not 1 <= plan["duration_minutes"] <= 1440):
         missing.append("duration_minutes")
-    frequency = plan["frequency_rule"]
-    if not isinstance(frequency, dict) or frequency.get("schema_version") != 1 or not str(frequency.get("text") or "").strip():
+    frequency = plan.get("frequency_rule")
+    if frequency is not None and (not isinstance(frequency, dict) or frequency.get("schema_version") != 1 or not str(frequency.get("text") or "").strip()):
         missing.append("frequency_rule")
-    barriers, coping = plan["potential_barriers"], plan["barrier_coping_plan"]
+    rating = plan.get("difficulty_rating")
+    if type(rating) is not int or not 0 <= rating <= 5:
+        missing.append("difficulty_rating")
+    evidence = plan.get("difficulty_evidence")
+    rating_evidence = evidence.get("rating") if isinstance(evidence, dict) else None
+    if (not isinstance(rating_evidence, dict) or rating_evidence.get("value") != rating
+            or type(rating_evidence.get("message_id")) is not int
+            or not isinstance(rating_evidence.get("quote"), str) or not rating_evidence["quote"].strip()):
+        missing.append("difficulty_evidence")
+    barriers, coping = plan.get("potential_barriers"), plan.get("barrier_coping_plan")
     if not isinstance(barriers, list) or not barriers or any(not isinstance(x, str) or not x.strip() for x in barriers):
         missing.append("potential_barriers")
     if not isinstance(coping, list) or not coping or any(not isinstance(x, dict) or not isinstance(x.get("barrier"), str) or not x["barrier"].strip() or not isinstance(x.get("plan"), str) or not x["plan"].strip() for x in coping):

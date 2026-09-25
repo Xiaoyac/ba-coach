@@ -135,8 +135,10 @@ def approved_mediator(provider, monkeypatch):
     import json
     async def approve(**kwargs):
         payload = json.loads(kwargs["user"])
-        return Completion(text=json.dumps({"selected_ids": [x["id"] for x in payload["knowledge"]],
-            "guidance": "Use the selected evidence only as background."}), model="approved-test-mediator")
+        selections = [{"id": x["id"], "quote": x["text"][:40],
+            "application": "Use the selected evidence only as background."} for x in payload["knowledge"][:2]]
+        return Completion(text=json.dumps({"decision": "use" if selections else "no_match",
+            "selections": selections, "note": "" if selections else "No candidates."}), model="approved-test-mediator")
     monkeypatch.setattr(provider, "route_detailed", approve)
 
 

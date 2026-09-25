@@ -1,18 +1,8 @@
-"""Graph construction and compilation.
+"""Compile the reply pipeline.
 
-    START -> extract_memory -> analyze_intent -> recall_memory -> risk_gate
-          -> crisis | [module_1..4]
-          -> route_next_module (marks delayed routing) -> summarizer
-          -> update_memory_and_format -> END
-
-`risk_gate` is the one node allowed to add latency to a turn: it decides
-whether the person gets the coaching reply at all, so it cannot run after it.
-When it fires, `crisis` answers instead of the module and the state machine
-holds its position — a crisis turn never advances a module.
-
-The graph is compiled once at import and reused for every request. It holds no
-per-request state: everything mutable travels in `AgentState`, and live
-dependencies arrive per-run through `Runtime[GraphContext]`.
+Load context -> safety screening -> current-turn router -> verified business
+commit -> selected module reply -> background-extraction marker -> persistence.
+A crisis turn bypasses the router and business transitions entirely.
 """
 
 from __future__ import annotations
@@ -22,6 +12,7 @@ from functools import lru_cache
 from langgraph.graph import END, START, StateGraph
 
 from ..prompts import MODULE_PROMPTS
+from ..pre_reply_routing import pre_reply_router_node, route_after_pre_reply, route_to_pre_reply
 from .nodes import (
     MODULE_NODES,
     analyze_intent_node,
@@ -29,7 +20,6 @@ from .nodes import (
     extract_memory_node,
     recall_memory_node,
     risk_gate_node,
-    route_after_risk,
     route_next_module_node,
     summarizer_node,
     update_memory_and_format_node,
@@ -52,6 +42,7 @@ def build_graph() -> StateGraph:
     builder.add_node("analyze_intent", analyze_intent_node)
     builder.add_node("recall_memory", recall_memory_node)
     builder.add_node(RISK_NODE, risk_gate_node)
+    builder.add_node("pre_reply_router", pre_reply_router_node)
 
     # --- Module branches, plus the crisis branch that can replace them ---
     for module_name, node in MODULE_NODES.items():
@@ -68,29 +59,25 @@ def build_graph() -> StateGraph:
     builder.add_edge("analyze_intent", "recall_memory")
     builder.add_edge("recall_memory", RISK_NODE)
 
-    # Conditional fan-out. The explicit path_map keeps the mapping between a
-    # routing decision and a node name declarative, and makes LangGraph fail at
-    # build time if a module has no node rather than at request time. `crisis`
-    # is one more destination in the same map — the risk gate's verdict and the
-    # intent decision are resolved together in `route_after_risk`, so there is
-    # exactly one place that decides who answers this turn.
+    # Only a clean risk result may reach the current-turn decision/commit.
     builder.add_conditional_edges(
         RISK_NODE,
-        route_after_risk,
+        route_to_pre_reply,
+        {"pre_reply_router": "pre_reply_router", CRISIS_NODE: CRISIS_NODE},
+    )
+    builder.add_conditional_edges(
+        "pre_reply_router",
+        route_after_pre_reply,
         {
             **{module_name: module_name for module_name in MODULE_PROMPTS},
-            CRISIS_NODE: CRISIS_NODE,
         },
     )
 
-    # Fan-in: every branch converges on the cheap routing marker. The actual
-    # DeepSeek Router Agent is scheduled by the HTTP layer only after the
-    # assistant row is durable, so it can enrich that exact row asynchronously.
+    # Replies converge on the marker for evidence extraction, not a second
+    # model router. The HTTP layer schedules it once the assistant is durable.
     for module_name in MODULE_PROMPTS:
         builder.add_edge(module_name, ROUTE_NODE)
-    # The crisis branch converges too, so the turn is still persisted and
-    # summarised — but route_next_module_node holds position on a crisis turn
-    # rather than advancing the programme.
+    # Crisis replies are still persisted, with progression held.
     builder.add_edge(CRISIS_NODE, ROUTE_NODE)
     builder.add_edge(ROUTE_NODE, SUMMARIZER_NODE)
     builder.add_edge(SUMMARIZER_NODE, POST_NODE)

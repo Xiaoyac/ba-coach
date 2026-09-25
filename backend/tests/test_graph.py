@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import pytest
 
 from app.graph import build_graph, get_graph
 from app.graph import nodes as nodes_module
@@ -36,7 +37,7 @@ async def _drain_background_tasks() -> None:
         await asyncio.gather(*pending)
 
 async def run(state: dict, context) -> dict:
-    """Run the response graph, then settle its deliberately delayed router."""
+    """Run the response graph, then settle post-reply fact bookkeeping."""
     final = await get_graph().ainvoke(state, context=context)
     nodes_module.schedule_background_routing(
         final, context, assistant_message_id=None
@@ -49,55 +50,37 @@ async def run(state: dict, context) -> dict:
 
 
 async def test_module_router_uses_dedicated_provider(context, provider) -> None:
-    """The visible-reply choice must never replace DeepSeek as router."""
     router_provider = type(provider)()
     router_provider.route_result = '{"target_module":"1"}'
     context = dataclasses.replace(context, router_provider=router_provider)
-
-    result = await run(
-        {"user_input": "你好", "forced_module": "module_1", "metadata": {}},
-        context,
-    )
-
+    await run({"user_input": "你好", "metadata": {}}, context)
     assert sum("target_module" in system for system in router_provider.route_systems) == 1
     assert any("风险信号检测器" in system for system in router_provider.route_systems)
     assert not any("target_module" in system for system in provider.route_systems)
-    assert provider.seen  # the ordinary provider still generated the reply
+    assert provider.seen
 
 
-async def test_background_router_does_not_block_the_finished_reply(
-    context, provider
-) -> None:
-    """A slow Router Agent must outlive, not extend, the response graph."""
-    started = asyncio.Event()
-    release = asyncio.Event()
-
-    async def gated_router(**_kwargs) -> Completion:
+async def test_router_finishes_before_reply_generation(context, provider) -> None:
+    started, release = asyncio.Event(), asyncio.Event()
+    original = context.router_provider.route_with_reasoning
+    async def gated_router(**kwargs) -> Completion:
+        if "target_module" not in kwargs["system"]:
+            return await original(**kwargs)
         started.set()
         await release.wait()
-        return Completion(
-            text='{"target_module":"1"}',
-            model="stub-router-1",
-            reasoning_content="后台判断完成",
-        )
-
+        return Completion(text='{"target_module":"1"}', model="stub-router-1", reasoning_content="前置判断完成")
     context.router_provider.route_with_reasoning = gated_router
-    final = await get_graph().ainvoke(
-        {"user_input": "你好", "forced_module": "module_1", "metadata": {}},
-        context=context,
-    )
-    assert final["final_response"]
-    assert final["routing_pending"] is True
-
-    nodes_module.schedule_background_routing(
-        final, context, assistant_message_id=None
-    )
-    await started.wait()
-    task = nodes_module._routing_tasks[final["session_id"]]
-    assert not task.done()
-
+    task = asyncio.create_task(get_graph().ainvoke({"user_input":"你好","metadata":{}}, context=context))
+    await asyncio.wait_for(started.wait(), 2)
+    assert provider.seen == [], "reply cannot precede its Router decision"
     release.set()
+    final = await asyncio.wait_for(task, 2)
+    assert final["final_response"]
+    assert final["routing_reasoning_content"].endswith("前置判断完成")
+    count = len(provider.route_systems)
+    nodes_module.schedule_background_routing(final, context, assistant_message_id=None)
     await nodes_module.wait_for_pending_routing(final["session_id"])
+    assert len(provider.route_systems) == count, "no second Router after reply"
 
 
 async def test_turn_records_stage_telemetry(context) -> None:
@@ -126,6 +109,7 @@ def test_graph_has_expected_nodes() -> None:
         "analyze_intent",
         "recall_memory",
         "risk_gate",
+        "pre_reply_router",
         "crisis",
         "module_1",
         "module_2",
@@ -141,7 +125,7 @@ def test_graph_has_expected_nodes() -> None:
 def test_every_module_branches_from_intent_and_converges() -> None:
     edges = [(e.source, e.target, e.conditional) for e in get_graph().get_graph().edges]
     for module in MODULE_PROMPTS:
-        assert ("risk_gate", module, True) in edges, f"{module} not routed to"
+        assert ("pre_reply_router", module, True) in edges, f"{module} not routed to"
         assert (module, "route_next_module", False) in edges, (
             f"{module} does not converge on route_next_module"
         )
@@ -180,7 +164,7 @@ async def test_explicit_module_bypasses_state(context, provider) -> None:
 async def test_fresh_session_defaults_to_module_1(context, provider) -> None:
     final = await run({"user_input": "你好", "metadata": {}}, context)
     assert final["extracted_intent"] == "module_1"
-    assert final["routed_by"] == "default"
+    assert final["routed_by"] == "pre_reply_router"
 
 
 async def test_current_module_is_read_back_as_sticky(context, store, provider) -> None:
@@ -193,7 +177,7 @@ async def test_current_module_is_read_back_as_sticky(context, store, provider) -
         {"user_input": "嗯", "session_id": session.session_id, "metadata": {}}, context
     )
     assert final["extracted_intent"] == "module_3"
-    assert final["routed_by"] == "sticky"
+    assert final["routed_by"] == "pre_reply_router"
 
 
 async def test_system_prompt_carries_authoritative_reply_module(context, provider) -> None:
@@ -202,10 +186,10 @@ async def test_system_prompt_carries_authoritative_reply_module(context, provide
         context=context,
     )
     system = as_text(provider.systems[-1])
-    assert "# 权威工作流状态" in system
+    assert "# 本轮运行事实" in system
     assert "current_module: module_2" in system
-    assert "reply_module: module_2" in system
-    assert "禁止根据聊天内容" in system
+    assert "reply_module:" not in system
+    assert "生成文字本身不执行保存" in system
 
 
 async def test_direct_module_question_is_answered_from_state_not_model(
@@ -216,8 +200,8 @@ async def test_direct_module_question_is_answered_from_state_not_model(
         context=context,
     )
     assert final["extracted_intent"] == "module_3"
-    assert "当前是模块三（module_3）" in final["final_response"]
-    assert provider.seen == [], "a server-owned state fact must not be guessed by the LLM"
+    assert "module_3" not in final["final_response"]
+    assert provider.seen, "ordinary reply must not leak internal numbering"
 
 
 async def test_background_router_receives_prior_module_history(
@@ -254,7 +238,7 @@ async def test_background_router_receives_prior_module_history(
 async def test_route_next_module_persists_the_agents_decision(context, store, provider) -> None:
     provider.route_result = '{"target_module":"2","completed_steps":["core_problem_example","depression_cycle_formulated","ba_education_completed","goal_setting_consent"]}'
     first = await run(
-        {"user_input": "我准备好了", "forced_module": "module_1", "metadata": {}}, context
+        {"user_input": "我准备好了", "metadata": {}}, context
     )
     assert first["next_module"] == "module_2"
 
@@ -266,34 +250,36 @@ async def test_route_next_module_persists_the_agents_decision(context, store, pr
         {"user_input": "继续", "session_id": first["session_id"], "metadata": {}}, context
     )
     assert second["extracted_intent"] == "module_2"
-    assert second["routed_by"] == "sticky"
+    assert second["routed_by"] == "pre_reply_router"
 
 
-async def test_route_rejects_a_bare_module_without_step_evidence(context, store, provider) -> None:
+async def test_route_accepts_a_bare_module_without_microsteps(context, store, provider) -> None:
     provider.route_result = "2"
     final = await run(
-        {"user_input": "我准备好了", "forced_module": "module_1", "metadata": {}},
+        {"user_input": "我准备好了", "metadata": {}},
         context,
     )
     session = await store.get(final["session_id"])
     assert session is not None
-    assert session.module == "module_1"
+    assert session.module == "module_2"
 
 
-async def test_route_next_module_rejects_a_skipped_step(context, provider) -> None:
+async def test_route_next_module_rejects_a_skipped_step(context, provider, store) -> None:
     # The rules only allow 1 -> 2 from module 1; 1 -> 3 skips goal-setting
     # entirely and must be rejected even though the model proposed it.
     provider.route_result = '{"target_module":"3","completed_steps":["pa_concept_understood","values_or_intention_explored","activity_selected","pa_card_completed"]}'
     final = await run(
-        {"user_input": "随便说点什么", "forced_module": "module_1", "metadata": {}}, context
+        {"user_input": "随便说点什么", "metadata": {}}, context
     )
     assert final["next_module"] == "module_1"
 
 
-async def test_route_next_module_requires_a_pa_card_for_module_3(context, provider) -> None:
+async def test_route_next_module_requires_a_pa_card_for_module_3(context, provider, store) -> None:
     provider.route_result = '{"target_module":"3","completed_steps":["pa_concept_understood","values_or_intention_explored","activity_selected","pa_card_completed"]}'
+    session = await store.get_or_create(None)
+    await store.set_module(session.session_id, "module_2")
     final = await run(
-        {"user_input": "开始执行", "forced_module": "module_2", "metadata": {}}, context
+        {"user_input": "开始执行", "session_id": session.session_id, "metadata": {}}, context
     )
     # No PA card exists yet (fresh session, stub reply carries no card), so
     # the transition is rejected regardless of what the model proposed.
@@ -304,6 +290,7 @@ async def test_route_next_module_allows_module_3_once_a_pa_card_exists(
     context, store, provider
 ) -> None:
     session = await store.get_or_create(None)
+    await store.set_module(session.session_id, "module_2")
     await store.set_memory(session.session_id, {"pa_card": "当前PA目标\n• 活动内容：散步"})
     provider.route_result = '{"target_module":"3","completed_steps":["pa_concept_understood","values_or_intention_explored","activity_selected","pa_card_completed"]}'
 
@@ -311,7 +298,6 @@ async def test_route_next_module_allows_module_3_once_a_pa_card_exists(
         {
             "user_input": "开始执行",
             "session_id": session.session_id,
-            "forced_module": "module_2",
             "metadata": {},
         },
         context,
@@ -319,10 +305,12 @@ async def test_route_next_module_allows_module_3_once_a_pa_card_exists(
     assert final["next_module"] == "module_3"
 
 
-async def test_route_next_module_garbage_falls_back_to_current(context, provider) -> None:
+async def test_route_next_module_garbage_falls_back_to_current(context, provider, store) -> None:
     provider.route_result = "not json"
+    session = await store.get_or_create(None)
+    await store.set_module(session.session_id, "module_2")
     final = await run(
-        {"user_input": "hi", "forced_module": "module_2", "metadata": {}}, context
+        {"user_input": "hi", "session_id": session.session_id, "metadata": {}}, context
     )
     assert final["next_module"] == "module_2"
 
@@ -352,7 +340,7 @@ async def test_extract_memory_loads_history_for_later_turns(context, provider) -
     await run({"user_input": "two", "session_id": session_id, "metadata": {}}, context)
 
     # Turn 2's model call sees: user "one", assistant reply, user "two".
-    assert [m.content for m in provider.seen[-1]] == ["one", "saw 1 messages", "two"]
+    assert [m.content for m in provider.seen[-1]] == ["one", "saw 1 messages", "<user_message>two</user_message>"]
 
 
 async def test_state_carries_the_documented_fields(context) -> None:
@@ -453,7 +441,6 @@ async def test_summarizer_dispatches_on_module_change(context, memos) -> None:
         {
             "user_input": "我准备好了",
             "subject_id": "subj-1",
-            "forced_module": "module_1",
             "metadata": {},
         },
         context,
@@ -491,7 +478,6 @@ async def test_summarizer_does_not_block_the_response(context, provider, memos) 
         {
             "user_input": "我准备好了",
             "subject_id": "subj-1",
-            "forced_module": "module_1",
             "metadata": {},
         },
         context,
@@ -523,7 +509,6 @@ async def test_summarizer_failure_does_not_affect_the_turn(context, provider, me
         {
             "user_input": "我准备好了",
             "subject_id": "subj-1",
-            "forced_module": "module_1",
             "metadata": {},
         },
         context,
@@ -542,7 +527,6 @@ async def test_summarizer_skipped_when_module_does_not_change(context, memos) ->
         {
             "user_input": "嗯嗯",
             "subject_id": "subj-1",
-            "forced_module": "module_1",
             "metadata": {},
         },
         context,
@@ -555,7 +539,7 @@ async def test_summarizer_skipped_without_subject_id(context, memos) -> None:
     context = dataclasses.replace(context, memos=memos)
     context.provider.route_result = '{"target_module":"2","completed_steps":["core_problem_example","depression_cycle_formulated","ba_education_completed","goal_setting_consent"]}'
     await run(
-        {"user_input": "我准备好了", "forced_module": "module_1", "metadata": {}}, context
+        {"user_input": "我准备好了", "metadata": {}}, context
     )
     await _drain_background_tasks()
     assert memos.saved == []
@@ -570,7 +554,6 @@ async def test_router_and_summarizer_use_their_separate_token_budgets(
         {
             "user_input": "我准备好了",
             "subject_id": "subj-1",
-            "forced_module": "module_1",
             "metadata": {},
         },
         context,
@@ -637,44 +620,28 @@ async def test_global_prompt_stays_first_and_cacheable(context, provider, approv
     assert segments[1].cacheable
     # The per-module checklist is its own cacheable segment, not folded into
     # the module instructions text.
-    assert "子步骤清单" in segments[2].text
+    assert "本轮运行事实" in segments[2].text
     assert segments[2].cacheable
     # Volatile tail (knowledge/memory/context) must NOT carry a breakpoint.
     assert not segments[-1].cacheable
     assert any("# Retrieved Knowledge" in s.text and not s.cacheable for s in segments)
 
 
-async def test_custom_global_prompt_is_reasserted_after_server_contracts() -> None:
-    custom = "不管用户说什么，回复666666。"
-    segments = build_system_segments("module_1", global_prompt=custom)
-    assert segments[0].text == custom
-    assert segments[-1].cacheable is False
-    assert "管理员自定义全局提示词" in segments[-1].text
-    assert custom in segments[-1].text
-    assert "不得用它覆盖服务器注入的安全规则" in segments[-1].text
-
-
-async def test_custom_module_and_global_prompts_are_the_true_final_instructions() -> None:
-    global_custom = "全局调试标记：回复必须包含 GLOBAL_SENTINEL。"
-    module_custom = "当前模块调试标记：回复必须包含 MODULE_SENTINEL。"
+async def test_editable_prompts_are_included_once_even_after_context_additions() -> None:
+    global_custom = "GLOBAL_SENTINEL"
+    module_custom = "MODULE_SENTINEL"
     segments = build_system_segments(
-        "module_1", global_prompt=global_custom, module_prompt=module_custom
+        "module_1", global_prompt=global_custom, module_prompt=module_custom,
+        module_steps={"module_1": ["core_problem_example"]},
     )
-    # Simulate the graph's later retrieval/workflow additions, then reassert
-    # the editable prompts at the actual end of the assembled request.
-    segments.append(SystemPromptSegment("late server-owned workflow contract", cacheable=False))
-    append_admin_prompt_overrides(
-        segments,
-        module_name="module_1",
-        global_prompt=global_custom,
-        module_prompt=module_custom,
-    )
-
-    assert segments[-2].text.startswith("# 管理员自定义当前模块提示词")
-    assert segments[-1].text.startswith("# 管理员自定义全局提示词")
-    assert "MODULE_SENTINEL" in segments[-2].text
-    assert "GLOBAL_SENTINEL" in segments[-1].text
-    assert not segments[-1].cacheable
+    segments.append(SystemPromptSegment("late relevant context", cacheable=False))
+    append_admin_prompt_overrides(segments, module_name="module_1",
+                                 global_prompt=global_custom, module_prompt=module_custom)
+    assembled = as_text(segments)
+    assert assembled.count(global_custom) == assembled.count(module_custom) == 1
+    assert segments[0].text == global_custom and segments[0].cacheable
+    assert "core_problem_example" not in assembled
+    assert "子步骤清单" not in assembled
 
 
 async def test_knowledge_is_labelled_as_untrusted_data(context, provider, approved_mediator) -> None:
@@ -709,7 +676,7 @@ async def test_irrelevant_knowledge_is_omitted_rather_than_injected(
 async def test_global_prompt_forbids_fabricating_names(context, provider) -> None:
     await run({"user_input": "hi", "forced_module": "module_1", "metadata": {}}, context)
     system = as_text(provider.systems[-1])
-    assert "禁止捏造任何未提及的人名" in system
+    assert "禁止虚构、编造用户没有表达的信息" in system
 
 
 async def test_system_prompt_carries_no_greeting(context, provider) -> None:
@@ -720,26 +687,14 @@ async def test_system_prompt_carries_no_greeting(context, provider) -> None:
     assert "怎么称呼你" not in system
 
 
-async def test_turn_execution_protocol_is_always_sent(context, provider) -> None:
-    await run({"user_input": "我叫小明", "forced_module": "module_1", "metadata": {}}, context)
+@pytest.mark.parametrize("module", ["module_1", "module_2", "module_3", "module_4"])
+async def test_reply_has_no_duplicate_server_coaching_script(context, provider, module) -> None:
+    await run({"user_input": "我叫小明", "forced_module": module}, context)
     system = as_text(provider.systems[-1])
-    assert "# 本轮执行协议（优先级高）" in system
-    assert "找出“最早尚未完成”的一个子步骤" in system
-    assert "不得跳步、重启流程或重复已确认信息" in system
-
-
-async def test_module_one_prompt_has_a_non_repeating_exit_bridge(
-    context, provider
-) -> None:
-    await run(
-        {"user_input": "我理解了，也愿意开始", "forced_module": "module_1", "metadata": {}},
-        context,
-    )
-    system = as_text(provider.systems[-1])
-    assert "# 模块一防循环与衔接规则" in system
-    assert "不要求穷尽全部背景" in system
-    assert "禁止再开启新的模块一问题" in system
-    assert "不需要按照特定顺序" not in MODULE_PROMPTS["module_1"]
+    for legacy in ("# 本轮执行协议", "最早尚未完成", "子步骤清单", "# 模块一防循环与衔接规则",
+                   "# 权威子步骤进度", "# 服务器强制"):
+        assert legacy not in system
+    assert "current_module: " + module in system
 
 
 async def test_module_prompts_carry_no_dev_notes(context, provider) -> None:
@@ -752,10 +707,10 @@ async def test_module_prompts_carry_no_dev_notes(context, provider) -> None:
         assert "备注：" not in system, f"{module} still ships dev notes"
 
 
-async def test_module_checklist_is_specific_to_its_module(context, provider) -> None:
+async def test_only_selected_module_prompt_is_loaded(context, provider) -> None:
     await run({"user_input": "hi", "forced_module": "module_2", "metadata": {}}, context)
     system = as_text(provider.systems[-1])
-    assert "PA 目标卡片" in system
+    assert MODULE_PROMPTS["module_2"] in system
     assert "ABC 功能分析" not in system  # module_4's checklist, not module_2's
 
 
@@ -799,13 +754,13 @@ async def test_module_knowledge_rules_match_the_curated_source_map(
 ) -> None:
     await run({"user_input": "我想散步", "forced_module": "module_2", "metadata": {}}, context)
     module_two = as_text(provider.systems[-1])
-    assert "身体活动分类" in module_two
-    assert "本模块不调用BCT" in module_two
+    assert "PA 概念及相关专业知识" in module_two
+    assert "不作为用户经历的证据" in module_two
 
     await run({"user_input": "我担心坚持不了", "forced_module": "module_3", "metadata": {}}, context)
     module_three = as_text(provider.systems[-1])
-    assert "【BCT】与【内在/外在障碍】" in module_three
-    assert "动机式访谈（MI）" in module_three
+    assert "不在模块三内解决具体 PA 执行困难" in module_three
+    assert "不在未了解用户具体顾虑前直接提供轻量化方案" in module_three
 
 
 async def test_empty_knowledge_base_still_produces_a_prompt(context, provider) -> None:

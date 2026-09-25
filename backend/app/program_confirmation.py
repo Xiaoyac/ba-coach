@@ -16,6 +16,14 @@ def record_hash(row):
     return hashlib.sha256(json.dumps(dict(row), sort_keys=True, default=str, ensure_ascii=False).encode()).hexdigest()
 
 
+def confirmation_memory(memory):
+    """Invalidate operation markers without discarding durable dialogue facts."""
+    transient = {"dialogue_draft", "module_extraction_freshness", "pa_card",
+        "current_transition_evidence", "last_module", "current_module", "next_module",
+        "phase", "current_phase", "current_step", "module_steps"}
+    return {key:value for key,value in (memory or {}).items() if key not in transient}
+
+
 async def draft(db, state, user_id):
     table = schema.tables[TABLES[state["current_module"]]]
     if state["current_module"] == "module_1":
@@ -29,8 +37,12 @@ async def draft(db, state, user_id):
             plan = (await db.execute(select(cycles.c.module_two_record_id).where(
                 cycles.c.id == state["active_cycle_id"], cycles.c.goal_id == state["active_goal_id"]))).scalar_one_or_none()
             scope = scope & (table.c.module_two_record_id == plan)
-    return (await db.execute(select(table).where(scope, table.c.record_status == "draft")
-        .order_by(table.c.created_at.desc()).limit(1))).mappings().one_or_none()
+    rows = (await db.execute(select(table).where(scope, table.c.record_status == "draft")
+        .order_by(table.c.created_at.desc(), table.c.id.desc()))).mappings().all()
+    if state["current_module"] == "module_3":
+        from .m3_contract import contract_for
+        return next((row for row in rows if contract_for(row).get("cycle_id") == state["active_cycle_id"]), None)
+    return rows[0] if rows else None
 
 
 async def current_m1_missing(db, pending, conversation_id, session_id):
@@ -72,7 +84,7 @@ async def confirmation_readiness(
     marker = memory.get("dialogue_draft") if isinstance(memory, dict) else None
     marker = marker if isinstance(marker, dict) else {}
     actual_fingerprint = None
-    if module in {"module_2", "module_3"} and pending:
+    if module == "module_2" and pending:
         # Keep this local import to avoid dialogue_confirmation ↔
         # program_confirmation import cycles while modules initialise.
         from .dialogue_confirmation import fingerprint
@@ -86,23 +98,23 @@ async def confirmation_readiness(
     readiness = evaluate_readiness(
         module, pending,
         extraction_fresh=extraction_fresh,
-        summary_verified=marker.get("summary_verified") if module in {"module_2", "module_3"} else None,
-        expected_fingerprint=marker.get("fingerprint") if module in {"module_2", "module_3"} else None,
+        summary_verified=marker.get("summary_verified") if module == "module_2" else None,
+        expected_fingerprint=marker.get("fingerprint") if module == "module_2" else None,
         actual_fingerprint=actual_fingerprint,
-        evidence_session_id=marker.get("session_id") if module in {"module_2", "module_3"} else None,
+        evidence_session_id=marker.get("session_id") if module == "module_2" else None,
         session_id=session_id,
-        evidence_cycle_id=marker.get("cycle_id") if module in {"module_2", "module_3"} else None,
+        evidence_cycle_id=marker.get("cycle_id") if module == "module_2" else None,
         cycle_id=state.get("active_cycle_id"),
         m4_missing_fields=m4_missing,
-        require_summary=module in {"module_2", "module_3"},
-        require_fingerprint=module in {"module_2", "module_3"},
+        require_summary=module == "module_2",
+        require_fingerprint=module == "module_2",
     )
     # A structurally complete draft is still only a draft until the router has
     # published the verified summary and opened the confirmation boundary.
     # Expose that phase gate here so the program API and reply guard cannot
     # accidentally promise a transition from a merely complete extraction.
     from .workflow_readiness import CONFIRMATION_WINDOW_CLOSED, REVIEW_ACTION_MISSING
-    if module in {"module_2", "module_3", "module_4"} and state.get("last_transition_reason") != "awaiting_record_confirmation":
+    if module in {"module_2", "module_4"} and state.get("last_transition_reason") != "awaiting_record_confirmation":
         readiness["ready"] = False
         readiness["reasons"].append({
             "code": CONFIRMATION_WINDOW_CLOSED,
@@ -135,7 +147,12 @@ async def confirmation_readiness(
                 "message": "复盘方向缺少聊天中的真实决定证据",
             })
     readiness["review_action"] = review_action
-    readiness["confirmation_window_open"] = state.get("last_transition_reason") == "awaiting_record_confirmation"
+    if module == "module_3":
+        from .m3_contract import contract_for
+        evidence = contract_for(pending).get("evidence") or {}
+        readiness["recording_status"] = (pending or {}).get("recording_status", "unknown")
+        readiness["recording_decision_message_id"] = (evidence.get("decision") or {}).get("message_id")
+    readiness["confirmation_window_open"] = readiness["ready"] if module == "module_3" else state.get("last_transition_reason") == "awaiting_record_confirmation"
     return {
         **readiness,
         "marker": marker,
@@ -155,7 +172,7 @@ async def validate_confirmation(
     pending = await draft(db, state, user_id)
     if state["row_version"] != payload.row_version or not pending or pending["id"] != payload.record_id or record_hash(pending) != payload.record_hash:
         raise HTTPException(409, "记录已更新，请重新查看后确认")
-    if state["last_transition_reason"] != "awaiting_record_confirmation":
+    if state["current_module"] != "module_3" and state["last_transition_reason"] != "awaiting_record_confirmation":
         raise HTTPException(409, "当前模块的必要讨论尚未完成")
     module, cycle_id, goal_id = state["current_module"], state["active_cycle_id"], state["active_goal_id"]
     table = schema.tables[TABLES[module]]
@@ -220,7 +237,16 @@ async def commit_confirmation(db, *, conversation, state, user_id, pending, mess
             row_version=progress.c.row_version + 1, updated_at=now()))
         next_module = "module_3"
     elif module == "module_3":
-        await db.execute(update(table).where(table.c.id == pending["id"]).values(**common, acceptance_status="confirmed"))
+        from .m3_contract import contract_for, missing_fields
+        decision = (contract_for(pending).get("evidence") or {}).get("decision") or {}
+        if (missing_fields(pending, session_id=conversation.session_id, cycle_id=cycle_id)
+                or decision.get("message_id") != message.id
+                or not isinstance(decision.get("quote"), str)
+                or decision["quote"] not in (message.content or "")):
+            raise V2Conflict("记录决定缺少本用户、本周期的真实接受或拒绝来源")
+        # Acceptance/refusal is a business decision; the attitude field retains
+        # its original meaning. A refusal never fabricates a recording plan.
+        await db.execute(update(table).where(table.c.id == pending["id"]).values(**common))
         cycles = schema.tables["pa_cycles"]
         await db.execute(update(cycles).where(cycles.c.id == cycle_id, cycles.c.goal_id == goal_id).values(
             module_three_record_id=pending["id"], status="waiting_execution"))
@@ -228,7 +254,7 @@ async def commit_confirmation(db, *, conversation, state, user_id, pending, mess
         await db.execute(update(progress).where(progress.c.cycle_id == cycle_id).values(
             module_3_steps=list(MODULE_STEP_KEYS["module_3"]),
             row_version=progress.c.row_version + 1, updated_at=now()))
-        next_module, flow = "module_4", "waiting_execution"
+        next_module, flow = "module_3", "waiting_execution"
     else:
         # The column identifies the actual ABC acknowledgement, not
         # this separate final web confirmation (which is audit-logged).
@@ -242,7 +268,10 @@ async def commit_confirmation(db, *, conversation, state, user_id, pending, mess
         if decision == 1:
             next_cycle = await continue_reviewed_cycle(db, user_id=user_id, goal_id=goal_id,
                 cycle_id=cycle_id, conversation_id=conversation.id)
-            next_module, flow = "module_4", "waiting_execution"
+            successor_status = (await db.execute(select(cycles.c.status).where(
+                cycles.c.id == next_cycle, cycles.c.goal_id == goal_id))).scalar_one()
+            next_module = "module_3"
+            flow = "waiting_execution" if successor_status == "waiting_execution" else "active"
         elif decision == 3:
             next_cycle = await start_cycle(db, user_id=user_id, goal_id=goal_id, conversation_id=conversation.id)
             # Start a new editable version, never overwrite historical plans.
@@ -290,23 +319,27 @@ async def commit_confirmation(db, *, conversation, state, user_id, pending, mess
         # Other chats may be continuing this SAME cycle. They must not
         # keep stale module pointers or advance a completed cycle.
         from .models import Conversation
-        others = select(rt.c.conversation_id).join(Conversation, Conversation.id == rt.c.conversation_id).where(
+        others = select(rt.c.conversation_id, rt.c.memory).join(Conversation, Conversation.id == rt.c.conversation_id).where(
             rt.c.active_cycle_id == cycle_id, Conversation.subject_id == user_id,
             rt.c.conversation_id != conversation.id)
-        other_ids = list((await db.execute(others)).scalars())
+        other_rows = (await db.execute(others)).mappings().all()
+        other_ids = [row["conversation_id"] for row in other_rows]
         if other_ids:
-            await db.execute(update(rt).where(rt.c.conversation_id.in_(other_ids)).values(
-                current_module=next_module if module != "module_4" else "module_4",
-                flow_status=flow if module != "module_4" else "completed", memory={},
-                row_version=rt.c.row_version + 1, last_transition_reason="cycle_updated_in_other_chat"))
+            for other in other_rows:
+                await db.execute(update(rt).where(rt.c.conversation_id == other["conversation_id"]).values(
+                    current_module=next_module if module != "module_4" else "module_4",
+                    flow_status=flow if module != "module_4" else "completed",
+                    memory=confirmation_memory(other["memory"]),
+                    row_version=rt.c.row_version + 1, last_transition_reason="cycle_updated_in_other_chat"))
             await db.execute(update(Conversation).where(Conversation.id.in_(other_ids)).values(revision=Conversation.revision + 1))
     await db.execute(update(rt).where(rt.c.conversation_id == conversation.id).values(
         current_module=next_module, active_goal_id=next_goal, active_cycle_id=next_cycle, flow_status=flow,
-        memory={}, row_version=state["row_version"] + 1, last_transition_reason="user_confirmed_record"))
+        memory=confirmation_memory(state["memory"]), row_version=state["row_version"] + 1, last_transition_reason="user_confirmed_record"))
     await db.execute(insert(schema.tables["ai_decision_logs"]), {"conversation_id": conversation.id,
         "turn_id": str(boundary_message_id or message.id), "goal_id": goal_id, "cycle_id": cycle_id, "module_name": module,
         "decision_type": "user_confirmation", "decision_value": {"record_id": pending["id"],
-            "confirmed_snapshot_hash": snapshot_hash, "next_module": next_module, "source": source},
+            "confirmed_snapshot_hash": snapshot_hash, "next_module": next_module,
+            "next_cycle_id": next_cycle, "source": source},
         "evidence_message_ids": [message.id]})
     conversation.revision += 1
 

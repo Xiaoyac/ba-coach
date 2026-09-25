@@ -345,8 +345,11 @@ async def finish_turn(
             "time_to_first_reasoning_token_ms": metrics.get("time_to_first_reasoning_token_ms"),
             "time_to_first_content_token_ms": metrics.get("time_to_first_content_token_ms"),
             "reply_recovery": metrics.get("reply_recovery"),
-            # Rule codes/timing only; never store the rejected draft or its
-            # reasoning. A corrected turn is not a successful semantic check.
+            **{key: metrics.get(key) for key in ("main_input", "reply_trace", "prompt_sources",
+                "execution_timeline", "time_to_first_visible_content_ms", "first_visible_measurement",
+                "router_pre_reply")},
+            # Permission-controlled execution trace; never include this in
+            # ordinary user-visible chat content.
             "answer_validator": metrics.get("answer_validator"),
             "knowledge_references": ({
                 **metrics["knowledge_references"],

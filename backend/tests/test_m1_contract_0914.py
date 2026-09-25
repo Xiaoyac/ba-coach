@@ -54,7 +54,7 @@ def test_order_and_speaker_provenance_gate_completion():
 
 def test_empty_raw_consent_before_education_and_unresolved_questions_fail_closed():
     assert normalize({}, _data(), _turns(), "s1")["milestones"]["m1_milestone_3"] is False
-    raw = _raw(); raw["education_quotes"] = ["行动和情绪、精力会相互影响。"] * 5; raw["understanding_quote"] = "我愿意进入目标设定。"; raw["consent_quote"] = "我愿意进入目标设定。"
+    raw = _raw(); raw["education_quotes"][1] = None; raw["understanding_quote"] = "我愿意进入目标设定。"; raw["consent_quote"] = "我愿意进入目标设定。"
     assert normalize(raw, _data(), _turns(), "s1")["milestones"]["m1_milestone_3"] is False
     raw = _raw(); raw["core_questions_resolved"] = False
     assert "ba_understanding" in normalize(raw, _data(), _turns(), "s1")["missing_fields"]
@@ -78,7 +78,7 @@ def test_methods_null_differs_from_empty_and_session_or_legacy_is_blocked():
     assert missing_m1_fields(record, "other") == ["m1_evidence_refresh"]
     assert missing_m1_fields({"event_experience": {}}, "s1") == ["m1_evidence_refresh"]
     raw = _raw(); c = normalize(raw, _data(attempted_relief_methods=None), _turns(), "s1")
-    assert "m1_milestone_2" in c["missing_fields"]
+    assert "m1_milestone_2" not in c["missing_fields"]
 
 
 @pytest.mark.parametrize("key", ["trigger", "feeling", "behavior", "consequence"])
@@ -101,7 +101,11 @@ def test_consent_before_education_is_not_current_understanding():
 def test_actual_low_disclosure_without_event_summary_or_methods():
     raw = _raw("low_disclosure")
     raw["refusal_quote"] = "我不想分享个人经历。"
-    turns = [("user", raw["refusal_quote"])] + _turns()[4:]
+    raw["limitation_explained_quote"] = {"turn": 1}
+    raw["limitation_acknowledged_quote"] = {"turn": 2}
+    turns = [("user", raw["refusal_quote"]),
+             ("assistant", "可以不谈个人经历，这样我只能解释一般原理，无法结合你的经历分析。"),
+             ("user", "知道，先听一般的原理就好。") ] + _turns()[4:]
     result = normalize(raw, {}, turns, "s1")
     assert result["missing_fields"] == []
     assert result["milestones"]["m1_milestone_3"]

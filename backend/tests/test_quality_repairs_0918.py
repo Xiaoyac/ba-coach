@@ -14,12 +14,12 @@ from test_goal_overview import goal_api
 from test_goal_contract_0914 import seed_goal_dialogue, primary_payload
 
 
-def proposal(body, activity, selection=None, previous=None):
+def proposal(body, activity, selection=None, previous=None, status="selected"):
     messages = []
     if previous:
         messages.append(SimpleNamespace(id=1, position=1, role='assistant', content=previous, conversation_id=7))
     messages.append(SimpleNamespace(id=2, position=2, role='user', content=body, conversation_id=7))
-    return proposal_evidence({'goal_kind': 'secondary', 'selection_quote': selection or body,
+    return proposal_evidence({'selection_status': status, 'selection_role': 'core', 'goal_kind': 'secondary', 'selection_quote': selection or body,
                               'activity_quote': activity}, messages, activity)
 
 
@@ -46,8 +46,8 @@ def proposal(body, activity, selection=None, previous=None):
     ('我想试试散步或者游泳', '散步', None),
     ('我选择散步还是游泳好呢', '游泳', '我选择散步还是游泳'),
 ])
-def test_goal_rejects_non_selection_and_cherry_picked_quotes(body, activity, selection):
-    assert proposal(body, activity, selection) is None
+def test_semantically_ambiguous_extraction_never_promotes_mentions(body, activity, selection):
+    assert proposal(body, activity, selection, status="ambiguous") is None
 
 
 @pytest.mark.parametrize('body,activity,previous', [
@@ -83,7 +83,7 @@ def test_goal_accepts_grounded_normalized_activity_content():
     body = "我选择散步，具体是在小区平路慢走五分钟。"
     messages = [SimpleNamespace(id=2, position=2, role="user", content=body,
                                 conversation_id=7)]
-    result = proposal_evidence({"goal_kind": "secondary", "selection_quote": "我选择散步",
+    result = proposal_evidence({"selection_status": "selected", "selection_role": "core", "goal_kind": "secondary", "selection_quote": "我选择散步",
         "activity_quote": "散步"}, messages, "小区平路慢走五分钟")
     assert result is not None
     assert result["evidence"]["activity_quote"] == "散步"
@@ -94,7 +94,7 @@ def test_goal_rejects_ungrounded_normalized_activity_content():
     body = "我选择散步。"
     messages = [SimpleNamespace(id=2, position=2, role="user", content=body,
                                 conversation_id=7)]
-    assert proposal_evidence({"goal_kind": "secondary", "selection_quote": "我选择散步",
+    assert proposal_evidence({"selection_status": "selected", "selection_role": "core", "goal_kind": "secondary", "selection_quote": "我选择散步",
         "activity_quote": "散步"}, messages, "每天游泳三十分钟") is None
 
 
@@ -117,7 +117,7 @@ def test_goal_selection_can_be_confirmed_after_later_plan_detail_turns():
         SimpleNamespace(id=5, position=5, role="user", conversation_id=7,
                         content="这张卡没问题，我同意按这个计划试。"),
     ]
-    result = proposal_evidence({"goal_kind": "secondary",
+    result = proposal_evidence({"selection_status": "selected", "selection_role": "core", "goal_kind": "secondary",
         "selection_quote": "我选择散步作为这周要尝试的活动。", "activity_quote": "散步"},
         messages, "每天晚饭后七点，在小区楼下散步十分钟")
     assert result is not None
@@ -137,7 +137,7 @@ def test_goal_selection_is_invalidated_by_later_replacement():
         SimpleNamespace(id=5, position=5, role="user", conversation_id=7,
                         content="确认这张散步卡。"),
     ]
-    assert proposal_evidence({"goal_kind": "secondary",
+    assert proposal_evidence({"selection_status": "retracted", "selection_role": "core", "goal_kind": "secondary",
         "selection_quote": "我选择散步作为这周要尝试的活动。", "activity_quote": "散步"},
         messages, "散步") is None
 
@@ -151,7 +151,7 @@ def test_goal_card_cannot_add_a_second_activity_to_the_user_choice():
         SimpleNamespace(id=3, position=3, role="user", conversation_id=7,
                         content="确认这张卡。"),
     ]
-    result = proposal_evidence({"goal_kind": "secondary",
+    result = proposal_evidence({"selection_status": "selected", "selection_role": "core", "goal_kind": "secondary",
         "selection_quote": "我选择散步作为这周要尝试的活动。", "activity_quote": "散步"},
         messages, "散步并跑步")
     # The card-only expansion may be observed for diagnostics, but the
@@ -176,14 +176,14 @@ def test_goal_selection_survives_a_long_detail_transcript_but_not_reconsideratio
         SimpleNamespace(id=45, position=45, role="user", conversation_id=7,
                         content="确认这张卡。"),
     ])
-    accepted = proposal_evidence({"goal_kind": "secondary",
+    accepted = proposal_evidence({"selection_status": "selected", "selection_role": "core", "goal_kind": "secondary",
         "selection_quote": "我选择散步作为这周要尝试的活动。", "activity_quote": "散步"},
         messages, "散步")
     assert accepted and accepted["source_message_id"] == 1
 
     messages.insert(-1, SimpleNamespace(id=43.5, position=43.5, role="user",
                                         conversation_id=7, content="我再考虑一下，先不做这个目标。"))
-    assert proposal_evidence({"goal_kind": "secondary",
+    assert proposal_evidence({"selection_status": "retracted", "selection_role": "core", "goal_kind": "secondary",
         "selection_quote": "我选择散步作为这周要尝试的活动。", "activity_quote": "散步"},
         messages, "散步") is None
 
@@ -201,7 +201,7 @@ def test_later_friend_suggestion_does_not_replace_the_user_choice():
         SimpleNamespace(id=5, position=5, role="user", conversation_id=7,
                         content="确认这张卡。"),
     ]
-    result = proposal_evidence({"goal_kind": "secondary",
+    result = proposal_evidence({"selection_status": "selected", "selection_role": "core", "goal_kind": "secondary",
         "selection_quote": "我选择散步作为这周要尝试的活动。", "activity_quote": "散步"},
         messages, "散步")
     assert result and result["source_message_id"] == 1
@@ -214,7 +214,7 @@ def test_later_friend_suggestion_does_not_replace_the_user_choice():
     ('好，但我还没决定', '你愿意选择散步作为目标吗？'),
 ])
 def test_goal_ambiguous_acknowledgment_never_selects_assistant_activity(body, previous):
-    assert proposal(body, '散步', previous=previous) is None
+    assert proposal(body, '散步', previous=previous, status='ambiguous') is None
 
 
 @pytest.mark.asyncio
@@ -227,7 +227,7 @@ async def test_invalid_goal_writes_no_goal_plan_cycle_or_audit(goal_api, body, a
     tables = [schema.tables[name] for name in ('pa_goals','module_two_record','pa_cycles','ai_decision_logs')]
     before = [(await db.execute(select(func.count()).select_from(t))).scalar_one() for t in tables]
     data = {**primary_payload(), 'target_activity_content': activity,
-            'goal_proposal': {'goal_kind':'secondary','selection_quote':body,'activity_quote':activity}}
+            'goal_proposal': {'selection_status': 'not_expressed', 'selection_role': 'core', 'goal_kind':'secondary','selection_quote':body,'activity_quote':activity}}
     assert await create_goal_from_agent_dialogue(db, session_id='new-chat-a', user_id='a', data=data,
         completed_steps=['activity_selected','values_or_intention_explored'], assistant_message_id=aid) is None
     await db.commit()
@@ -258,11 +258,13 @@ BAD_REPLIES = [
 ]
 
 
+QUALITY_REPLIES = {BAD_REPLIES[i][1] for i in (0,1,7,8,9,11,12,13,15)}
+
 @pytest.mark.parametrize('module,reply', BAD_REPLIES)
-def test_known_violations_are_blocked_not_merely_reviewed(module, reply):
+def test_quality_is_diagnostic_but_safety_and_uncommitted_claims_are_blocked(module, reply):
     result = validate_answer(reply=reply, module=module, evidence_ids=[], workflow={
         'available':True, 'current_module':module, 'goal_selected':False, 'plan_confirmed':False})
-    assert result['status'] == 'blocked', result
+    assert result['status'] == ('review' if reply in QUALITY_REPLIES else 'blocked'), result
     assert result['llm_calls'] == 0 and not result['semantic_verified']
 
 
@@ -296,17 +298,17 @@ def test_daily_instructions_are_current_even_with_admin_override(builder):
     raw = builder('module_3', module_prompt='管理员自定义记录话术')
     prompt = raw if isinstance(raw,str) else '\n'.join(s.text for s in raw)
     assert '管理员自定义记录话术' in prompt
-    for text in ('左侧','记录今日','查看历史','想做的事情完成程度','整体心情','4项选填'):
-        assert text in prompt
+    # An admin module prompt is authoritative; no second server checklist.
+    assert prompt.count('管理员自定义记录话术') == 1
+    assert 'MODULE_CHECKLIST' not in prompt
     for text in ('右上角的笔记本','我的每日记录','整体／平均心情','没有预定计划可选'):
         assert text not in prompt
 
 
 def test_m4_bound_secondary_and_unbound_activity_are_distinct():
     prompt = build_system_prompt('module_4')
-    assert '独立 secondary 目标被选中后同样享有完整复盘' in prompt
-    assert '不对次要目标进行独立的数据收集' not in prompt
-    assert '对次要目标进行独立、完整的复盘' not in prompt
+    assert '不对次要目标进行独立的数据收集' in prompt
+    assert '其执行情况决定本次复盘的情境及主要流程' in prompt
 
 
 @pytest.mark.parametrize('module', ['module_1','module_2','module_3','module_4'])
@@ -326,7 +328,9 @@ def test_flat_and_segmented_prompts_have_identical_content(module):
 ])
 def test_completion_claim_requires_current_self_report(user, reply, blocked):
     result = validate_answer(reply=reply,module='module_4',evidence_ids=[],current_user=user)
-    assert (result['status'] == 'blocked') is blocked
+    assert bool(result['findings']) is blocked
+    if result['findings'] and all(f['code'] == 'completion_claim' for f in result['findings']):
+        assert result['status'] == 'review'
 
 
 def test_conversational_card_confirmation_is_not_a_panel_instruction():
@@ -362,6 +366,13 @@ async def test_bad_drafts_never_leak_or_drive_workflow(context, provider, monkey
             context=ctx, stream_mode=['custom','values']):
         if kind == 'custom': events.append(value)
         else: final = value
+    if reply in QUALITY_REPLIES:
+        assert final['final_response'] == reply and not final.get('reply_held')
+        assert final['telemetry']['answer_validator']['status'] == 'review'
+        assert 'replacement_reply' not in final['telemetry']['answer_validator']
+        if stream:
+            assert ''.join(e['text'] for e in events if e['type'] == 'delta') == reply
+        return
     assert not final.get('error') and final['reply_held']
     assert final['next_module'] == module and final['routing_pending'] is False
     assert final['reasoning_content'] == '' and final['final_response'] != reply
@@ -380,7 +391,7 @@ async def test_bad_drafts_never_leak_or_drive_workflow(context, provider, monkey
 
 
 @pytest.mark.parametrize('stream', [False,True])
-def test_recovery_is_a_completed_http_turn_not_a_502(client, provider, monkeypatch, stream):
+def test_ordinary_quality_diagnostic_preserves_http_reply(client, provider, monkeypatch, stream):
     from app.providers.base import Completion, StreamDelta
     from test_chat import sse_events
     bad = '从明天开始你应该每天跑步。'
@@ -390,18 +401,18 @@ def test_recovery_is_a_completed_http_turn_not_a_502(client, provider, monkeypat
     monkeypatch.setattr(provider,'stream',generated_stream)
     response = client.post('/api/chat/stream' if stream else '/api/chat',
                            json={'message':'我最近感觉有点烦', 'module':'module_1'})
-    assert response.status_code == 200 and bad not in response.text
+    assert response.status_code == 200 and bad in response.text
     if stream:
         events = sse_events(response.text)
         done = next(data for name,data in events if name == 'done')
         assert not any(name == 'error' for name,_ in events)
     else:
         done = response.json()
-        assert '暂时没有展示' in done['reply']
+        assert done['reply'] == bad
     assert done['next_module'] == 'module_1' and done['routing_pending'] is False
 
 
-async def test_correction_audit_persists_without_the_rejected_draft(client, auth_headers, provider, monkeypatch, db_sessionmaker):
+async def test_quality_audit_preserves_original_reply(client, auth_headers, provider, monkeypatch, db_sessionmaker):
     from app.models import AIExecutionEvent
     from app.providers.base import Completion
     bad = '从明天开始你应该每天跑步。'
@@ -415,12 +426,13 @@ async def test_correction_audit_persists_without_the_rejected_draft(client, auth
             AIExecutionEvent.session_id == response.json()['session_id'],
             AIExecutionEvent.stage == 'main_generation'))).scalar_one()
         validator = event.event_metadata['answer_validator']
-        assert validator['status'] == 'corrected' and validator['progression_held']
-        assert validator['findings'] == [{'code':'premature_plan','severity':'block'}]
+        assert validator['status'] == 'review' and not validator.get('progression_held')
+        assert validator['findings'] == [{'code':'premature_plan','severity':'review'}]
         messages = (await db.execute(select(ConversationMessage).where(
             ConversationMessage.conversation_id == event.conversation_id))).scalars().all()
-        assert all(bad not in m.content and not m.reasoning_content for m in messages)
-        assert bad not in str(event.event_metadata) and 'rejected-reasoning' not in str(event.event_metadata)
+        assert any(m.role == 'assistant' and m.content == bad for m in messages)
+        assert validator['display_source'] == 'original_model_reply'
+        assert 'replacement_reply' not in validator
 
 
 async def test_held_turn_cannot_start_jobs_with_a_subject(context, monkeypatch):

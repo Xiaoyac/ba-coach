@@ -33,7 +33,7 @@ exports.run=async function(browser,baseUrl='http://127.0.0.1:3000') {
           if(p.endsWith('/events'))return new Response(new ReadableStream({start(){},cancel(){}}),{headers:{'Content-Type':'text/event-stream'}});
           if(p==='/api/program/goals/overview')return json({enabled:true,goals:[]});
           if(p==='/api/push/status')return json({available:mode!=='disabled',preference_blocked:mode==='preference',public_key:'B'+ 'A'.repeat(86),devices:f.devices,
-            upcoming:[{goal_id:'fake',start_at:'2026-09-18T08:00:00Z',due_at:'2026-09-18T08:30:00Z'}]});
+            upcoming:[{goal_id:'fake',start_at:'2026-09-18T08:00:00Z',due_at:'2026-09-18T09:15:00Z'}]});
           if(p==='/api/push/checks'&&options.method==='POST') {
             if(f.checks.length)return json({detail:'请隔5分钟再测试，每24小时最多5次。'},429);
             const body=JSON.parse(options.body);f.lastDelay=body.delay_seconds;

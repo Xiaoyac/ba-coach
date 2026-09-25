@@ -17,19 +17,27 @@ PLAN = {
     "frequency_rule": {"schema_version": 1, "text": "每天"},
     "potential_barriers": ["下雨"],
     "barrier_coping_plan": [{"barrier": "下雨", "plan": "在家走动"}],
+    "difficulty_rating": 4,
+    "difficulty_evidence": {"rating": {"value": 4, "message_id": 2, "quote": "4分"}},
 }
 
 
 def test_m2_required_fields_are_checked():
-    result = evaluate_readiness("module_2", {**PLAN, "location": ""})
+    result = evaluate_readiness("module_2", {**PLAN, "difficulty_rating": 8})
     assert not result["ready"]
-    assert (MISSING_REQUIRED_FIELD, "location") in {
+    assert (MISSING_REQUIRED_FIELD, "difficulty_rating") in {
         (item.get("code"), item.get("field")) for item in result["reasons"]
     }
 
 
+def test_m2_location_duration_and_frequency_are_optional():
+    assert evaluate_readiness("module_2", {**PLAN, "location": None, "duration_minutes": None,
+                                          "frequency_rule": None})["ready"]
+
+
 def test_m3_requires_non_empty_negotiated_plan():
     result = evaluate_readiness("module_3", {
+        "recording_status": "accepted",
         "record_requirement": "记录心情",
         "negotiated_record_plan": {"text": "  "},
         "feedback_mechanism": "聊天反馈",
@@ -37,6 +45,7 @@ def test_m3_requires_non_empty_negotiated_plan():
     assert not result["ready"]
     assert any(item["code"] == NEGOTIATED_RECORD_PLAN_MISSING for item in result["reasons"])
     schema_only = evaluate_readiness("module_3", {
+        "recording_status": "accepted",
         "record_requirement": "记录心情",
         "negotiated_record_plan": {"schema_version": 1, "text": ""},
         "feedback_mechanism": "聊天反馈",

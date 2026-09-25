@@ -76,7 +76,7 @@ def test_create_conversation_persists_opening_and_seeds_agent_history(
     assert response.status_code == 200, response.text
     assert [message.content for message in provider.seen[-1]] == [
         OPENING_MESSAGE_TEXT,
-        "我叫小雨",
+        "<user_message>我叫小雨</user_message>",
     ]
 
     refreshed = client.get(
@@ -453,7 +453,7 @@ def test_latency_telemetry_and_background_route_are_durable(
         finish_turn,
         start_turn,
     )
-    from app.models import Conversation, ConversationMessage, ConversationRuntimeState
+    from app.models import AIExecutionEvent, Conversation, ConversationMessage, ConversationRuntimeState
 
     async def scenario() -> None:
         async with db_sessionmaker() as db:
@@ -473,6 +473,8 @@ def test_latency_telemetry_and_background_route_are_durable(
                     "risk_gate_duration_ms": 12,
                     "time_to_first_reasoning_token_ms": 34,
                     "time_to_first_content_token_ms": 56,
+                    "time_to_first_visible_content_ms": 123,
+                    "first_visible_measurement": "server_sse_release",
                     "main_generation_duration_ms": 789,
                     "provider_request_id": "req-1",
                     "finish_reason": "stop",
@@ -527,6 +529,12 @@ def test_latency_telemetry_and_background_route_are_durable(
             assert message.reasoning_tokens == 7
             assert message.provider_request_id == "req-1"
             assert message.routing_reasoning_content == "route thought"
+            event = (await db.execute(select(AIExecutionEvent).where(
+                AIExecutionEvent.assistant_message_id == assistant_id,
+                AIExecutionEvent.stage == "main_generation",
+            ))).scalar_one()
+            assert event.event_metadata["time_to_first_visible_content_ms"] == 123
+            assert event.event_metadata["first_visible_measurement"] == "server_sse_release"
             assert conversation.revision == before_revision + 1
             assert runtime is not None and runtime.module == "module_2"
 
@@ -625,7 +633,7 @@ def test_a_resumed_session_still_carries_its_history(
         "/api/chat", json={"message": "二", "session_id": session_id}, headers=headers
     )
     # The model saw the rehydrated history, not a bare first turn.
-    assert [m.content for m in provider.seen[-1]] == ["一", "saw 1 messages", "二"]
+    assert [m.content for m in provider.seen[-1]] == ["一", "saw 1 messages", "<user_message>二</user_message>"]
 
 
 def test_a_resumed_session_keeps_the_router_module(
@@ -651,8 +659,8 @@ def test_a_resumed_session_keeps_the_router_module(
     # intentionally null in the immediate response while the post-hoc router
     # is still pending; the durable conversation snapshot receives it later.
     assert second.json()["reply_module"] == "module_2"
-    assert second.json()["next_module"] is None
-    assert second.json()["routing_pending"] is True
+    assert second.json()["next_module"] == second.json()["reply_module"]
+    assert second.json()["routing_pending"] is False
 
 
 def test_another_accounts_session_id_is_never_adopted(

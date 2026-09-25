@@ -51,10 +51,12 @@ def test_untrusted_reference_cannot_award_user_evidence(reference):
     assert result['validation_issues']
 
 
-def test_education_still_requires_five_distinct_literal_spans():
+def test_one_explanation_can_supply_all_three_semantic_topics():
+    turns = _turns()
+    turns[4] = ('assistant', '情绪会影响行动，行动带来的环境反馈也会影响状态。活动减少时，愉悦和成就反馈可能减少，让困扰维持；重新行动可以获得新的反馈，为状态变化创造机会。')
     raw = indexed_raw()
-    raw['education_quotes'] = [{'turn': 4}] * 5
-    assert 'ba_understanding' in normalize(raw, _data(), _turns(), 's')['missing_fields']
+    raw['education_quotes'] = [{'turn': 4}] * 3
+    assert normalize(raw, _data(), turns, 's')['missing_fields'] == []
 
 
 def test_indexed_approved_summary_is_not_reset_by_later_education_or_restatement():
@@ -129,7 +131,7 @@ def test_missing_education_is_not_presented_as_missing_willingness():
     assert status['goal_consent_expressed']
     assert not status['goal_consent_recorded']
     assert status['education_missing_topics'] == [EDUCATION_TOPICS[1]]
-    assert '补充' in status['next_action'] and '不要重问目标意愿' in status['next_action']
+    assert 'next_action' not in status
     assert 'ba_understanding' in result['missing_fields']
     assert not result['milestones']['m1_milestone_3']
 
@@ -139,7 +141,7 @@ def test_later_repeated_education_does_not_expire_indexed_understanding():
     assert normalize(indexed_raw(), _data(), turns, 's')['missing_fields'] == []
     raw = indexed_raw()
     raw['education_quotes'][-1] = {'turn': 10, 'quote': _raw()['education_quotes'][-1]}
-    assert 'ba_understanding' in normalize(raw, _data(), turns, 's')['missing_fields']
+    assert 'ba_understanding' not in normalize(raw, _data(), turns, 's')['missing_fields']
 
 
 def test_later_incomplete_extraction_keeps_verified_education_and_consent():
@@ -164,42 +166,39 @@ def test_incomplete_extraction_does_not_reuse_education_after_user_correction():
     previous = normalize(indexed_raw(), _data(), _turns(), 's')
     raw = indexed_raw()
     raw['education_quotes'][3] = None
+    raw['core_questions_resolved'] = False
     candidate = normalize(raw, _data(), turns, 's')
     fixed = merge_verified_evidence(previous, candidate, turns, session_id='s')
     assert 'education_3' not in fixed['evidence']
     assert 'ba_understanding' in fixed['missing_fields']
 
 
-@pytest.mark.parametrize('duplicate_after_restore', [False, True])
-def test_evidence_merge_cannot_complete_duplicate_education_quotes(duplicate_after_restore):
-    previous = normalize(indexed_raw(), _data(), _turns(), 's')
-    turns = _turns() + [('assistant', '我们继续整理下一步。')]
+@pytest.mark.parametrize('missing_slot', [0, 1, 2])
+def test_evidence_merge_keeps_shared_explanation_for_multiple_topics(missing_slot):
+    original_turns = _turns()
+    original_turns[4] = ('assistant', '情绪和行动相互影响；减少活动会减少愉悦、成就等环境反馈，可能维持困扰；行动则能带来新反馈，为状态变化创造机会。')
     raw = indexed_raw()
-    if duplicate_after_restore:
-        raw['education_quotes'][0] = raw['education_quotes'][3]
-        raw['education_quotes'][3] = None
-        duplicated_slot, original_slot = 3, 0
-    else:
-        raw['education_quotes'][1] = raw['education_quotes'][0]
-        raw['consent_quote'] = None
-        duplicated_slot, original_slot = 1, 0
+    raw['education_quotes'] = [{'turn': 4}] * 3
+    previous = normalize(raw, _data(), original_turns, 's')
+    turns = original_turns + [('assistant', '我们继续整理下一步。')]
+    raw['education_quotes'][missing_slot] = None
+    raw['consent_quote'] = None
     candidate = normalize(raw, _data(), turns, 's')
     fixed = merge_verified_evidence(previous, candidate, turns, session_id='s')
     assert fixed is not candidate  # Exercise recomputation after an actual restore.
-    assert fixed['education_evidence_complete'] is False
-    assert fixed['understanding_verified'] is False
-    assert fixed['milestones']['m1_milestone_3'] is False
-    assert 'goal_setting_consent' not in fixed['completed_steps']
-    assert EDUCATION_TOPICS[duplicated_slot] in fixed['education_missing_topics']
-    assert {'field': f'education_{duplicated_slot}', 'reason': 'duplicate_evidence',
-            'same_as': f'education_{original_slot}'} in fixed['validation_issues']
+    assert fixed['education_evidence_complete'] is True
+    assert fixed['understanding_verified'] is True
+    assert fixed['milestones']['m1_milestone_3'] is True
+    assert 'goal_setting_consent' in fixed['completed_steps']
+    assert fixed['education_missing_topics'] == []
+    assert not any(issue['reason'] == 'duplicate_evidence' for issue in fixed['validation_issues'])
 
 
 @pytest.mark.parametrize('unverified_reason', ['missing_education', 'unresolved_questions', 'wrong_order'])
 def test_evidence_merge_does_not_upgrade_unverified_prior_user_references(unverified_reason):
     old_raw = indexed_raw()
     if unverified_reason == 'missing_education':
-        old_raw['education_quotes'][3] = None
+        old_raw['education_quotes'][1] = None
     elif unverified_reason == 'unresolved_questions':
         old_raw['core_questions_resolved'] = False
     else:
@@ -237,7 +236,7 @@ def test_evidence_merge_does_not_upgrade_consent_that_preceded_understanding():
     assert 'goal_setting_consent' in fixed['missing_fields']
 
 
-def test_evidence_merge_does_not_restore_a_previously_duplicate_education_slot():
+def test_optional_education_can_share_a_source_and_never_blocks_completion():
     old_raw = indexed_raw()
     old_raw['education_quotes'][3] = old_raw['education_quotes'][0]
     previous = normalize(old_raw, _data(), _turns(), 's')
@@ -245,8 +244,8 @@ def test_evidence_merge_does_not_restore_a_previously_duplicate_education_slot()
     raw['education_quotes'][3] = None
     candidate = normalize(raw, _data(), _turns(), 's')
     fixed = merge_verified_evidence(previous, candidate, _turns(), session_id='s')
-    assert 'education_3' not in fixed['evidence']
-    assert 'ba_understanding' in fixed['missing_fields']
+    assert 'education_3' in fixed['evidence']
+    assert 'ba_understanding' not in fixed['missing_fields']
 
 
 async def test_persisted_m1_progress_uses_reconciled_contract_immediately(goal_api):
@@ -340,10 +339,11 @@ async def test_router_recovers_truncated_thinking_once_and_keeps_guards(provider
     result = await decide_target_module_with_reasoning(provider, current_module='module_1',
         user_input='我愿意开始目标设定', ai_output='synthetic reply', has_pa_card=False,
         recovery_timeout_seconds=.01)
-    assert result.target_module == ('module_2' if case == 'success' else 'module_1')
+    recovered_case = case in {'success', 'bare', 'missing_steps'}
+    assert result.target_module == ('module_2' if recovered_case else 'module_1')
     assert result.reasoning_content == 'original native trace'
     assert result.json_recovery['status'] == {'success':'recovered', 'invalid':'failed',
-        'bare':'failed', 'missing_steps':'failed',
+        'bare':'recovered', 'missing_steps':'recovered',
         'truncated':'failed', 'timeout':'timeout', 'error':'provider_error'}[case]
     provider.route_detailed.assert_awaited_once()
     assert provider.route_detailed.call_args.kwargs['include_reasoning'] is False

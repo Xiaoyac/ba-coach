@@ -17,7 +17,7 @@ from app.pa_push import tick, candidates, validate_subscription
 from app.routes import push as route
 from app.identity import require_caller
 
-AT = datetime(2026, 9, 18, 8, 30, tzinfo=timezone.utc)
+AT = datetime(2026, 9, 18, 9, 15, tzinfo=timezone.utc)
 ANCHOR = AT.replace(hour=1, minute=0)
 
 
@@ -97,6 +97,11 @@ async def setup(tmp_path):
 async def test_buffer_single_send_and_restart(setup):
     calls = []
     sender = lambda *args: calls.append(args) or 201
+    async with setup() as db:
+        item, = await candidates(db, 'u', AT)
+        assert item['due_at'] == item['start_at'] + timedelta(minutes=15, hours=1)
+    # The previous end + 15 minutes boundary must no longer send.
+    assert (await tick(setup, at=AT-timedelta(minutes=45), sender=sender))['accepted'] == 0
     assert (await tick(setup, at=AT-timedelta(seconds=1), sender=sender))['accepted'] == 0
     assert (await tick(setup, at=AT, sender=sender))['accepted'] == 1
     assert (await tick(setup, at=AT+timedelta(minutes=1), sender=sender))['duplicate'] == 1
@@ -107,7 +112,7 @@ async def test_buffer_single_send_and_restart(setup):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('change', ['missing_duration','no_clock','paused','plan_replaced','cycle_cancelled','deleted_source','logout','expired','late_subscription'])
+@pytest.mark.parametrize('change', ['missing_duration','no_clock','paused','plan_replaced','cycle_cancelled','deleted_source','logout','expired','late_subscription','no_subscription','disabled_subscription'])
 async def test_cancellation_and_no_guesses(setup, change):
     async with setup() as db:
         plans, goals, cycles = [schema.tables[n] for n in ('module_two_record','pa_goals','pa_cycles')]
@@ -120,6 +125,8 @@ async def test_cancellation_and_no_guesses(setup, change):
         if change=='logout': await db.execute(delete(AuthSession))
         if change=='expired': await db.execute(update(AuthSession).values(expires_at=AT-timedelta(seconds=1)))
         if change=='late_subscription': await db.execute(update(devices).values(enabled_at=AT.replace(tzinfo=None)))
+        if change=='no_subscription': await db.execute(delete(devices))
+        if change=='disabled_subscription': await db.execute(update(devices).values(enabled=False))
         await db.commit()
     calls=[]
     assert (await tick(setup, at=AT, sender=lambda *a:calls.append(a) or 201))['accepted']==0
@@ -169,6 +176,7 @@ async def test_api_authentication_ownership_and_disabled_rollout(setup,monkeypat
         monkeypatch.setattr(route,'now',lambda:AT.replace(tzinfo=None))
         result=await client.get('/api/push/status')
         assert result.status_code==200 and 'endpoint' not in result.text and 'auth' not in result.text
+        assert result.json()['buffer_minutes']==60
         caller.subject_id='other'
         assert not (await client.get('/api/push/status')).json()['devices']
         assert (await client.delete('/api/push/subscriptions/device')).status_code==204

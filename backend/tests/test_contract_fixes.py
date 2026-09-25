@@ -11,11 +11,16 @@ from dataclasses import replace
 
 PLAN = dict(activity_content="读书", schedule_text="晚饭后", location="家里", duration_minutes=10,
     frequency_rule={"schema_version":1,"text":"每天"}, potential_barriers=["忘记"],
-    barrier_coping_plan=[{"barrier":"忘记","plan":"书放桌上"}])
+    barrier_coping_plan=[{"barrier":"忘记","plan":"书放桌上"}], difficulty_rating=4,
+    difficulty_evidence={"rating": {"value": 4, "message_id": 9, "quote": "4分"}})
 
-@pytest.mark.parametrize("key", list(PLAN))
+@pytest.mark.parametrize("key", ["activity_content", "schedule_text", "potential_barriers", "barrier_coping_plan", "difficulty_rating", "difficulty_evidence"])
 def test_plan_required_field_rejected(key):
     assert key in missing_plan_fields({**PLAN,key:None})
+
+@pytest.mark.parametrize("key", ["location", "duration_minutes", "frequency_rule"])
+def test_plan_optional_fields_do_not_block(key):
+    assert missing_plan_fields({**PLAN, key: None}) == []
 
 def test_complete_plan_and_unmatched_barrier():
     assert missing_plan_fields(PLAN)==[]

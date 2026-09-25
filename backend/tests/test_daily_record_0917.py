@@ -1,6 +1,4 @@
 """Daily-record v2: explicit ratings, optional scores and historical fidelity."""
-from copy import deepcopy
-
 import pytest
 
 from app.prompts import build_system_segments
@@ -63,24 +61,41 @@ def test_summary_has_no_implicit_scores(field):
         AssessmentSubmission.model_validate(body)
 
 
-def test_optional_scores_are_explicit_and_empty_activity_not_accepted():
+def test_optional_scores_are_explicit():
     body = submission()
     body["activities"][0].update(achievement=0, connection=5, enjoyment=None, importance=3)
     parsed = AssessmentSubmission.model_validate(body)
     assert parsed.activities[0].achievement == 0
     assert parsed.activities[0].enjoyment is None
-    invalid = deepcopy(body)
-    invalid["activities"] = []
-    with pytest.raises(ValueError):
-        AssessmentSubmission.model_validate(invalid)
 
 
-def test_m3_instruction_survives_admin_override_without_affecting_other_modules():
+def test_summary_only_is_saved_as_completed_and_preserved_in_history(client, register):
+    headers = register("summaryonly")
+    body = submission()
+    body["activities"] = []
+    response = client.post("/api/assessment", headers=headers, json=body)
+    assert response.status_code == 201, response.text
+    record = response.json()
+    assert record["status"] == "completed"
+    assert record["activities"] == []
+    assert record["completion_rate"] == 0
+    assert record["activity_level"] == 5
+    assert record["overall_mood"] == 0
+    assert client.get("/api/assessment/history", headers=headers).json()["items"] == [record]
+
+
+@pytest.mark.parametrize("activities", [[], [{"time_slot": "19:00–20:00", "activity": "散步", "emotion": 0}]])
+def test_summary_still_required_with_or_without_activities(client, register, activities):
+    body = submission()
+    body["activities"] = activities
+    del body["summary"]["overall_mood"]
+    response = client.post("/api/assessment", headers=register("nosummarymood"), json=body)
+    assert response.status_code == 422, response.text
+
+
+def test_admin_prompt_is_not_augmented_with_a_second_daily_record_lesson():
     for module in ("module_1", "module_2", "module_3", "module_4"):
         prompt = "\n".join(s.text for s in build_system_segments(module, module_prompt="自定义提示词"))
         assert "自定义提示词" in prompt
-        assert ("# 每日记录的网页操作引导" in prompt) == (module == "module_3")
-        if module == "module_3":
-            for text in ("记录今日", "打开每日记录", "保存今日记录", "三项均必填", "4项选填", "不把日记表单当作"):
-                assert text in prompt
-            assert "不适用" not in prompt
+        assert "# 每日记录的网页操作引导" not in prompt
+        assert "current_module: " + module in prompt

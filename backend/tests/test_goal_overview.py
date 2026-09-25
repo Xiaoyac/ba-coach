@@ -166,7 +166,7 @@ async def test_agent_creates_goal_only_when_router_and_extractor_agree(goal_api)
     assert await create_goal_from_agent_dialogue(db, session_id="new-chat-a", user_id="a",
         data={"target_activity_content": "晚饭后散步"}, completed_steps=[], assistant_message_id=101,
         diagnostics=diagnostics) is None
-    assert diagnostics["goal_creation"]["reason_code"] == "proposal_evidence_missing"
+    assert diagnostics["goal_creation"]["reason_code"] == "selection_extraction_missing"
     diagnostics = {}
     assert await create_goal_from_agent_dialogue(db, session_id="new-chat-a", user_id="a",
         data={}, completed_steps=["activity_selected"], assistant_message_id=101,
@@ -175,7 +175,7 @@ async def test_agent_creates_goal_only_when_router_and_extractor_agree(goal_api)
 
     created = await create_goal_from_agent_dialogue(db, session_id="new-chat-a", user_id="a",
         data={"target_activity_content": "晚饭后散步", "schedule_text": "每天晚饭后",
-              "goal_proposal": {"goal_kind": "secondary", "selection_quote": "我选晚饭后散步", "activity_quote": "散步"}},
+              "goal_proposal": {"selection_status": "selected", "selection_role": "core", "goal_kind": "secondary", "selection_quote": "我选晚饭后散步", "activity_quote": "散步"}},
         completed_steps=["activity_selected", "values_or_intention_explored"], assistant_message_id=101)
     assert created is not None
     await db.commit()
@@ -214,7 +214,7 @@ async def test_agent_goal_creation_uses_verified_proposal_when_router_omits_step
     ])
     created = await create_goal_from_agent_dialogue(db, session_id="new-chat-a", user_id="a",
         data={"target_activity_content": "晚饭后散步十分钟", "schedule_text": "每天晚饭后",
-              "goal_proposal": {"goal_kind": "secondary",
+              "goal_proposal": {"selection_status": "selected", "selection_role": "core", "goal_kind": "secondary",
                   "selection_quote": "我选择晚饭后散步十分钟作为一个独立的小目标。",
                   "activity_quote": "散步十分钟"}},
         completed_steps=[], assistant_message_id=111)

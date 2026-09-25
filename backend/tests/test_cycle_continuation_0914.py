@@ -91,8 +91,7 @@ async def test_continue_copies_confirmed_plan_contract_and_progress(db):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kwargs", [
     {"user_id": "b"}, {"cycle_status": "reviewing"}, {"review_decision": 2},
-    {"confirmed_plan": False}, {"confirmed_contract": False}, {"plan_goal": "other"},
-    {"contract_goal": "other"},
+    {"confirmed_plan": False}, {"plan_goal": "other"},
 ])
 async def test_continue_rejects_unqualified_source(db, kwargs):
     goal, cycle, _, _ = await seed_cycle(db, **kwargs)

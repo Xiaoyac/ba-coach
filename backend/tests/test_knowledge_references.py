@@ -26,7 +26,7 @@ async def test_capture_matches_actual_prompt(context, provider, mode):
     context = dataclasses.replace(context, knowledge_base=kb)
     context.settings.knowledge_intent_gate_enabled = mode == "gated"
     context.settings.knowledge_mediator_enabled = mode != "disabled"
-    provider.route_result = json.dumps({"selected_ids": ["one"] if mode == "approved" else [], "guidance": "根据证据回应。"})
+    provider.route_result = json.dumps({"decision": "use" if mode == "approved" else "not_needed", "selections": [{"id": "one", "quote": "行动可能帮助情绪", "application": "根据证据回应。"}] if mode == "approved" else [], "note": "" if mode == "approved" else "根据证据回应。"})
     if mode == "timeout":
         async def timeout(**kwargs):
             raise TimeoutError
@@ -40,6 +40,8 @@ async def test_capture_matches_actual_prompt(context, provider, mode):
     assert snapshot["available"] is True
     assert snapshot["mediator_guidance"] == ("根据证据回应。" if mode in ("approved", "rejected") else None)
     assert snapshot["mediator_cautions"] == []
+    assert snapshot["mediator_decision"] == ("use" if mode == "approved" else "not_needed" if mode == "rejected" else None)
+    assert snapshot["mediator_selections"] == ([{"id":"one", "quote":"行动可能帮助情绪", "application":"根据证据回应。"}] if mode == "approved" else [])
     if mode in ("empty", "gated", "timeout", "disabled"):
         assert snapshot["mediator_reasoning_content"] is None
     assert len(snapshot["recalled"]) == (0 if mode in ("empty", "gated") else 2)
@@ -80,7 +82,7 @@ def test_durable_snapshot_owned_lazy_and_deleted(client, auth_headers, register,
     # Native mediator reasoning is diagnostic-only now; explicitly opt in so
     # this snapshot test continues to verify the lazy reasoning side channel.
     get_settings().knowledge_mediator_include_reasoning = True
-    provider.route_result = '{"selected_ids":["one"],"guidance":"根据证据回应。"}'
+    provider.route_result = '{"decision":"use","selections":[{"id":"one","quote":"行动可能帮助情绪","application":"根据证据回应。"}],"note":""}'
     original = provider.route_detailed
     async def mediator_with_thought(**kwargs):
         if kwargs.get("include_reasoning"):
@@ -137,6 +139,7 @@ def test_guidance_is_distinct_from_reasoning_and_old_snapshots_are_not_backfille
     old = KnowledgeReferences.model_validate({"version": 2, "available": True,
         "mediator_reasoning_content": "old native reasoning", "mediator_status": "completed"})
     assert old.mediator_guidance is None and old.mediator_cautions == []
+    assert old.mediator_decision is None and old.mediator_selections == [] and old.mediator_note is None
     for status, withheld, expected in [("completed", False, "仅解释一般原理"),
                                        ("fallback", False, None), ("completed", True, None)]:
         snapshot = reference_snapshot(module="module_2", recalled=KB().chunks, provided=[], retrieval={},

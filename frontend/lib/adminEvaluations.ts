@@ -8,12 +8,42 @@ export interface TestCaseInput {
 }
 export interface TestCase extends TestCaseInput { id: string; revision: number; updated_at: string }
 export interface TestReview { id: string; reviewer_id: number; verdict: string; notes: string; created_at: string }
+export interface ExecutionTimelineEntry {
+  stage: string; start_ms?: number | null; duration_ms?: number | null; status?: string;
+  after_display?: boolean; retry_count?: number; reason?: string;
+}
+export interface DiagnosticSnapshot {
+  status?: string; error?: unknown; error_code?: string; [key: string]: unknown;
+}
+export interface TestTelemetry {
+  answer_validator?: {
+    status: string; version?: string; duration_ms?: number; llm_calls?: number;
+    findings?: {code: string; severity: string}[];
+    progression_held?: boolean; original_reply?: string; replacement_reply?: string;
+    display_source?: string; replacement_source?: string; reason?: string;
+  };
+  retrieval?: { gate?: { reason: string; retrieve: boolean }; returned?: number; total_duration_ms?: number };
+  prompt_version?: string;
+  execution_timeline?: ExecutionTimelineEntry[];
+  prompt_sources?: {source: string; version?: string | null}[];
+  time_to_first_visible_content_ms?: number | null;
+  first_visible_measurement?: string;
+  main_input?: { system: string; messages: { role: string; content: string }[] };
+  pre_reply_extraction?: DiagnosticSnapshot;
+  reply_trace?: { raw_model_reply: string; normalized_reply: string; visible_reply: string; display_source: string };
+  router_pre_reply?: {
+    input_sources?: string[]; selected_module?: string | null; database_module?: string | null;
+    status?: string; retry_count?: number; reason?: string;
+  };
+  extraction?: DiagnosticSnapshot;
+  database_write?: DiagnosticSnapshot;
+}
 export interface TestRun {
   id: string; case_id: string; parent_run_id: string | null; status: string; latest_verdict?: string;
   case_snapshot: TestCase; provider: string; model: string | null; input_text: string; reply: string;
   transcript: { role: string; content: string }[];
   metrics: { duration_ms?: number; usage?: Record<string, number>; risk_flagged?: boolean;
-    telemetry?: { answer_validator?: {status: string; version?: string; duration_ms?: number; findings?: {code: string; severity: string}[]}; retrieval?: { gate?: { reason: string; retrieve: boolean }; returned?: number; total_duration_ms?: number }; prompt_version?: string };
+    telemetry?: TestTelemetry;
     retrieved?: { id: string; source: string; score: number }[] };
   error_code: string | null; created_at: string; finished_at: string | null; reviews?: TestReview[];
 }

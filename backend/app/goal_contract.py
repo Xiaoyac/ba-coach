@@ -6,13 +6,21 @@ from .database_v2_schema import metadata as schema
 from .models import Conversation, ConversationMessage
 from .v2_repository import new_id, now
 
-GOAL_SPEC = Spec("goal_proposal", "json", """仅在用户已明确选择要尝试的活动时提取对象，否则 null。
-对象字段：goal_kind(primary主要目标/secondary次要目标)，long_term_direction(用户希望长期改善的方向，次要可null)，
-selection_quote(本次 M2 对话中用户明确选择活动的逐字原话，可来自较早一轮；不能使用助手单方建议)，activity_quote(具体活动的原文短语，必须出现在用户原话或紧邻该用户回复前的助手建议中)。target_activity_content可以是对用户原话的保守规范化或补充细节，但也必须能在用户原话或紧邻助手建议中逐字找到，不能凭空改写，
-direction_quote(希望改变的方向的用户逐字原话，主要目标必需)。
-主要目标是用户长期方向下选出的活动；次要目标可独立存在，不要求有主要目标，不等于一次性。
-不要把尚在考虑的想法、助手单方建议、已经做过的临时活动当成新目标。不要要求用户说出主要/次要术语。
-本轮纠正优先；含糊意愿或尚未选择时一律null。""")
+GOAL_SPEC = Spec("goal_proposal", "json", """从完整当前对话语义识别用户仍然有效的活动选择，不能从助手建议、过去做过或考虑/也许推定选择。
+对象字段：selection_status(selected真实明确选择/ambiguous含糊/not_expressed尚未表达/retracted已撤回)，
+selection_message_id(输入提供的真实用户消息ID)，selection_quote(该消息中表达选择的连续原文)，
+activity_quote(所选活动的连续原文，可来自该用户消息或紧邻前一条助手提议)，selection_role(core正式核心草稿/secondary额外次要活动/trial尚无生效核心目标时的临时体验)，
+goal_kind(primary主要目标/secondary次要目标)，long_term_direction(明确表达的长期方向，可null)，direction_quote(方向的用户原话或null)。
+selected由上下文判断，不要求用户说固定句式；回答某个活动名、自然接受单一提议也可能构成选择；用户当前犹豫、否定或撤回时不得沿用旧selected。
+已有有效选择在后续讨论细节时继续引用原消息，不因新一轮没有重复活动名而丢失。尚未选定也返回状态，不能要求用户为抽取失败重复表达。
+目标卡不完整时仍保存真实选择和draft；长期方向/core_values不是所有用户的必填条件。不能根据缺少方向把主要目标自动改成次要目标。
+输入未提供消息ID时可省略selection_message_id，但selection_quote必须能唯一定位用户消息；不能自行编号或伪造ID。""")
+M2_CONTEXT_SPEC = Spec("m2_activity_context", "json", """M2当前意愿及次要/临时体验的有源记录快照，未涉及则null。不要把次要或临时体验直接创建为核心目标。
+对象字段：intention(可null，{value:no_intention/intention/action,message_id:真实用户消息ID,quote:当前意愿原话})；
+trial(可null，{state:none/trial_active/trial_completed/trial_continue/trial_upgrade_to_core/trial_retained_secondary,activity_content:活动原文,source_role:trial/secondary,message_id:真实用户消息ID,quote:原话})；
+secondary_activities(数组，每项{activity_content:用户主动额外提出的PA活动原文,message_id:真实用户消息ID,quote:用户原话,time/location/frequency/companion/duration:用户主动给出的信息或null})。
+按批准M2 Prompt判断：生效核心目标之外新增活动是secondary，不主动推动转正。没有生效核心目标时，用户主动试水记trial_active；用户实际完成才trial_completed；用户明确选择继续一次才trial_continue；明确同意转正才trial_upgrade_to_core，之后仍须完成完整核心计划与确认；拒绝转正则trial_retained_secondary。历史做过/助手提议/犹豫不能算用户已选择。无法判断就不填写状态，不按聊天轮数伪造独立体验次数。
+未提供的次要信息不追问不补全；不要自动修改活动时长频次。每项必须能对应真实用户来源，只记录已发生、仍有效的状态。""")
 PLAN_SPEC = Spec("plan_context", "json", """对象：schedule_kind(recurring周期性/one_off一次性/unspecified未知)，
 schedule_quote(频率的用户逐字原话)，review_cadence(复盘节奏的用户原话或null)，difficulty(活动难度的用户原话或null)，
 resources(用户明确提到的可用资源原话数组或null)。执行频率、复盘节奏、目标持续时长独立，不能把每周五天解释成每五天复盘。""")
@@ -62,298 +70,219 @@ async def evidence_messages(db, conversation_id, user_id):
         .order_by(ConversationMessage.position))).scalars().all()
 
 
-def _current_activity_choice(body, phrase, previous, selection):
-    """Conservative choice evidence, not general intent/semantic classification.
-
-    Inspect the whole turn, not just an extractor-selected substring. Scope a
-    negative to its clause so rejecting running does not reject choosing swimming.
-    Ambiguous cases stay in dialogue; no goal or plan is written speculatively.
-    """
-    if re.match(r"不|没|别", phrase):
-        return False
-    # Quoting an activity name (我选“游泳”) is fine; quoting a full statement
-    # (朋友说“我选游泳”) is not the user's own decision.
-    scoped = re.sub(r'[“‘"]([^”’"]*)[”’"]',
-        lambda m: "[引用]" if re.search(r"我.*(?:想|选|决定|愿意)|你可以", m.group(1)) else m.group(), body)
-    clauses = [s.strip() for s in re.split(r"[，,。；;！!\n]|(?:但是|不过|但)", scoped) if s.strip()]
-    uncertainty = r"可能|也许|考虑|说不定|不确定|没想好|还没决定|尚未决定"
-    negation = r"不想|不打算|不要|先不|没选|不选|先别|选择不|选不|暂时不|不去|不做|不再|(?:决定|打算|想|愿意)不"
-    non_choice = r"如果|假如|假设|比如|例如|举例|只是.*(?:例子|引用|转述)|这句话|[？?]|(?:以前|之前|过去).*(?:说过|想|选)|(?:他说|她说|朋友说|助手说|你说|别人说)"
-    # A later retraction invalidates an earlier apparent selection, even when
-    # the extractor omits that retraction from selection_quote.
-    retraction = r"算了|(?:^|，)(?:我)?(?:还没决定|没想好)(?!.*(?:时间|几点|多久|地点|时长|频率))|(?:^|，)(?:我)?先(?:别|不要|不).{0,6}(?:创建|建|保存|设定|做)|只是.*(?:例子|引用|转述)"
-    # Natural emphasis words ("自己", "亲自", "本人") do not change the
-    # choice semantics. Keep them inside the explicit-choice grammar so a
-    # quoted, hypothetical, or subsequently retracted statement is still
-    # rejected by the guards above/below. In particular, both
-    # "我自己选择散步" and "这次自己选择散步" are first-person choices.
-    explicit = (
-        r"^(?:(?:好|好的|那|那么|就|这次|现在|我现在|我这次|还是)[\s、]*)*"
-        r"(?:我(?:还是)?(?:自己|亲自|本人)?"
-        r"(?:选择|选|决定|打算|愿意|想(?:要|试试|尝试|继续)?)|"
-        r"(?:自己|亲自|本人)?(?:选择|选|决定|打算|想试试|试试|那就|就))"
-    )
-    for index, clause in enumerate(clauses):
-        if phrase not in clause or re.search(uncertainty + "|" + negation + "|" + non_choice, clause):
-            continue
-        if index and re.search(r"(?:说|说过|举例)[：:]?$", clauses[index - 1]):
-            continue
-        tail = "，".join(clauses[index + 1:])
-        if re.search(retraction, tail):
-            continue
-        if re.search(r"(?:改成|换成|改为|换为).{0,20}", tail) and not re.search(
-                r"时间|地点|时长|频率|每天|每周|每月|早上|上午|中午|下午|晚上|分钟|小时|日期|星期", tail):
-            continue
-        if any(phrase in s and re.search(negation + "|" + uncertainty, s) for s in clauses[index + 1:]):
-            continue
-        # Do not let an intent toward a different activity justify this one.
-        choice = re.match(explicit, clause)
-        if choice and re.search(r"还是|或者|或|都行|均可", clause[choice.end():]):
-            continue
-        if (choice and phrase in clause[choice.end():] and phrase in selection
-                and (selection in clause or clause in selection)):
-            return True
-
-    # Natural Chinese often places the explicit choice marker in one clause
-    # and the activity after a comma ("我想约朋友，周日去玩鬼抓人").  Keep the
-    # same fail-closed exclusions above, but allow that single-user sentence to
-    # bind the later activity when the marker clearly precedes it.
-    marker = re.search(r"(?:我(?:想|打算|决定|选择|愿意)|安排我|那就|我觉得可以)", body)
-    if (marker and phrase in body and marker.start() < body.find(phrase)
-            and selection in body and not re.search(
-                uncertainty + "|" + negation + "|" + non_choice + r"|还是|或者|或|、|/", body)):
-        return True
-
-    if not previous or previous.role != "assistant":
-        return False
-    prompt = previous.content.strip()
-    # Only the immediate final question can ground an elliptical response.
-    question = re.split(r"[。！!？?\n]", prompt.rstrip("？? "))[-1]
-    asks_choice = bool(re.search(
-        r"(?:愿意|想|要|选择|选).*(?:活动|目标|试试|尝试|吗)|"
-        r"(?:选择|选).*(?:哪种|哪个|哪件|哪项|什么)|哪(?:种|个|件|项)",
-        question))
-    if not asks_choice or re.search(r"理解|明白|知道|举例|比如|例如", question):
-        return False
-    clean = re.sub(r"[\s，,。！!、‘’“”\"~～]", "", body)
-    if clean == phrase and phrase in body:
-        return True
-    # Agreement to multiple candidates or an educational example is not a
-    # selection of whichever candidate the extractor happened to choose.
-    # A short answer that exactly repeats one item from an explicitly listed
-    # choice set is an unambiguous selection (for example the user says
-    # “散步” after “散步、拉伸、收拾屋子，哪件最不费劲？”). The old
-    # alternatives guard rejected it merely because the assistant listed the
-    # other options in the same question.
-    if clean == phrase and phrase in question and re.search(r"哪(?:种|个|件|项)", question):
-        return True
-    if phrase not in question or re.search(r"还是|或者|或|、|/|举例|比如|例如", prompt):
-        return False
-    return bool(re.fullmatch(r"(?:好|好的|嗯|可以|行|愿意|我愿意|同意|我同意|就按这个试试|就按这个来|就这样|就选这个)+", clean))
-
-
-def _selection_turn(raw_selection, phrase, messages):
-    """Find the user's explicit activity choice in the persisted transcript.
-
-    Extraction runs over the whole M2 transcript.  A later plan/detail turn or
-    the short confirmation that follows a card therefore need not repeat the
-    original choice.  The previous implementation required ``selection_quote``
-    to occur in the last user message, so a perfectly valid choice became
-    uncreatable as soon as extraction completed one turn late.  Keep the
-    source bound to a user row and require that no later user turn explicitly
-    retracts or replaces that choice.
-    """
-    users = [m for m in messages if m.role == "user"]
-    candidates = [m for m in reversed(users)
-                  if isinstance(raw_selection, str) and raw_selection in (m.content or "")]
-    for candidate in candidates:
-        previous = next((m for m in reversed(messages) if m.position < candidate.position), None)
-        if not _current_activity_choice(candidate.content, phrase, previous, raw_selection):
-            continue
-        later = [m for m in users if m.position > candidate.position]
-        # A later correction/replacement is a material change.  It must be
-        # handled as a fresh proposal rather than reviving the old activity.
-        def replaces_choice(message):
-            body = message or ""
-            if re.search(r"(?:朋友说|他说|她说|助手说|你说|别人说)", body):
-                # A reported suggestion is not the user's replacement choice.
-                return False
-            # Keep an earlier activity choice valid while the user is merely
-            # filling in schedule details (for example, changing the time).
-            # A replacement of the activity itself is still a hard boundary.
-            if phrase and phrase in body and re.search(
-                    r"(?:不做|不选|不想|没选|改成|换成|改为|换为|不是.{0,20}而是)", body):
-                return True
-            if re.search(r"(?:换个目标|换一个目标|重新安排|算了|先不(?:做|建|创建|保存|设定))", body):
-                return True
-            if re.search(r"(?:再考虑|重新考虑|还没决定|没想好|暂时不)", body):
-                schedule_words = r"时间|地点|时长|频率|每天|每周|每月|早上|上午|中午|下午|晚上|分钟|小时|日期|星期"
-                return not re.search(schedule_words, body)
-            # A later request can repeat the choice without naming the
-            # activity again (for example, "我选择按这份安排执行，请创建
-            # 目标").  Treat references to the already reviewed plan as an
-            # acknowledgement, not as a replacement.  Keep explicit change
-            # language above this guard so "改成/换成" remains a boundary.
-            plan_reference = r"(?:这份|这个|上述|之前的|原来的|原定的)(?:安排|计划|方案|目标|决定)"
-            change_language = r"改成|换成|改为|换为|换个目标|换一个目标|重新安排|不做|不选|不想"
-            refers_to_plan = (re.search(r"(?:选择|选|决定|执行|创建|保存).{0,24}" + plan_reference, body)
-                              or re.search(r"(?:按|按照|依照|照着)" + plan_reference, body))
-            if refers_to_plan and not re.search(change_language, body):
-                return False
-            if re.search(r"(?:我|这次).{0,8}(?:选择|选|决定|改成|换成|改为|换为)", body):
-                schedule_words = r"时间|地点|时长|频率|每天|每周|每月|早上|上午|中午|下午|晚上|分钟|小时|日期|星期"
-                return not re.search(schedule_words, body)
-            return False
-        if any(replaces_choice(m.content) for m in later):
-            continue
-        return candidate, previous
-    return None, None
+def source_reference(raw, messages, *, role="user", id_key="message_id", quote_key="quote"):
+    """Resolve an exact quote to a trusted row; never infer conversational intent."""
+    if not isinstance(raw, dict):
+        return None
+    quote = text(raw.get(quote_key), 2000)
+    if not quote:
+        return None
+    source_id = raw.get(id_key)
+    if source_id is not None:
+        if type(source_id) is not int:
+            return None
+        matches = [m for m in messages if m.id == source_id and m.role == role
+                   and quote in (m.content or "")]
+    else:
+        matches = [m for m in messages if m.role == role and quote in (m.content or "")]
+    return matches[0] if len(matches) == 1 else None
 
 
 def proposal_evidence(raw, messages, activity):
-    if not isinstance(raw, dict):
+    """Validate the extractor's semantic choice against authenticated sources.
+
+    A legacy candidate without selection_status needs a new extraction over
+    existing messages; it cannot be promoted by keyword recovery. Existing
+    confirmed records are unaffected by this candidate-only check.
+    """
+    if (not isinstance(raw, dict) or raw.get("selection_status") != "selected"
+            or raw.get("selection_role") != "core"):
         return None
-    users = [m for m in messages if m.role == "user"]
-    if not users:
+    if raw.get("goal_kind") not in {"primary", "secondary"}:
         return None
-    selection = text(raw.get("selection_quote"), 2000)
+    source = source_reference(raw, messages, id_key="selection_message_id", quote_key="selection_quote")
     phrase = text(raw.get("activity_quote"), 255)
-    kind = raw.get("goal_kind")
-    if kind not in {"primary", "secondary"} or not selection:
+    if source is None or not phrase or not isinstance(activity, str) or not activity.strip():
         return None
-    if not phrase or not isinstance(activity, str) or not activity.strip():
-        return None
-    latest = users[-1]
-    selection_turn, previous = _selection_turn(selection, phrase, messages)
-    if selection_turn is None:
-        return None
-    # ``activity_quote`` is the user's own short label (for example ``散步``),
-    # while ``activity_content`` may be a more specific wording (for example
-    # ``小区平路慢走五分钟``).  Requiring the quote to be a substring of the
-    # display text silently rejected legitimate goals.  Both values remain
-    # source-bound: the short label must be in the selected turn (or its
-    # immediate assistant proposal), and normalized detail may additionally be
-    # present in the card immediately preceding a later confirmation.
-    source_texts = [selection_turn.content]
+    previous = next((m for m in reversed(messages) if m.position < source.position), None)
+    sources = [source.content or ""]
     if previous and previous.role == "assistant":
-        source_texts.append(previous.content)
-    if latest.id != selection_turn.id:
-        latest_previous = next((m for m in reversed(messages) if m.position < latest.position), None)
-        if latest_previous and latest_previous.role == "assistant":
-            source_texts.append(latest_previous.content)
-        source_texts.append(latest.content)
-    if not any(phrase in source for source in source_texts):
+        sources.append(previous.content or "")
+    if not any(phrase in content for content in sources):
         return None
-    activity_matches_phrase = phrase in activity.strip() or activity.strip() in phrase
-    if not any(activity.strip() in source for source in source_texts) and not (
-            activity_matches_phrase and any(phrase in source for source in source_texts)):
-        return None
-    # A coach card may normalize a user's short label with time/location
-    # detail, but it cannot add a second activity.  Keep the raw extraction
-    # available for diagnostics while returning a source-bound activity for
-    # persistence.  The caller must use ``source_activity`` as the goal title
-    # and plan activity; never persist a card-only expansion.
+    # Keep the literal activity chosen by the user. An unconfirmed later
+    # assistant card cannot expand it into another activity.
     normalized = activity.strip()
-    user_bound = any(normalized in (m.content or "") for m in users)
-    # A short list choice can be expanded into an executable card by the
-    # assistant.  Persist that expansion only when the user immediately
-    # affirmed the card; otherwise keep the user's literal short label and do
-    # not let an assistant suggestion become a goal title.
-    latest_previous = next((m for m in reversed(messages)
-                            if m.position < latest.position and m.role == "assistant"), None)
-    compact_latest = re.sub(r"[\s，。！!,.、~～；;：:]", "", latest.content or "")
-    card_ack = bool(latest_previous and normalized in (latest_previous.content or "")
-                    and re.fullmatch(
-                        r"(?:好|好的|好呀|好啊|好哒|嗯|嗯嗯|可以|可以的|可以呀|没问题|行|对|对的|是的|确认|就这样|就这么定|没错)+",
-                        compact_latest))
-    source_activity = normalized if user_bound or card_ack else phrase
-    direction = text(raw.get("long_term_direction"))
-    direction_quote = text(raw.get("direction_quote"), 2000)
-    if kind == "primary" and (not direction or not direction_quote or
-        not any(direction_quote in m.content for m in users) or direction not in direction_quote):
+    if normalized not in source.content and phrase not in normalized and normalized not in phrase:
         return None
-    return {"goal_kind": kind, "long_term_direction": direction if kind == "primary" else None,
-        "source_message_id": selection_turn.id, "source_conversation_id": selection_turn.conversation_id,
+    source_activity = normalized if normalized in source.content else phrase
+    direction, direction_quote = text(raw.get("long_term_direction")), text(raw.get("direction_quote"), 2000)
+    direction_valid = (direction and direction_quote and direction in direction_quote
+                       and any(m.role == "user" and direction_quote in (m.content or "") for m in messages))
+    return {"goal_kind": raw["goal_kind"], "long_term_direction": direction if direction_valid else None,
+        "source_message_id": source.id, "source_conversation_id": source.conversation_id,
         "source_activity": source_activity,
-        "evidence": {"selection_quote": selection, "activity_quote": phrase, "direction_quote": direction_quote}}
+        "evidence": {"selection_status": "selected", "selection_quote": raw["selection_quote"],
+                     "selection_role": "core", "activity_quote": phrase,
+                     "direction_quote": direction_quote if direction_valid else None}}
 
 
 def recover_goal_proposal(messages, activity):
-    """Recover an omitted extractor proposal only from explicit user choice text.
-
-    The extractor may return a complete PA card while omitting ``goal_proposal``.
-    This fallback never treats an assistant card or a bare activity mention as a
-    choice: it needs a user sentence with a first-person choice marker and the
-    activity phrase bound to that same sentence.
-    """
-    if not isinstance(activity, str) or not activity.strip():
-        return None
-    users = [m for m in messages if m.role == "user"]
-    for message in reversed(users):
-        body = (message.content or "").strip()
-        if not body or re.search(r"还没决定|没想好|不确定|可能|也许|先不|算了|不想|不打算", body):
-            continue
-        # Prefer the longest contiguous activity span still present in the
-        # user's sentence; card-only modifiers cannot become evidence.
-        candidate = activity.strip()
-        if candidate not in body:
-            pieces = [candidate[i:j] for i in range(len(candidate))
-                      for j in range(i + 2, len(candidate) + 1)
-                      if candidate[i:j] in body]
-            if not pieces:
-                continue
-            candidate = max(pieces, key=len)
-        if not re.search(r"我(?:想|打算|决定|选(?:择)?|愿意)|安排我|那就|我觉得可以", body):
-            continue
-        # The marker and activity must occur in one forward clause; this
-        # rejects quoted examples and detached activity observations.
-        if not re.search(r"(?:我(?:想|打算|决定|选(?:择)?|愿意)|安排我|那就|我觉得可以).{0,120}" + re.escape(candidate), body):
-            continue
-        direction_quote = next((m.content.strip() for m in users if re.search(
-            r"希望.{0,12}(?:改变|改善)|想让.{0,12}(?:改变|改善)", m.content or "")), None)
-        if direction_quote:
-            return {"goal_kind": "primary", "long_term_direction": direction_quote,
-                    "selection_quote": body, "activity_quote": candidate,
-                    "direction_quote": direction_quote}
-        return {"goal_kind": "secondary", "long_term_direction": None,
-                "selection_quote": body, "activity_quote": candidate}
-
-    # A user can select one item from a short list with the item alone.  The
-    # phrase is still source-bound to the immediately preceding assistant
-    # question; it is not a bare activity mention.  Later assistant cards may
-    # expand that choice into the executable plan text passed as ``activity``.
-    for message in reversed(users):
-        body = (message.content or "").strip()
-        if not body or len(body) > 24 or re.search(r"[？?，,。；;]|(?:可能|也许|不确定|还没|先不|算了)", body):
-            continue
-        previous = next((m for m in reversed(messages) if m.position < message.position), None)
-        if not previous or previous.role != "assistant":
-            continue
-        candidate = body.rstrip("吧呀啊呢")
-        if len(candidate) < 2 or re.search(r"第[一二三四五六七八九十123456789]个|^(?:好的?|嗯+|可以|行|对|是的)$", candidate):
-            continue
-        # A bare reply is a choice only when the immediate coach question
-        # actually listed that exact option.  Without this source check,
-        # generic replies such as “应该可以” were mistaken for activities
-        # merely because they satisfy ``clean == phrase`` below.
-        if candidate not in (previous.content or ""):
-            continue
-        if not _current_activity_choice(body, candidate, previous, body):
-            continue
-        # Require a later assistant/user source for the executable expansion;
-        # an isolated “散步” mention must not create a goal by itself.
-        later_sources = [m.content or "" for m in messages if m.position >= message.position]
-        if isinstance(activity, str) and activity.strip() and not any(activity.strip() in source for source in later_sources):
-            continue
-        direction_quote = next((m.content.strip() for m in users if re.search(
-            r"希望.{0,12}(?:改变|改善)|想让.{0,12}(?:改变|改善)", m.content or "")), None)
-        proposal = {"goal_kind": "primary" if direction_quote else "secondary",
-                    "long_term_direction": direction_quote if direction_quote else None,
-                    "selection_quote": body, "activity_quote": candidate}
-        if direction_quote:
-            proposal["direction_quote"] = direction_quote
-        return proposal
+    """Compatibility entry point: missing semantic extraction is never guessed."""
     return None
+
+
+_SCORE_WORDS = {0: ("0", "零", "〇"), 1: ("1", "一"), 2: ("2", "二", "两"),
+                3: ("3", "三"), 4: ("4", "四"), 5: ("5", "五"),
+                6: ("6", "六"), 7: ("7", "七"), 8: ("8", "八"),
+                9: ("9", "九"), 10: ("10", "十")}
+
+
+def difficulty_values(data, messages, *, existing=None):
+    """Persist only user-scored numbers with a real, role-correct source.
+
+    Intent and adjustment semantics belong to extraction. This validator
+    checks the number itself, its literal source, role and ordering.
+    """
+    keys = ("difficulty_rating", "difficulty_original", "difficulty_evidence")
+    if not any(key in data for key in keys):
+        return {}
+    raw = data.get("difficulty_evidence")
+    raw = raw if isinstance(raw, dict) else {}
+    verified = {}
+    values = {"difficulty_rating": None, "difficulty_original": None, "difficulty_evidence": {}}
+    positions = {}
+    for kind, field in (("rating", "difficulty_rating"), ("original", "difficulty_original")):
+        score = data.get(field)
+        reference = raw.get(kind)
+        source = source_reference(reference, messages)
+        if type(score) is not int or score not in _SCORE_WORDS or source is None:
+            continue
+        if kind == "original" and score < 6:
+            continue
+        score_text = reference.get("score_text")
+        quote = reference["quote"]
+        if score_text not in _SCORE_WORDS[score] or score_text not in quote:
+            continue
+        # Numeric boundaries prevent a 4 from being borrowed from 14/40.
+        if score_text.isdigit() and not re.search(r"(?<!\d)" + re.escape(score_text) + r"(?!\d)", quote):
+            continue
+        if not score_text.isdigit() and not re.search(
+                r"(?<![零〇一二两三四五六七八九十百\d])" + re.escape(score_text)
+                + r"(?![零〇一二两三四五六七八九十百\d])", quote):
+            continue
+        values[field] = score
+        verified[kind] = {"value": score, "message_id": source.id,
+                          "quote": quote, "score_text": score_text}
+        positions[kind] = source.position
+    if "original" in verified and ("rating" not in verified or positions["original"] >= positions["rating"]):
+        values["difficulty_original"] = None
+        verified.pop("original")
+    # Omission does not erase a previously verified initial rating. Revalidate
+    # its source before carrying it to a newer extraction of the same plan.
+    old_evidence = existing.get("difficulty_evidence") if existing else None
+    old_original = old_evidence.get("original") if isinstance(old_evidence, dict) else None
+    if "original" not in raw and "rating" in verified and isinstance(old_original, dict):
+        old_source = source_reference(old_original, messages)
+        if (old_source is not None and type(old_original.get("value")) is int
+                and 6 <= old_original["value"] <= 10 and old_source.position < positions["rating"]):
+            values["difficulty_original"] = old_original["value"]
+            verified["original"] = old_original
+    values["difficulty_evidence"] = verified
+    return values
+
+
+def invalidate_stale_difficulty(values, existing, messages):
+    """A changed, already specified plan cannot inherit the old plan's score.
+
+    Merely adding a previously absent optional detail does not constitute
+    an existing plan change here. This operates only on an editable draft.
+    """
+    if not existing or existing.get("record_status") != "draft":
+        return values
+    fields = ("activity_content", "schedule_text", "scheduled_start_at", "location",
+              "duration_minutes", "frequency_rule", "companion")
+    changed = [key for key in fields if key in values and existing.get(key) is not None
+               and values[key] != existing[key]]
+    if not changed:
+        return values
+    evidence = values.get("difficulty_evidence", existing.get("difficulty_evidence"))
+    evidence = dict(evidence) if isinstance(evidence, dict) else {}
+    rating = evidence.get("rating")
+    source = source_reference(rating, messages)
+    latest_user = next((m for m in reversed(messages) if m.role == "user"), None)
+    if source is not None and latest_user is not None and source.position >= latest_user.position:
+        return values
+    if rating:
+        evidence["previous_rating"] = rating
+    evidence.pop("rating", None)
+    evidence["invalidated_plan_fields"] = changed
+    return {**values, "difficulty_rating": None, "difficulty_evidence": evidence}
+
+
+async def save_m2_activity_context(db, *, conversation, state, raw, messages):
+    """Store sourced M2 activity notes without promoting them to a goal.
+
+    The count of independent trial experiences is deliberately not derived
+    from message count: two messages may describe the same activity event.
+    """
+    if (not isinstance(raw, dict) or not messages or state.get("current_module") != "module_2"
+            or state.get("conversation_id") != conversation.id
+            or (state.get("memory") or {}).get("sandbox_mode") == "true"):
+        return None
+    if any(m.conversation_id != conversation.id for m in messages):
+        return None
+    context = dict((state.get("memory") or {}).get("m2_activity_context") or {})
+    changed = False
+    intention = raw.get("intention")
+    source = source_reference(intention, messages)
+    if source is not None and intention.get("value") in {"no_intention", "intention", "action"}:
+        context["intention"] = {"value": intention["value"], "message_id": source.id, "quote": intention["quote"]}
+        changed = True
+    trial = raw.get("trial")
+    source = source_reference(trial, messages)
+    states = {"none", "trial_active", "trial_completed", "trial_continue", "trial_upgrade_to_core", "trial_retained_secondary"}
+    if source is not None and trial.get("state") == "none":
+        context["trial"] = {"state": "none", "message_id": source.id, "quote": trial["quote"]}
+        changed = True
+    elif source is not None and trial.get("state") in states and trial.get("source_role") in {"trial", "secondary"}:
+        activity = text(trial.get("activity_content"), 255)
+        previous = next((m for m in reversed(messages) if m.position < source.position), None)
+        texts = [source.content or ""] + ([previous.content or ""] if previous and previous.role == "assistant" else [])
+        if activity and any(activity in value for value in texts):
+            context["trial"] = {"state": trial["state"], "activity_content": activity,
+                                "source_role": trial["source_role"], "message_id": source.id, "quote": trial["quote"]}
+            changed = True
+    secondary = raw.get("secondary_activities")
+    if isinstance(secondary, list):
+        # Retain existing sourced notes on partial extraction. Updating a note
+        # uses its activity and source, rather than generating a formal goal.
+        notes = {(v["message_id"], v["activity_content"]): v for v in context.get("secondary_activities", [])
+                 if isinstance(v, dict) and "message_id" in v and "activity_content" in v}
+        for item in secondary[:20]:
+            source = source_reference(item, messages)
+            activity = text(item.get("activity_content"), 255) if isinstance(item, dict) else None
+            if source is None or not activity or activity not in source.content:
+                continue
+            note = {"activity_content": activity, "message_id": source.id, "quote": item["quote"]}
+            for field in ("time", "location", "frequency", "companion", "duration"):
+                value = text(item.get(field), 255)
+                if value and value in source.content:
+                    note[field] = value
+            notes[(source.id, activity)] = note
+            changed = True
+        if changed:
+            context["secondary_activities"] = list(notes.values())
+    if not changed:
+        return None
+    runtime = schema.tables["conversation_runtime_states"]
+    current = (await db.execute(select(runtime).where(runtime.c.conversation_id == conversation.id).with_for_update())).mappings().one_or_none()
+    if current is None or current["current_module"] != "module_2":
+        return None
+    await db.execute(update(runtime).where(runtime.c.conversation_id == conversation.id).values(
+        memory={**(current["memory"] or {}), "m2_activity_context": context},
+        row_version=current["row_version"] + 1, updated_at=now()))
+    return context
 
 
 async def save_goal_details(db, goal_id, evidence):

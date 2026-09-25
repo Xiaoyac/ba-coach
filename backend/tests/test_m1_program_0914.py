@@ -111,6 +111,9 @@ def test_null_and_empty_methods_preserved_without_schema_changes():
 async def test_current_snapshot_clears_stale_summary_methods_and_readiness(goal_api):
     client, db, _ = goal_api
     await seed(db)
+    await db.execute(insert(ConversationMessage), {"id": 21, "conversation_id": 1,
+        "position": 2, "role": "assistant", "content": "这次我们重新核对经历。"})
+    await db.commit()
     values = {"ai_depression_cycle_summary": None, "attempted_relief_methods": None,
         "abc_event": None, "m1_contract": {"version": VERSION, "session_id": "chat-a",
             "assistant_message_id": 21, "completed_steps": [], "missing_fields": ["m1_milestone_2"]}}

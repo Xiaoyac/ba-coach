@@ -338,8 +338,11 @@ def normalize(data, messages, *, session_id, cycle_id, assistant_message_id, exi
     duration = overt.get("actual_duration_minutes")
     occurred = started is True and status in {"complete", "partial"}
     not_started = started is False and status == "not_started"
-    duration_ok = type(duration) in {int, float} and duration >= 0 and duration <= 10080
-    if occurred:
+    # Actual minutes may be unknown. An evidenced completion/partial report
+    # remains an execution fact without a duration; never fill it from the
+    # plan or turn the missing measurement into "not performed".
+    duration_ok = duration is None or (type(duration) in {int, float} and 0 <= duration <= 10080)
+    if occurred and duration is not None:
         duration_ok = duration_ok and duration > 0
     elif not_started:
         duration_ok = duration is None or (type(duration) in {int, float} and duration == 0)

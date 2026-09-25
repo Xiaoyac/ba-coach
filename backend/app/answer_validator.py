@@ -9,8 +9,8 @@ from time import perf_counter
 
 from .reasoning import contains_internal_protocol
 
-VERSION = "answer-rules-v4-evidence"
-SAFE_REPLY = "刚才的回复未通过完整性检查，暂时无法展示。你可以补充一下最希望讨论的具体问题，我们再继续。"
+VERSION = "answer-rules-20260924-diagnostics"
+SAFE_REPLY = "这条回复生成异常，暂未展示。请重试；不需要重新说明已有信息。"
 INTEGRITY_CODES = {
     "empty_reply",
     "oversized_reply",
@@ -18,16 +18,18 @@ INTEGRITY_CODES = {
     "internal_protocol_leak",
 }
 
+# Coaching quality is assessed in diagnostics/evaluation. It cannot replace
+# an otherwise valid response with an unrelated module template.
+DIAGNOSTIC_CODES = {
+    "panel_confirmation_instruction", "unsupported_behavior_label",
+    "m3_analysis_boundary", "premature_plan", "goal_replacement",
+    "completion_claim",
+}
+
 
 def recovery_reply(module: str) -> str:
-    # Acknowledge the interruption, not a silent demand to repeat information.
-    followup = {
-        "module_1": "我们先围绕你提到的经历和感受继续，不急着制定活动计划。",
-        "module_2": "目标由你来选择和确认；可以直接在这里继续讨论，不需要去目标面板操作。",
-        "module_3": "记录方式可以在这里商量；填写时从左侧导航打开“记录今日”，历史也在里面。",
-        "module_4": "复盘以你实际的经历为准，我不会替你判断做没做、感受如何，或擅自改目标。",
-    }
-    return "抱歉，刚才生成的内容有不够妥当的地方，我暂时没有展示。" + followup.get(module, "我们可以在这里继续聊。")
+    """Technical failure notice; never substitute a scripted coaching question."""
+    return SAFE_REPLY
 
 
 def _declaration(sentence: str, start: int) -> bool:
@@ -69,6 +71,8 @@ def validate_answer(*, reply: str, module: str, evidence_ids: list[str],
     findings = []
 
     def flag(code, severity="block"):
+        if code in DIAGNOSTIC_CODES:
+            severity = "review"
         if not any(f["code"] == code for f in findings):
             findings.append({"code": code, "severity": severity})
 

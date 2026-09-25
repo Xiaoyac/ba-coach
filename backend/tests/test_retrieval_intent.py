@@ -14,7 +14,7 @@ from app.retrieval import KnowledgeChunk
 from app.retrieval_intent import decide_retrieval
 from app.schemas import Message
 
-CASES = json.loads((Path(__file__).parents[1] / "evals/retrieval_intent_cases.json").read_text(encoding="utf-8"))["cases"]
+CASES = json.loads((Path(__file__).parent / "fixtures/retrieval_intent_cases.json").read_text(encoding="utf-8"))["cases"]
 
 
 def state_for(case):

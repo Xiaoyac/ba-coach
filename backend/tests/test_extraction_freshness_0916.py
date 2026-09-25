@@ -16,12 +16,16 @@ from test_goal_overview import goal_api
 async def seed_m2(db):
     plans, cycles, progress, runtime = (schema.tables[name] for name in (
         "module_two_record", "pa_cycles", "pa_cycle_progress", "conversation_runtime_states"))
+    await db.execute(insert(ConversationMessage), {"id": 17, "conversation_id": 1, "position": -1,
+        "role": "user", "content": "这个散步计划我觉得4分难。"})
     await db.execute(insert(plans), {"id": "m2-draft", "goal_id": "g1", "version_no": 1,
         "timezone": "Asia/Shanghai", "activity_content": "晚饭后散步十分钟",
         "schedule_text": "每天晚饭后", "location": "小区", "duration_minutes": 10,
         "frequency_rule": {"schema_version": 1, "text": "每天"},
         "potential_barriers": ["下雨"],
-        "barrier_coping_plan": [{"barrier": "下雨", "plan": "室内走"}]})
+        "barrier_coping_plan": [{"barrier": "下雨", "plan": "室内走"}],
+        "difficulty_rating": 4, "difficulty_evidence": {"rating": {"value": 4,
+            "message_id": 17, "quote": "这个散步计划我觉得4分难。", "score_text": "4"}}})
     await db.execute(insert(cycles), {"id": "m2-cycle", "goal_id": "g1", "ordinal": 1,
         "status": "planning"})
     await db.execute(insert(progress), {"cycle_id": "m2-cycle",

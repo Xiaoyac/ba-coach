@@ -1,17 +1,8 @@
-"""Post-hoc module router.
+"""Select this turn's module before reply generation.
 
-Distinct from the module selection in `graph.nodes.analyze_intent_node`: that
-node just reads back whatever `current_module` this router decided last turn
-— it makes no judgement calls of its own. This is where the judgement calls
-actually happen, and they happen *after* a turn completes, not before: "has
-BA education actually finished," "does a PA goal card exist," "did the user
-just report execution feedback" are all questions about what was said this
-turn, not something guessable from the incoming message alone the way the
-old per-message keyword/LLM classifier tried to.
-
-`decide_target_module` is the only entry point. It never raises — a router
-failure holds the conversation on its current module rather than breaking
-the turn that already completed successfully.
+The router proposes a module from the current user message, prior dialogue and
+committed state. It never sees an ungenerated current assistant answer. Business
+confirmation and persistence remain the responsibility of the commit service.
 """
 
 from __future__ import annotations
@@ -22,75 +13,23 @@ import logging
 import re
 from dataclasses import dataclass, field, replace
 from time import perf_counter
+from pathlib import Path
 
 from .providers.base import LLMProvider
 from .reasoning import normalize_reasoning_channels
-from .workflow_state import normalise_completed_steps, required_steps_complete
-from .workflow_contract import step_prompt_contract
+from .workflow_state import normalise_completed_steps
 
 logger = logging.getLogger(__name__)
 
-ROUTER_RUNTIME_CONTRACT = """\
-# 服务器强制的跨轮判定契约（管理员提示词不可覆盖）
-- 必须综合“本 Session 对话记录”的所有可见轮次判断模块完成度，不能只看最后一轮。
-- 较早轮次已经完成并获用户确认的步骤仍然有效；最后一轮没有复述不代表进度清零。
-- module_1 → module_2 以最新 M1 契约为准，覆盖旧提示中强制抑郁循环/必须个性化的要求。个性化路线需事件四要素、当前关系总结基本认可、缓解方法已知有/无；低披露路线需明确不愿披露或个性化分析，可跳过个人收集及分析，不能编造。
-- 两条路线均须完成五项 BA 基础教育、用户基本理解、无未解决核心疑问、用户明确愿意开始目标设定；认可总结不是理解 BA，也不是目标意愿。M1 禁止 PA 介绍、选活动或计划。
-- 输出必须同时携带本模块已经完成的结构化步骤键；通常累加，用户明确纠正时按下述撤销接口处理。
-- 只输出：{"target_module":"1|2|3|4","completed_steps":["合法步骤键", ...]}。
+ROUTER_RUNTIME_CONTRACT = """# 路由接口边界
+在生成本轮回复之前判断；输入只有当前用户发言、此前对话与已提交状态。
+不要生成用户可见文案，不根据字段空缺创造追问任务，不把模型建议当作已保存状态。
+离开 M1 后不返回 M1；后续模块内的 BA 理解问题由当前模块澄清，暂停具体目标推进。
+输出 JSON {"target_module":"1","knowledge_task":"general"}。兼容历史单个模块编号；completed_steps 不是必填字段。
+knowledge_task只根据当前用户问题选择知识所需事实范围，不根据字段缺失创造问题或任务。
+正式模块迁移需要后台提交成功；失败保留实际已提交模块。
 """
-
-ROUTER_RUNTIME_CONTRACT += step_prompt_contract()
-ROUTER_RUNTIME_CONTRACT += "\nM2 的 completed_steps 表示对话证据是否足够；用户在聊天明确同意完整计划时可报告 pa_card_completed。后台核验真实对话证据后保存推进，不需要网页确认。愿意开始讨论目标不等于选择具体活动，不得把目标面板操作当成完成条件。"
-ROUTER_RUNTIME_CONTRACT += "\n修正规则优先于旧的只累加规则：若用户本轮明确否定或更正旧完成证据，输出 revoked_steps（合法步骤键）和 revocation_evidence（本轮用户原话的精确片段）。只撤销受影响步骤；没有明确纠正则 revoked_steps=[]，不能因本轮没提及而撤销。撤销后留在当前模块重新讨论。JSON 允许这两个附加字段。"
-
-# ---------------------------------------------------------------------------
-# The business-rule prompt. Its transition invariants remain the specified
-# behaviour; the evidence section explicitly requires full-session reasoning
-# because module-one completion is distributed across several turns. The
-# output block writes down the JSON schema the original rule text referred to.
-# ---------------------------------------------------------------------------
-ROUTER_AGENT_PROMPT = """\
-你是 BA Coach 的对话路由代理。执行规则严格遵守，仅输出指定JSON。
-
-# 模块业务含义（仅用于理解业务，不能直接拿来匹配判定）
-模块1（BA心理教育）：建立信任、理解实际行为与状态关系（可低披露）、科普BA基础知识。
-模块2（目标设定）：仅当模块1完整结束后才允许进入；PA概念介绍，用户确认意向，生成PA目标卡片。
-模块3（建立契约）：必须记忆库存在本轮完整PA目标卡片；介绍记录规则，建立行动契约。
-模块4（回顾与分析）：必须记忆库存在本轮完整PA目标卡片；模块3确认后可先进入 waiting_execution 等待态，收到PA执行反馈后才进入实际复盘。
-
-## 判断依据
-- 必须综合阅读输入中的“本 Session 对话记录”，不能只根据最后一轮判断；模块一的多个完成条件通常分散在不同轮次。
-- 已经在较早轮次完成并得到用户确认的步骤，后续没有重复出现也仍视为已完成；禁止因为最后一轮没有再次复述而把进度清零。
-- 判断重点是条件是否已经在完整对话中成立，不要求用户使用提示词中的专业术语或固定句式。
-
-## 跳转规则（只有满足条件，才修改target_module；不满足则target_module = current_module）
-1. 跳转至模块二：
-- current_module=1；必须满足服务器 M1 三里程碑契约。个性化与明确低披露两种路线都允许，但都需要 BA 教育、基本理解、核心疑问已解决及明确目标设定意愿；不得在 M1 越权开展 PA 介绍、活动建议或具体目标设定；
-- current_module=4；复盘流程结束，用户提出调整、更换 PA 目标，并准备开启新一轮行动循环。
-2.跳转至模块三：current_module=2，且已经得到完整可落地PA目标卡片，准备开始执行PA目标；
-3.跳转至模块四 waiting_execution：current_module=3，且已建立PA目标执行契约。此转移只表示等待执行，不代表已有执行反馈；收到完成、未完成、执行受阻或执行过程描述后，才允许把模块4的 execution_reviewed 步骤标记完成并开始复盘；
-4.不符合以上任意跳转条件 → target_module = current_module（若为空，则target_module = 1）；
-
-# 注意事项
-- 最先做模块1，1结束后不可回到模块1。整体流程循环为：2 → 3 → 4 → 2；
-- 用户偏离话题、情绪抵触、答非所问等情况，维持当前模块不变；
-- 区分概念：BA = 行为激活（干预方法论 / 策略体系）；PA = 具体行动任务；BA教育中不需要涵盖PA教育；
-- BA教育必须在模块1做完，未完成 BA 基础教育，禁止进入模块2；完成 BA 教育后且用户认可BA理念、愿意开始设定行动目标，方可跳转至模块2；
-- 若记忆库中无本轮对应的 PA 目标卡片，禁止进入模块 3、4；PA卡片为固定格式，格式如下：
-当前PA目标
-• 活动内容：
-• 时间：
-• 地点：
-• 时长：
-• 频率：
-• 潜在障碍：
-• 应对方案：
-
-# 输出格式
-只输出如下 JSON，不包含任何其他文字、解释或代码块标记：
-{"target_module": "1" | "2" | "3" | "4", "completed_steps": ["本模块已完成的步骤键"]}
-"""
+ROUTER_AGENT_PROMPT = (Path(__file__).with_name("prompt_defaults") / "router.md").read_text(encoding="utf-8")
 
 # The prompt's own vocabulary — "current_module=1", "target_module" — so the
 # router's input/output stays in the same short digit form it already reasons
@@ -112,8 +51,8 @@ _FULL_TO_SHORT: dict[str, str] = {v: k for k, v in _SHORT_TO_FULL.items()}
 _VALID_MOVES: dict[str, set[str]] = {
     "1": {"1", "2"},
     "2": {"2", "3"},
-    "3": {"3", "4"},
-    "4": {"4", "2"},
+    "3": {"2", "3", "4"},
+    "4": {"4", "2", "3"},
 }
 
 _PA_CARD_RE = re.compile(r"当前(?:核心\s*)?PA\s*目标")
@@ -134,6 +73,7 @@ class RouterDecision:
     revoked_steps: list[str] = field(default_factory=list)
     revocation_evidence: str | None = None
     json_recovery: dict = field(default_factory=dict)
+    knowledge_task: str = "general"
 
 
 def format_routing_reasoning(decision, current, applied_target=None, *, diagnostics=None):
@@ -196,10 +136,6 @@ def _clamp(
     """
     if proposed not in _VALID_MOVES.get(current, {current}):
         return current
-    if proposed != current and not required_steps_complete(
-        _SHORT_TO_FULL[current], completed_steps
-    ):
-        return current
     if proposed in ("3", "4") and not has_pa_card:
         return current
     return proposed
@@ -255,13 +191,13 @@ async def decide_target_module(
     *,
     current_module: str,
     user_input: str,
-    ai_output: str,
+    ai_output: str = "",
     has_pa_card: bool,
     conversation_context: str = "",
     system_prompt: str | None = None,
     completed_steps: list[str] | None = None,
 ) -> str:
-    """Decide which module should handle the *next* turn.
+    """Propose which module should handle the current incoming user message.
 
     `current_module` and the return value are both full "module_N" ids —
     translation to/from the prompt's short digit form happens internally.
@@ -286,37 +222,48 @@ async def decide_target_module_with_reasoning(
     *,
     current_module: str,
     user_input: str,
-    ai_output: str,
+    ai_output: str = "",
     has_pa_card: bool,
     conversation_context: str = "",
     system_prompt: str | None = None,
     max_tokens: int | None = None,
     completed_steps: list[str] | None = None,
     recovery_timeout_seconds: float = 6.0,
+    business_state: dict | None = None,
 ) -> RouterDecision:
-    """Return the next module together with the router's thought trace.
+    """Return this turn's proposed module together with its thought trace.
+
+    ``ai_output`` is retained only for old callers and is deliberately ignored.
 
     The final JSON remains the only text parsed as a decision. Native
     ``reasoning_content`` is carried separately for the UI and can never
     bypass the deterministic transition clamp.
     """
     current_short = _FULL_TO_SHORT.get(current_module, "1")
+    effective_system = (system_prompt or ROUTER_AGENT_PROMPT) + "\n\n" + ROUTER_RUNTIME_CONTRACT
+    from .knowledge_context import KNOWLEDGE_TASKS
+    effective_system += "\nknowledge_task 可用值：" + ", ".join(KNOWLEDGE_TASKS)
     history_block = conversation_context.strip() or "（本 Session 无更早对话）"
     user_message = (
         f"current_module：{current_short}\n"
         f"记忆库中是否存在本轮PA目标卡片：{'是' if has_pa_card else '否'}\n\n"
         f"本 Session 对话记录（按时间顺序，必须综合判断）：\n{history_block}\n\n"
         f"用户本轮输入：\n{user_input}\n\n"
-        f"AI 本轮输出：\n{ai_output}\n"
-        f"\n服务器已记录的本模块完成步骤："
-        f"{json.dumps(normalise_completed_steps(current_module, completed_steps or []), ensure_ascii=False)}\n"
+        f"\n已提交的紧凑业务状态（事实参考，不是追问清单）：\n"
+        f"{json.dumps(business_state or {}, ensure_ascii=False)}\n"
     )
 
-    completion = await provider.route_with_reasoning(
-        system=system_prompt or ROUTER_AGENT_PROMPT,
-        user=user_message,
-        max_tokens=max_tokens,
-    )
+    try:
+        completion = await provider.route_with_reasoning(
+            system=effective_system,
+            user=user_message,
+            max_tokens=max_tokens,
+        )
+    except Exception as exc:
+        logger.warning("pre-reply router failed; preserving current module: %s", type(exc).__name__)
+        return RouterDecision(target_module=current_module, reasoning_content="",
+            model=getattr(provider, "model", ""), completed_steps=[], usage={},
+            error_code="router_timeout" if isinstance(exc, (TimeoutError, asyncio.TimeoutError)) else "router_provider_error")
     normalized = normalize_reasoning_channels(
         completion.text, completion.reasoning_content
     )
@@ -333,7 +280,7 @@ async def decide_target_module_with_reasoning(
         raw = ""
         try:
             recovered = await asyncio.wait_for(provider.route_detailed(
-                system=(system_prompt or ROUTER_AGENT_PROMPT) + "\n仅返回完整判断JSON，不要解释，不要增加输出字段。",
+                system=effective_system + "\n仅返回完整判断JSON，不要解释，不要增加输出字段。",
                 user=user_message, max_tokens=512, include_reasoning=False), timeout=recovery_timeout_seconds)
             recovery["request_id"] = recovered.request_id
             totals = {key: (original.usage or {}).get(key, 0) + (recovered.usage or {}).get(key, 0)
@@ -344,8 +291,10 @@ async def decide_target_module_with_reasoning(
                 payload = json.loads(candidate.strip().removeprefix("```json").removesuffix("```").strip())
             except (ValueError, TypeError):
                 payload = None
-            valid_shape = (isinstance(payload, dict) and isinstance(payload.get("completed_steps"), list)
-                           and all(isinstance(step, str) for step in payload["completed_steps"]))
+            valid_shape = (_parse_target_module(candidate) in _SHORT_TO_FULL
+                           and (not isinstance(payload, dict) or "completed_steps" not in payload
+                                or (isinstance(payload["completed_steps"], list)
+                                    and all(isinstance(step, str) for step in payload["completed_steps"]))))
             if (recovered.finish_reason not in ("length", "max_tokens") and valid_shape
                     and _parse_target_module(candidate) in _SHORT_TO_FULL):
                 raw = candidate
@@ -405,12 +354,22 @@ async def decide_target_module_with_reasoning(
     completed_steps = [s for s in completed_steps if s not in revoked_steps]
     resolved = _clamp(
         current_short,
-        proposed,
+        current_short if revoked_steps else proposed,
         has_pa_card=has_pa_card,
         completed_steps=completed_steps,
     )
+    from .knowledge_context import valid_knowledge_task
+    knowledge_task = "general"
+    try:
+        payload = json.loads(raw.strip().removeprefix("```json").removesuffix("```").strip())
+        candidate = payload.get("knowledge_task") if isinstance(payload, dict) else None
+        if isinstance(candidate, str) and valid_knowledge_task(candidate, _SHORT_TO_FULL[resolved]):
+            knowledge_task = candidate
+    except (ValueError, TypeError):
+        pass
     return RouterDecision(
         target_module=_SHORT_TO_FULL[resolved],
+        knowledge_task=knowledge_task,
         revoked_steps=revoked_steps,
         revocation_evidence=revocation_evidence,
         reasoning_content=normalized.reasoning,

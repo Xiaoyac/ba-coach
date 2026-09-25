@@ -110,14 +110,16 @@ def test_successful_precommit_does_not_readopt_under_turn_lock(client, monkeypat
         calls.append(True)
         assert len(calls) == 1, 're-adopt would re-enter the non-reentrant turn lock'
         return await original(*args, **kwargs)
-    async def precommit(db, *, store, session_id, **kwargs):
+    async def precommit(state, context, **kwargs):
+        store, session_id = context.store, state['session_id']
         lock = await store.get_turn_lock(session_id)
         assert lock.locked()
         await store.set_module(session_id, 'module_3')
         await store.set_memory(session_id, {})
-        return 'module_3', 'local-cycle'
+        return {'current_module': 'module_3', 'extracted_intent': 'module_3',
+                'next_module': 'module_3', 'routed_by': 'pre_reply_router'}
     monkeypatch.setattr(chat, '_initial_state', initial)
-    monkeypatch.setattr(chat, '_precommit_chat_confirmation', precommit)
+    monkeypatch.setattr('app.pre_reply_routing.route_before_reply', precommit)
     response = client.post('/api/chat/stream' if stream else '/api/chat',
         json={'message': '我同意这份计划。'})
     assert response.status_code == 200
@@ -157,8 +159,7 @@ async def test_provider_failure_uses_only_a_real_confirmation_receipt(
         state['confirmation_receipt'] = {'module': module, 'cycle_id': 'committed-cycle'}
     result = await nodes.MODULE_NODES[module](state, Runtime(context=ctx))
     if committed:
-        expected = ('活动计划已确认并保存。接下来我们一起商量怎样记录活动和感受。' if module == 'module_3' else
-            '记录约定已确认并保存。现在等你尝试后回来反馈，完成、部分完成或没有开始都可以如实告诉我。')
+        expected = '本轮确认已保存，但后续回复生成中断。已有对话和记录已保留。'
         assert result['final_response'] == expected
         assert result['error'] is None
         assert result['telemetry']['confirmation_receipt_recovery'] == 'provider_error'

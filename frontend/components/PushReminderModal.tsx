@@ -48,7 +48,7 @@ export default function PushReminderModal({onClose}:{onClose:()=>void}) {
   }
   return <dialog ref={dialog} onClose={onClose} aria-labelledby="pa-push-title" className="m-auto w-[min(520px,calc(100vw-24px))] max-h-[calc(100dvh-32px)] overflow-y-auto rounded-3xl border-0 bg-sheet p-6 text-ink shadow-2xl backdrop:bg-black/40 sm:p-8">
     <header className="flex items-start justify-between gap-4"><div><p className="text-xs text-accent-ink">PA · 轻一点的提醒</p><h2 id="pa-push-title" className="mt-2 text-2xl font-semibold">活动后提醒</h2></div><button onClick={onClose} aria-label="关闭提醒设置" className="surface-button min-h-11 min-w-11 rounded-full text-xl">×</button></header>
-    <p className="mt-5 text-sm leading-7 text-ink-muted">预计活动结束 <strong className="font-medium text-ink">15 分钟后</strong>，如果还没有收到反馈，轻轻提醒一次。做了、没做或有变化，都可以回来聊聊。</p>
+    <p className="mt-5 text-sm leading-7 text-ink-muted">预计活动结束 <strong className="font-medium text-ink">约 1 小时后</strong>，如果还没有收到反馈，轻轻提醒一次。做了、没做或有变化，都可以回来聊聊。</p>
     <div className="mt-5 rounded-2xl bg-raised/70 p-4 text-sm leading-6"><p className="font-medium">只有时间明确，才会安排</p><p className="mt-1 text-ink-muted">没有明确日期、开始时间或时长的计划不会提醒。已反馈、取消、暂停或改期后，会重新检查，不连续催促。</p></div>
     {loading?<p role="status" className="mt-5 text-sm">正在读取设置…</p>:<>
       {!status?.available&&<p className="mt-5 text-sm text-ink-muted">推送服务尚未启用，当前不会发送通知。</p>}

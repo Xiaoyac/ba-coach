@@ -45,7 +45,7 @@ async def module_extraction_is_current(
     db, *, conversation_id, state, module, assistant_message_id=None,
     following_user_message_id=None,
 ):
-    """Whether M2/M4's source-validated extraction belongs to the latest turn."""
+    """Whether source-validated extraction belongs to the current boundary."""
     if module not in {"module_2", "module_3", "module_4"}:
         return True
     freshness = (state["memory"] or {}).get("module_extraction_freshness", {}).get(module, {})
@@ -58,7 +58,11 @@ async def module_extraction_is_current(
     if latest_row is None:
         return False
     if latest_row.id == source_message_id:
-        return assistant_message_id is None or assistant_message_id == source_message_id
+        expected_role = "user" if freshness.get("user_message_id") is not None else "assistant"
+        return bool(latest_row.role == expected_role
+                    and (assistant_message_id is None or assistant_message_id == source_message_id)
+                    and (freshness.get("user_message_id") is None
+                         or freshness["user_message_id"] == source_message_id))
     # A confirmation command is submitted by the user immediately after the
     # assistant card that produced the fresh extraction.  At that point the
     # latest transcript row is necessarily the user message, so the ordinary
@@ -75,7 +79,7 @@ async def module_extraction_is_current(
 
 
 async def record_steps(db, *, session_id, user_id, module, requested_target, steps, assistant_message_id,
-                       revoked_steps=(), revocation_evidence=None, diagnostics=None):
+                       revoked_steps=(), revocation_evidence=None, diagnostics=None, allow_transition=True):
     diagnostics = diagnostics if diagnostics is not None else {}
     diagnostics.update(policy="verified_contract", block_reasons=[])
     conversation, state = await runtime_for(db, session_id)
@@ -172,7 +176,8 @@ async def record_steps(db, *, session_id, user_id, module, requested_target, ste
         readiness_record = pending if module == "module_4" else None
         if readiness_record is None:
             records = schema.tables[TABLES[module]]
-            scope = records.c.goal_id == state["active_goal_id"]
+            scope = (records.c.cycle_id == state["active_cycle_id"] if module == "module_4"
+                     else records.c.goal_id == state["active_goal_id"])
             readiness_record = (await db.execute(select(records).where(
                 scope, records.c.record_status == "draft").order_by(
                 records.c.created_at.desc()).limit(1))).mappings().one_or_none()
@@ -188,10 +193,8 @@ async def record_steps(db, *, session_id, user_id, module, requested_target, ste
     # cycle: a user cannot confirm until the router already calls it confirmed.
     # The commit service records those final steps only after a real consent.
     preparation = set(allowed)
-    if module == "module_2":
-        preparation.discard("pa_card_completed")
-    elif module == "module_3":
-        preparation = set()  # the complete record describes the proposed agreement
+    if module in {"module_2", "module_3"}:
+        preparation = set()  # sourced record readiness describes the proposal
     ready = (not m1_missing and preparation.issubset(merged)
              and (readiness is None or readiness["ready"])
              and (requested_target != module or module in {"module_1", "module_2", "module_3", "module_4"}))
@@ -203,7 +206,7 @@ async def record_steps(db, *, session_id, user_id, module, requested_target, ste
     # module as applied_target even when confirmation subsequently succeeded.
     from .dialogue_confirmation import advance_from_dialogue
     advanced = await advance_from_dialogue(db, session_id=session_id, user_id=user_id,
-        assistant_message_id=assistant_message_id)
+        assistant_message_id=assistant_message_id, allow_transition=allow_transition)
     applied_target = advanced[0] if advanced else module
     if requested_target != applied_target:
         if module == "module_1":
@@ -226,6 +229,7 @@ async def record_steps(db, *, session_id, user_id, module, requested_target, ste
         "decision_value": {"completed_steps": merged, "requested_target": requested_target,
                            "applied_target": applied_target, "confirmation_required": ready and not bool(advanced),
                            "routing_policy": diagnostics["policy"],
+                           "allow_transition": allow_transition,
                            "block_reasons": diagnostics["block_reasons"],
                            "reason_codes": diagnostics.get("reason_codes", []),
                            "readiness": diagnostics.get("readiness"),
@@ -303,10 +307,11 @@ def _synchronize_duration_text(values, existing):
 # follow-up without its record fields) must never make an old ready draft look
 # current.  These are the fields that make the draft itself substantive.
 FRESHNESS_FIELDS = {
-    "module_3": {"record_requirement", "negotiated_record_plan", "acceptance_feeling", "feedback_mechanism"},
+    "module_3": {"record_requirement", "negotiated_record_plan", "acceptance_feeling", "feedback_mechanism",
+                 "recording_status", "recording_evidence"},
     "module_2": {"activity_content", "schedule_text", "scheduled_start_at", "location",
                  "duration_minutes", "frequency_rule", "companion", "potential_barriers",
-                 "barrier_coping_plan"},
+                 "barrier_coping_plan", "difficulty_rating", "difficulty_original", "difficulty_evidence"},
     "module_4": {"execution_result", "phase_a", "phase_b", "phase_c", "abc_chain_summary",
                  "core_difficulty_type", "difficulty_description", "ba_reeducation_content",
                  "next_coping_strategy", "review_decision", "review_summary"},
@@ -318,7 +323,10 @@ def record_values(module, data):
     table = schema.tables[TABLES[module]]
     forbidden = {"id", "user_id", "goal_id", "cycle_id", "version_no", "record_status",
                  "confirmation_status", "confirmation_message_id", "chain_confirmation_status",
-                 "confirmed_at", "created_at", "updated_at"}
+                 "confirmed_at", "created_at", "updated_at",
+                 "difficulty_rating", "difficulty_original", "difficulty_evidence"}
+    if module == "module_3":
+        forbidden.update({"recording_status", "recording_evidence"})
     values = {}
     for key, value in data.items():
         target = FIELD_MAP[module].get(key, key)
@@ -385,97 +393,27 @@ async def create_goal_from_agent_dialogue(db, *, session_id, user_id, data,
             return blocked("sandbox_blocked", "沙盒会话不写入目标")
         return blocked("goal_creation_window_closed", "当前流程已有目标、已结束或不在目标设定阶段")
 
-    from .goal_contract import (evidence_messages, proposal_evidence, recover_goal_proposal,
+    from .goal_contract import (evidence_messages, proposal_evidence, difficulty_values,
                                 save_goal_details, save_plan_context)
     messages = await evidence_messages(db, conversation.id, user_id)
     if not messages or messages[-1].id != assistant_message_id:
         return blocked("assistant_evidence_stale", "当前助手消息不是会话最新证据，拒绝用旧轮次创建目标")
-    proposal_present = "goal_proposal" in data
-    proposal = data.get("goal_proposal") if proposal_present else None
+    proposal = data.get("goal_proposal")
+    if not isinstance(proposal, dict) or "selection_status" not in proposal:
+        return blocked("selection_extraction_missing", "选择证据需要从已有消息重新抽取")
+    selection_status = proposal.get("selection_status")
+    if selection_status != "selected":
+        codes = {"not_expressed": "selection_not_expressed", "ambiguous": "selection_semantics_ambiguous",
+                 "retracted": "selection_retracted"}
+        return blocked(codes.get(selection_status, "selection_extraction_missing"), "当前没有可提交的明确活动选择")
+    if proposal.get("selection_role") != "core":
+        if proposal.get("selection_role") in {"secondary", "trial"}:
+            return blocked("selection_not_core", "次要活动或临时体验保留活动记录，不自动生成核心目标")
+        return blocked("selection_extraction_missing", "需从已有消息抽取本次选择是核心目标还是次要/临时体验")
     evidence = proposal_evidence(proposal, messages, activity)
-    # A complete plan with an omitted proposal object is an extractor
-    # omission, not proof that the user never chose the activity.  Recover
-    # only from an explicit choice in the same transcript.  Keep an explicit
-    # null/invalid proposal fail-closed: callers that deliberately supplied a
-    # proposal have asked for validation.  An empty object is treated like an
-    # omitted extractor side-channel because the graph preserves empty JSON
-    # objects while filtering null values.
-    from .plan_contract import missing_plan_fields, recover_one_time_frequency
-    required_plan = {
-        "activity_content": values.get("activity_content"),
-        "schedule_text": values.get("schedule_text"),
-        "location": values.get("location"),
-        "duration_minutes": values.get("duration_minutes"),
-        "frequency_rule": values.get("frequency_rule"),
-        "potential_barriers": values.get("potential_barriers"),
-        "barrier_coping_plan": values.get("barrier_coping_plan"),
-    }
-    # The extractor can omit a one-off frequency even when the user stated it
-    # explicitly. Recover only that source-bound shape before readiness; a
-    # bare date such as “明天下午六点” remains incomplete and cannot create a
-    # goal by inference.
-    required_plan = recover_one_time_frequency(required_plan, messages)
-    if required_plan.get("frequency_rule") is not None and values.get("frequency_rule") is None:
-        values["frequency_rule"] = required_plan["frequency_rule"]
-    proposal_omitted = (not proposal_present or proposal == {})
-    # A non-empty proposal can also be unusable when the extractor combines
-    # an assistant suggestion with the user's selected activity. Recover only
-    # in that narrow case: if its activity quote is source-grounded, an invalid
-    # selection/direction quote remains fail-closed and must be corrected by a
-    # new user turn. This repairs the live shape ``和朋友玩鬼抓人`` for a user
-    # who chose ``和马哥...`` without accepting an invented activity.
-    proposal_activity = proposal.get("activity_quote") if isinstance(proposal, dict) else None
-    proposal_activity_grounded = bool(
-        isinstance(proposal_activity, str) and proposal_activity.strip()
-        and any(proposal_activity.strip() in (message.content or "")
-                for message in messages if message.role in {"user", "assistant"})
-    )
-    selection_text = proposal.get("selection_quote") if isinstance(proposal, dict) else None
-    selection_is_user_detail = bool(
-        isinstance(selection_text, str) and selection_text.strip()
-        and any(selection_text.strip() in (message.content or "") for message in messages if message.role == "user")
-        and not re.search(r"我(?:选择|选|决定|打算|愿意|想)|那就|就按", selection_text)
-        and (len(selection_text.strip()) >= 8 or re.search(
-            r"今天|明天|后天|上午|中午|下午|晚上|点|分钟|小时|地点|时间|频率", selection_text))
-    )
-    proposal_direction_invalid = bool(
-        isinstance(proposal, dict)
-        and proposal.get("goal_kind") == "primary"
-        and not (
-            isinstance(proposal.get("long_term_direction"), str)
-            and proposal.get("long_term_direction", "").strip()
-            and isinstance(proposal.get("direction_quote"), str)
-            and proposal.get("direction_quote", "").strip()
-            and any(
-                proposal["direction_quote"].strip() in (message.content or "")
-                for message in messages if message.role == "user"
-            )
-        )
-    )
-    recoverable_proposal = (
-        proposal_omitted or not proposal_activity_grounded
-        or selection_is_user_detail or proposal_direction_invalid
-    )
-    if (evidence is None and recoverable_proposal
-            and not missing_plan_fields(required_plan)):
-        recovered = recover_goal_proposal(messages, activity)
-        if recovered and isinstance(proposal, dict) and proposal.get("goal_kind") == "primary":
-            # Preserve a source-validated long-term direction from the raw
-            # extractor proposal while replacing only its unusable activity
-            # quote.  A short-choice recovery must not silently demote a
-            # primary goal to a secondary one.
-            direction = proposal.get("long_term_direction")
-            direction_quote = proposal.get("direction_quote")
-            if (isinstance(direction, str) and direction.strip()
-                    and isinstance(direction_quote, str) and direction_quote.strip()
-                    and any(direction_quote.strip() in (message.content or "")
-                            for message in messages if message.role == "user")):
-                recovered = {**recovered, "goal_kind": "primary",
-                             "long_term_direction": direction if direction in direction_quote else direction_quote,
-                             "direction_quote": direction_quote}
-        evidence = proposal_evidence(recovered, messages, activity) if recovered else None
     if not evidence:
-        return blocked("proposal_evidence_missing", "没有找到用户明确选择该活动的可核对证据")
+        return blocked("selection_source_invalid", "选择或活动引用无法与当前会话的真实消息核对")
+    values.update(difficulty_values(data, messages))
     # The extractor may decorate the chosen activity with an assistant's
     # wording. Persist the source-backed user choice, not an expanded activity
     # the user never selected. Schedule/location keep their separate fields.
@@ -511,13 +449,7 @@ async def create_goal_from_agent_dialogue(db, *, session_id, user_id, data,
         memory={**(state["memory"] or {}), "module_extraction_freshness": freshness},
         row_version=state["row_version"] + 1, updated_at=now()))
 
-    assistant_position = select(ConversationMessage.position).where(
-        ConversationMessage.id == assistant_message_id).scalar_subquery()
-    user_message_id = (await db.execute(select(ConversationMessage.id).where(
-        ConversationMessage.conversation_id == conversation.id,
-        ConversationMessage.role == "user",
-        ConversationMessage.position == assistant_position - 1,
-    ))).scalar_one_or_none()
+    user_message_id = evidence["source_message_id"]
     await db.execute(insert(schema.tables["ai_decision_logs"]), {
         "conversation_id": conversation.id,
         "turn_id": str(assistant_message_id),
@@ -546,15 +478,52 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
         await db.execute(select(profiles.c.uuid).where(profiles.c.uuid == user_id).with_for_update())
         values = record_values(module, data)
         messages, source_state = [], None
+        if module == "module_1" and isinstance(data.get("m1_contract"), dict):
+            # A slow M1 extraction has the same ownership/freshness boundary
+            # as later modules. Never replace a draft with evidence computed
+            # before a newer user turn or a completed module transition.
+            contract = data["m1_contract"]
+            source_session = contract.get("session_id")
+            # begin_turn serializes user-message insertion on Conversation;
+            # share that lock so a new boundary cannot race the write below.
+            conversation = (await db.execute(select(Conversation).where(
+                Conversation.session_id == source_session).with_for_update()
+                .execution_options(populate_existing=True))).scalar_one_or_none() if source_session else None
+            if not conversation or conversation.subject_id != user_id:
+                return None
+            rt = schema.tables["conversation_runtime_states"]
+            source_state = (await db.execute(select(rt).where(
+                rt.c.conversation_id == conversation.id).with_for_update())).mappings().one_or_none()
+            if (not source_state or source_state["current_module"] != module
+                    or source_state["flow_status"] in {"completed", "paused"}
+                    or (source_state["memory"] or {}).get("sandbox_mode") == "true"):
+                return None
+            latest = (await db.execute(select(ConversationMessage).where(
+                ConversationMessage.conversation_id == conversation.id).order_by(
+                    ConversationMessage.position.desc(), ConversationMessage.id.desc()).limit(1))).scalar_one_or_none()
+            if (not latest or latest.id != contract.get("assistant_message_id")
+                    or latest.role not in {"user", "assistant"}):
+                return None
         if module in {"module_2", "module_3", "module_4"} and data.get("_source_session_id"):
             from .goal_contract import evidence_messages, capture_activities
-            conversation, source_state = await runtime_for(db, data["_source_session_id"])
+            # Serialize freshness checks and record writes with begin_turn,
+            # which locks the owning Conversation before adding a user row.
+            conversation = (await db.execute(select(Conversation).where(
+                Conversation.session_id == data["_source_session_id"]).with_for_update()
+                .execution_options(populate_existing=True))).scalar_one_or_none()
+            rt = schema.tables["conversation_runtime_states"]
+            source_state = ((await db.execute(select(rt).where(
+                rt.c.conversation_id == conversation.id).with_for_update())).mappings().one_or_none()
+                if conversation else None)
             if (not conversation or conversation.subject_id != user_id or not source_state
                 or source_state["active_cycle_id"] != cycle_id or source_state["current_module"] != module
                 or (source_state["memory"] or {}).get("sandbox_mode") == "true" or source_state["flow_status"] in {"completed", "paused"}):
                 return None
             messages = await evidence_messages(db, conversation.id, user_id)
-            if not messages or messages[-1].id != data.get("_source_assistant_message_id"):
+            source_user_id = data.get("_source_user_message_id")
+            source_id = source_user_id if source_user_id is not None else data.get("_source_assistant_message_id")
+            expected_role = "user" if source_user_id is not None else "assistant"
+            if not messages or messages[-1].id != source_id or messages[-1].role != expected_role:
                 return None
             if module in {"module_2", "module_4"}:
                 await capture_activities(db, user_id=user_id, conversation=conversation, state=source_state,
@@ -570,7 +539,9 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
                 return None
             # Late extraction must not amend a confirmed execution plan, or
             # recreate the unique review row after that cycle has been closed.
-            if module in {"module_2", "module_3"} and cycle["status"] != "planning":
+            if module == "module_2" and cycle["status"] != "planning":
+                return None
+            if module == "module_3" and cycle["status"] not in {"planning", "waiting_execution"}:
                 return None
             if module == "module_4":
                 scope, defaults = table.c.cycle_id == cycle_id, {"cycle_id": cycle_id}
@@ -585,6 +556,14 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
                     scope = scope & (table.c.module_two_record_id == cycle["module_two_record_id"])
         existing = (await db.execute(select(table).where(scope, table.c.record_status == "draft")
             .order_by(table.c.created_at.desc()).limit(1))).mappings().one_or_none()
+        if module == "module_3":
+            from .m3_contract import contract_for
+            # A continued cycle may reuse the confirmed M2 plan. Its old M3
+            # draft is still historical evidence, not an editable new-cycle
+            # record or fresh recording consent.
+            candidates = (await db.execute(select(table).where(scope, table.c.record_status == "draft")
+                .order_by(table.c.created_at.desc(), table.c.id.desc()))).mappings().all()
+            existing = next((row for row in candidates if contract_for(row).get("cycle_id") == cycle_id), None)
         if module == "module_1" and existing and isinstance(data.get("m1_contract"), dict):
             # M1 facts remain a fresh snapshot, but already authenticated
             # education/understanding/consent evidence must not disappear just
@@ -618,8 +597,11 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
                     values["goal_setting_willingness"] = (
                         "willing" if "goal_setting_consent" in merged_contract.get("completed_steps", [])
                         else "unknown")
-        if module == "module_2" and existing:
-            values = _synchronize_duration_text(values, existing)
+        if module == "module_2":
+            from .goal_contract import difficulty_values
+            values.update(difficulty_values(data, messages, existing=existing))
+            if existing:
+                values = _synchronize_duration_text(values, existing)
         # A short affirmative turn confirms the card just displayed. The
         # extractor still runs over the full transcript, but it may rewrite
         # narrative fields or re-parse an already-known date. Preserve the
@@ -627,43 +609,68 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
         # card has a complete, verified structured marker. An affirmative
         # utterance cannot freeze an empty draft or a card that was never
         # verified as containing the contract.
-        if module in {"module_2", "module_3"} and existing and messages:
+        if module == "module_2" and existing and messages:
             latest_user = next((m for m in reversed(messages) if m.role == "user"), None)
             if latest_user:
-                from .dialogue_confirmation import (affirmative,
-                    confirmation_fields_complete, confirmation_marker_matches)
+                from .dialogue_confirmation import affirmative, confirmation_fields_complete
                 clean = re.sub(r"[\s，。！!,.、~～]", "", latest_user.content)
                 previous_assistant = next((m for m in reversed(messages)
                     if m.position < latest_user.position and m.role == "assistant"), None)
-                marker = (source_state["memory"] or {}).get("dialogue_draft", {}) if source_state else {}
                 confirmation_only = (
                     affirmative(latest_user.content)
                     and not re.search(r"改成|换成|调整|修改|但是|不过|如果|除非|重新安排|不做了|先不", clean)
                     and previous_assistant is not None)
-                if module == "module_3":
-                    # M3 must have a complete, verified recording card before
-                    # a confirmation-only extraction may preserve it.  This
-                    # prevents an empty JSON plan or an unverified summary
-                    # from being frozen by a short "好的" turn.
-                    confirmation_only = confirmation_only and confirmation_fields_complete(module, existing) and confirmation_marker_matches(
-                        module, marker, existing, cycle_id=cycle_id,
-                        preceding_assistant_id=previous_assistant.id)
-                else:
-                    # Keep the established M2 compatibility path: its plan
-                    # fields were historically preserved across an affirmative
-                    # turn. The final M2 dialogue gate still validates the
-                    # structured marker and executable card before committing.
-                    confirmation_only = confirmation_only and confirmation_fields_complete(module, existing)
+                # Keep the established M2 compatibility path; its final gate
+                # still verifies the displayed plan and its confirmation.
+                confirmation_only = confirmation_only and confirmation_fields_complete(module, existing)
                 if confirmation_only:
-                    fields = (("pa_understanding_status", "pa_willingness_status", "core_values",
+                    fields = ("pa_understanding_status", "pa_willingness_status", "core_values",
                                "core_values_impact", "activity_content", "schedule_text",
                                "scheduled_start_at", "timezone", "location", "duration_minutes",
                                "frequency_rule", "companion", "potential_barriers",
-                               "barrier_coping_plan") if module == "module_2" else
-                              ("record_requirement", "negotiated_record_plan", "feedback_mechanism"))
+                               "barrier_coping_plan", "difficulty_rating", "difficulty_original",
+                               "difficulty_evidence")
                     for field in fields:
                         if field in existing:
                             values[field] = existing[field]
+        if module == "module_3":
+            from .m3_contract import normalize, cycle_messages, contract_for
+            if not messages or source_state is None:
+                return None
+            messages = await cycle_messages(db, messages, cycle_id=cycle_id)
+            baseline = None
+            if cycle["status"] == "waiting_execution":
+                baseline = (await db.execute(select(table).where(
+                    table.c.id == cycle["module_three_record_id"], table.c.goal_id == cycle["goal_id"],
+                    table.c.module_two_record_id == cycle["module_two_record_id"],
+                    table.c.record_status == "confirmed"))).mappings().one_or_none()
+                if not baseline:
+                    return None
+            values = normalize(data, messages, session_id=data["_source_session_id"], cycle_id=cycle_id,
+                assistant_message_id=data.get("_source_assistant_message_id"),
+                user_message_id=data.get("_source_user_message_id"), existing=existing or baseline)
+            if baseline:
+                decision = (contract_for(values).get("evidence") or {}).get("decision") or {}
+                current_user = next((m for m in messages if m.id == decision.get("message_id") and m.role == "user"), None)
+                prior_user = await db.get(ConversationMessage, baseline["confirmation_message_id"])
+                if not current_user or not prior_user:
+                    return None
+                if current_user.conversation_id == prior_user.conversation_id:
+                    newer = current_user.position > prior_user.position
+                else:
+                    newer = (current_user.created_at, current_user.id) > (prior_user.created_at, prior_user.id)
+                if not newer:
+                    return None  # Never replay the old consent into a new version.
+                def arrangement(row):
+                    plan = row.get("negotiated_record_plan") or {}
+                    scope = ((contract_for(row).get("evidence") or {}).get("decision") or {}).get("scope")
+                    return (row.get("recording_status"), scope, row.get("record_requirement"),
+                        plan.get("text") if isinstance(plan, dict) else plan, row.get("feedback_mechanism"))
+                if arrangement(values) == arrangement(baseline):
+                    return None  # A repeated acknowledgement has no new arrangement to commit.
+        if module == "module_2" and existing:
+            from .goal_contract import invalidate_stale_difficulty
+            values = invalidate_stale_difficulty(values, existing, messages)
         if module == "module_4":
             from .m4_contract import normalize, cycle_messages
             # No trusted source session -> no model-controlled confirmation evidence.
@@ -671,7 +678,7 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
                 return None
             messages = await cycle_messages(db, messages)
             values = normalize(data, messages, session_id=data["_source_session_id"], cycle_id=cycle_id,
-                assistant_message_id=data["_source_assistant_message_id"], existing=existing,
+                assistant_message_id=(data.get("_source_user_message_id") or data.get("_source_assistant_message_id")), existing=existing,
                 cycle_status=cycle["status"])
             progress, rt = schema.tables["pa_cycle_progress"], schema.tables["conversation_runtime_states"]
             await db.execute(update(progress).where(progress.c.cycle_id == cycle_id).values(
@@ -704,7 +711,7 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
                 row = (await db.execute(select(progress).where(progress.c.cycle_id == cycle_id))).mappings().one_or_none()
                 if row:
                     await db.execute(update(progress).where(progress.c.cycle_id == cycle_id).values(
-                        module_2_steps=[s for s in row["module_2_steps"] if s not in {"activity_selected", "pa_card_completed"}],
+                        module_2_steps=[s for s in row["module_2_steps"] if s != "pa_card_completed"],
                         row_version=progress.c.row_version + 1, updated_at=now()))
                 await db.execute(update(rt).where(rt.c.active_cycle_id == cycle_id, rt.c.current_module == "module_2").values(
                     last_transition_reason="plan_changed_requires_review", row_version=rt.c.row_version + 1))
@@ -713,7 +720,7 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
                     "goal_id": cycle["goal_id"], "cycle_id": cycle_id, "module_name": module,
                     "decision_type": "plan_evidence_invalidated", "decision_value": {
                         "record_id": existing["id"], "changed_fields": sorted(values),
-                        "revoked_steps": ["activity_selected", "pa_card_completed"]}})
+                        "revoked_steps": ["pa_card_completed"]}})
             await db.execute(update(table).where(table.c.id == existing["id"]).values(**values, updated_at=now()))
             record_id = existing["id"]
         else:
@@ -743,9 +750,11 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
             rt = schema.tables["conversation_runtime_states"]
             freshness = dict((source_state["memory"] or {}).get("module_extraction_freshness") or {})
             freshness[module] = {
-                "assistant_message_id": data["_source_assistant_message_id"],
+                "assistant_message_id": data.get("_source_user_message_id") or data.get("_source_assistant_message_id"),
                 "cycle_id": cycle_id,
             }
+            if data.get("_source_user_message_id") is not None:
+                freshness[module]["user_message_id"] = data["_source_user_message_id"]
             await db.execute(update(rt).where(rt.c.conversation_id == source_state["conversation_id"]).values(
                 memory={**(source_state["memory"] or {}), "module_extraction_freshness": freshness},
                 row_version=rt.c.row_version + 1, updated_at=now()))
@@ -754,6 +763,7 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
 
 
 async def clinical_context(maker, user_id, session_id):
+    """Project source-labelled facts, not extraction diagnostics or coaching tasks."""
     lines = []
     async with maker() as db:
         context_conversation, state = await runtime_for(db, session_id) if session_id else (None, None)
@@ -761,55 +771,99 @@ async def clinical_context(maker, user_id, session_id):
         m1 = schema.tables["user_module_one_state"]
         completion = (await db.execute(select(m1).where(m1.c.user_id == user_id))).mappings().one_or_none()
         if state and state["current_module"] == "module_1":
-            from .m1_contract import contract_for, dialogue_status
+            from .m1_contract import contract_for, EDUCATION_TOPICS, OPTIONAL_EDUCATION_TOPICS
             pending = (await db.execute(select(one).where(one.c.user_id == user_id,
                 one.c.record_status == "draft").order_by(one.c.created_at.desc()).limit(1))).mappings().one_or_none()
             contract = contract_for(pending)
             if contract.get("session_id") == session_id:
-                lines.append("M1 当前契约状态（优先尊重已核对证据；用户本轮纠正优先）：" + json.dumps(
-                    dialogue_status(contract), ensure_ascii=False))
-                lines.append("M1对话节奏：已经明确的事实、总结认可、BA理解和目标意愿不要反复索取。"
-                    "后台证据引用校验失败不代表用户没回答，先查看对话原文。只有真实未谈到的内容才补问；"
-                    "如果缺的是教育内容，就补充相应解释，不重新询问同意。已记录目标意愿时不要再问是否愿意。"
-                    "不要提前宣称已切换模块，也不要为推进而在M1讨论具体活动。")
-                lines.append("M1 待核对的事实草稿（不是已经确认的事实，最新用户纠正优先）：" + json.dumps({
-                    k: pending[k] for k in ("chief_complaint", "trigger_situation", "coping_behavior",
-                        "coping_consequence", "functional_chain_summary", "attempted_relief_methods")}, ensure_ascii=False))
+                evidence = contract.get("evidence") or {}
+                # Missing evidence is an extraction diagnostic, not evidence
+                # that the user has not answered or needs another question.
+                lines.append("M1 已记录的对话事实与抽取状态：" + json.dumps({
+                    "source": "module_one_record", "record_id": pending["id"],
+                    "version_no": pending["version_no"], "record_status": pending["record_status"],
+                    "evidence_version": contract.get("version"), "session_id": contract.get("session_id"),
+                    "path": contract.get("path"),
+                    "explained_contents": [
+                        {"topic": topic, "source": evidence[f"education_{i}"]}
+                        for i, topic in enumerate(EDUCATION_TOPICS + OPTIONAL_EDUCATION_TOPICS)
+                        if f"education_{i}" in evidence],
+                    "summary_approval": contract.get("user_approval_level"),
+                    "understanding_verified": contract.get("understanding_verified"),
+                    "core_questions_resolved": contract.get("core_questions_resolved"),
+                    "goal_consent_expressed": contract.get("goal_consent_expressed"),
+                    "disclosure_declined": contract.get("disclosure_declined"),
+                    "limitation_explained": contract.get("limitation_explained"),
+                    "limitation_acknowledged": contract.get("limitation_acknowledged"),
+                    "user_expressions": {k: evidence[k] for k in (
+                        "approval", "understanding", "consent", "refusal", "limitation_acknowledged")
+                        if k in evidence},
+                }, ensure_ascii=False))
+                lines.append("M1 事实草稿（draft）：" + json.dumps({
+                    "source": "module_one_record", "record_id": pending["id"],
+                    "version_no": pending["version_no"], "record_status": pending["record_status"],
+                    "values": {k: pending[k] for k in ("chief_complaint", "trigger_situation", "coping_behavior",
+                        "coping_consequence", "functional_chain_summary", "attempted_relief_methods")},
+                    "sources": {k: evidence[k] for k in (
+                        "trigger", "feeling", "behavior", "consequence", "summary", "methods") if k in evidence},
+                }, ensure_ascii=False))
         if completion and completion["confirmed_formulation_id"]:
             record = (await db.execute(select(one).where(one.c.id == completion["confirmed_formulation_id"], one.c.user_id == user_id))).mappings().one_or_none()
             if record:
-                lines.append("已确认的问题理解：" + (record["functional_chain_summary"] or record["chief_complaint"] or ""))
+                lines.append("问题理解记录：" + json.dumps({
+                    "source": "module_one_record", "record_id": record["id"],
+                    "version_no": record["version_no"], "record_status": record["record_status"],
+                    "confirmation_status": record["confirmation_status"],
+                    "confirmation_message_id": record["confirmation_message_id"],
+                    "summary": record["functional_chain_summary"] or record["chief_complaint"],
+                }, ensure_ascii=False))
         elif completion and completion["completion_source"] == "legacy_imported":
-            lines.append("用户已在旧系统完成 M1，继续目标设定，不要求重做或补确认。旧理解记录缺少确认依据，不可冒充已确认事实。")
+            lines.append("M1 历史状态：" + json.dumps({
+                "source": "user_module_one_state", "completion_source": "legacy_imported",
+                "status": completion["status"], "evidence_status": completion["evidence_status"],
+                "confirmed_formulation_id": completion["confirmed_formulation_id"],
+            }, ensure_ascii=False))
         if state and state["active_goal_id"]:
             goal = await owned_goal(db, user_id, state["active_goal_id"])
             lines.append("本段聊天明确选择的目标：" + goal["title"])
             from .goal_contract import public_goal_details, public_activities
             details = (await public_goal_details(db, user_id)).get(goal["id"], {"goal_kind": "unclassified", "long_term_direction": None})
-            lines.append("目标分类（分类与执行频率独立，历史未分类不得推测）：" + json.dumps(details, ensure_ascii=False))
+            lines.append("目标分类记录：" + json.dumps(details, ensure_ascii=False))
             activities = await public_activities(db, user_id, conversation_id=context_conversation.id)
             if activities:
-                lines.append("本聊天用户自述活动（idea只是想法，不是目标；未关联记录不能算作当前目标完成）：" + json.dumps(activities[:12], ensure_ascii=False))
+                lines.append("本聊天用户自述活动及关联状态：" + json.dumps(activities[:12], ensure_ascii=False))
             cycles = schema.tables["pa_cycles"]
             cycle = (await db.execute(select(cycles).where(cycles.c.id == state["active_cycle_id"], cycles.c.goal_id == goal["id"]))).mappings().one_or_none()
             if cycle and cycle["module_two_record_id"]:
                 plans = schema.tables["module_two_record"]
                 plan = (await db.execute(select(plans).where(plans.c.id == cycle["module_two_record_id"], plans.c.goal_id == goal["id"]))).mappings().one_or_none()
                 if plan:
-                    lines.append("本周期已确认计划（不得混用其他目标）：" + json.dumps({k: plan[k] for k in
-                        ("activity_content", "schedule_text", "location", "duration_minutes", "companion", "potential_barriers", "barrier_coping_plan")}, ensure_ascii=False))
+                    lines.append("本周期绑定计划：" + json.dumps({
+                        "source": "module_two_record", "record_id": plan["id"],
+                        "goal_id": goal["id"], "cycle_id": cycle["id"],
+                        "version_no": plan["version_no"], "record_status": plan["record_status"],
+                        "confirmation_status": plan["confirmation_status"],
+                        "confirmation_message_id": plan["confirmation_message_id"],
+                        "values": {k: plan[k] for k in ("activity_content", "schedule_text", "location",
+                            "duration_minutes", "companion", "potential_barriers", "barrier_coping_plan")},
+                    }, ensure_ascii=False))
             if state["current_module"] == "module_4" and cycle:
                 from .m4_contract import contract_for
                 reviews = schema.tables["module_four_record"]
                 review = (await db.execute(select(reviews).where(reviews.c.cycle_id == cycle["id"]))).mappings().one_or_none()
                 if review:
                     contract = contract_for(review)
-                    lines.append("当前周期M4核对状态（草稿不是已确认事实，最新纠正优先；不得重复用旧周期证据）：" + json.dumps({
-                        "scenario_type": review["scenario_type"], "chain_confirmation_status": review["chain_confirmation_status"],
-                        "missing_fields": contract.get("missing_fields", ["m4_evidence_refresh"]),
-                        "completed_steps": contract.get("completed_steps", [])}, ensure_ascii=False))
+                    lines.append("当前周期 M4 记录状态：" + json.dumps({
+                        "source": "module_four_record", "record_id": review["id"],
+                        "cycle_id": cycle["id"], "record_status": review["record_status"],
+                        "evidence_version": contract.get("version"),
+                        "scenario_type": review["scenario_type"], "execution_result": review["execution_result"],
+                        "chain_confirmation_status": review["chain_confirmation_status"],
+                        "confirmation_message_id": review["confirmation_message_id"],
+                        "review_decision": review["review_decision"],
+                    }, ensure_ascii=False))
         elif state and state["current_module"] != "module_1":
-            lines.append("本聊天尚未绑定目标。可以与用户讨论新目标，但不得自行采用最新计划；只有用户明确选择具体活动后，才由 Agent 流程创建目标。")
+            lines.append("本聊天目标绑定状态：" + json.dumps({"active_goal_id": None}, ensure_ascii=False))
         for memory in await active_memories(db, user_id=user_id):
             lines.append(f"长期记忆（{memory['confirmation_status']} / {memory['source_kind']}）：{memory['content']}")
     return lines
