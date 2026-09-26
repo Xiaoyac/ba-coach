@@ -46,11 +46,7 @@ async def read_reply_workflow(maker, user_id, session_id):
             # workflow_prompt deliberately excludes these missing fields;
             # they do not become a main-model teaching or questioning list.
             from .m1_contract import contract_for, dialogue_status
-            one = metadata.tables['module_one_record']
-            m1_pending = (await db.execute(select(one).where(
-                one.c.user_id == user_id, one.c.record_status == 'draft'
-            ).order_by(one.c.created_at.desc()).limit(1))).mappings().one_or_none()
-            contract = contract_for(m1_pending)
+            contract = contract_for(pending)
             if contract.get('session_id') == session_id:
                 m1_status = dialogue_status(contract)
         if runtime['current_module'] in {'module_2', 'module_3', 'module_4'}:

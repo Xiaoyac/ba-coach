@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ChatMessage, RoutingMeta } from "@/lib/api";
 import MessageMarkdown from "@/components/MessageMarkdown";
 import ReasoningDetails from "@/components/ReasoningDetails";
+import ThemeToggle from "@/components/ThemeToggle";
 import {
   ArrowUpMark,
   CheckMark,
@@ -66,6 +67,8 @@ export default function Chat({
   onOpenAccountManager,
   onOpenIssueManager,
   onOpenAdminDailyRecords,
+  onReportIssue,
+  reportPreparing = false,
 }: {
   messages: ChatMessage[];
   routing: Partial<RoutingMeta>;
@@ -99,6 +102,8 @@ export default function Chat({
   onOpenAccountManager: () => void;
   onOpenIssueManager: () => void;
   onOpenAdminDailyRecords?: () => void;
+  onReportIssue?: () => void;
+  reportPreparing?: boolean;
 }) {
   const [input, setInput] = useState("");
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -174,7 +179,7 @@ export default function Chat({
     //
     <div className="workspace-card relative z-10 flex h-full min-h-0 w-full flex-col overflow-clip">
       <header className="workspace-card-header relative z-20 flex min-h-[76px] shrink-0 items-center gap-2 px-3 py-3 sm:gap-4 sm:px-6">
-        <button
+        {accountRole === "admin" && <button
           type="button"
           onClick={onOpenSidebar}
           aria-label="切换对话侧栏"
@@ -182,13 +187,23 @@ export default function Chat({
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-muted transition-colors duration-300 hover:bg-raised hover:text-ink"
         >
           <MenuMark className="h-[18px] w-[18px]" />
-        </button>
+        </button>}
 
         <div className="min-w-0 flex-1">
           {headerContent ?? <h1 className="truncate text-[0.92rem] font-semibold tracking-[0.02em] text-ink">对话</h1>}
         </div>
 
         <div className="ml-auto flex shrink-0 items-center gap-2">
+          {accountRole !== "admin" && (
+            <>
+              <button type="button" onClick={onOpenAssessment} className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-xs text-ink-muted transition-colors hover:bg-raised hover:text-ink sm:px-3">
+                <NotebookMark className="h-4 w-4 shrink-0" /><span>每日记录</span>
+              </button>
+              <button type="button" onClick={onOpenProfile} className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-xs text-ink-muted transition-colors hover:bg-raised hover:text-ink sm:px-3">
+                <IdCardMark className="h-4 w-4 shrink-0" /><span>我的档案</span>
+              </button>
+            </>
+          )}
           {accountRole === "admin" && displayedModule && (
             <span
               className="hidden shrink-0 items-center gap-1.5 px-1 text-[0.68rem] font-medium text-accent-ink xl:inline-flex"
@@ -249,6 +264,11 @@ export default function Chat({
                   </p>
                 </div>
                 {onOpenPushSettings && <button type="button" role="menuitem" onClick={()=>{setAccountMenuOpen(false);onOpenPushSettings();}} className="flex min-h-11 w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-ink-muted hover:bg-raised hover:text-ink"><NotebookMark className="h-3.5 w-3.5" />活动后提醒</button>}
+                {accountRole !== "admin" && onReportIssue && (
+                  <button type="button" role="menuitem" disabled={reportPreparing} onClick={() => { setAccountMenuOpen(false); onReportIssue(); }} data-screenshot-exclude="true" className="flex min-h-11 w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-ink-muted hover:bg-raised hover:text-ink disabled:opacity-50">
+                    <ReportMark className="h-3.5 w-3.5" />{reportPreparing ? "正在准备截图…" : "帮助与反馈"}
+                  </button>
+                )}
                 {accountRole === "admin" && (
                   <>
                     {onOpenAdminDailyRecords && <button type="button" role="menuitem" onClick={()=>{setAccountMenuOpen(false);onOpenAdminDailyRecords();}} className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm text-ink-muted hover:bg-raised hover:text-ink"><NotebookMark className="h-4 w-4"/>每日记录数据</button>}
@@ -353,6 +373,11 @@ export default function Chat({
                   <KeyMark className="h-3.5 w-3.5 shrink-0" />
                   修改密码
                 </button>
+                {accountRole !== "admin" && (
+                  <div className="mx-3 flex items-center justify-between border-t border-line py-1 text-[0.78rem] text-ink-muted">
+                    <span>界面主题</span><ThemeToggle inline />
+                  </div>
+                )}
                 <button
                   type="button"
                   role="menuitem"
@@ -382,7 +407,7 @@ export default function Chat({
           aria-live="polite"
           className="zen-scroll min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-5 sm:px-8 sm:py-6"
         >
-          {messages.length === 0 && routing.routed_by === "admin_sandbox" && (
+          {accountRole === "admin" && messages.length === 0 && routing.routed_by === "admin_sandbox" && (
             <div className="mx-auto mt-[12vh] flex max-w-md flex-col items-center rounded-3xl border border-accent-edge bg-accent-wash px-6 py-7 text-center">
               <span className="grid h-11 w-11 place-items-center rounded-2xl border border-accent-edge bg-panel text-accent-ink">
                 <SandboxMark className="h-5 w-5" />
@@ -417,6 +442,7 @@ export default function Chat({
                 generationStartedAt={pending ? generationStartedAt : undefined}
                 routingPending={i === messages.length - 1 && routing.routing_pending === true}
                 animate={busy && i >= messages.length - 2}
+                showDiagnostics={accountRole === "admin"}
               />
             );
           })}
@@ -496,6 +522,7 @@ function MessageRow({
   generationStartedAt,
   routingPending,
   animate,
+  showDiagnostics,
 }: {
   message: ChatMessage;
   pending: boolean;
@@ -503,6 +530,7 @@ function MessageRow({
   routingPending: boolean;
   /** Only the newly submitted turn floats in; loaded history stays still. */
   animate: boolean;
+  showDiagnostics: boolean;
 }) {
   const isUser = message.role === "user";
   const reasoning = message.reasoning_content?.trim() ?? "";
@@ -572,12 +600,12 @@ function MessageRow({
           }`}
         >
           {message.role === "assistant" ? <MessageMarkdown text={message.content} /> : message.content}
-          {!isUser && (
+          {!isUser && showDiagnostics && (
             <ReasoningDetails message={message} replyPending={pending && !routingPending} routingPending={routingPending} />
           )}
         </div>}
         {!isUser && pending && !routingPending && <TypingDots startedAt={generationStartedAt} hasReasoning={Boolean(reasoning)} hasContent={Boolean(message.content)} />}
-        {!isUser && !message.content && <ReasoningDetails message={message} replyPending={pending && !routingPending} routingPending={routingPending} />}
+        {!isUser && !message.content && showDiagnostics && <ReasoningDetails message={message} replyPending={pending && !routingPending} routingPending={routingPending} />}
         </div>
         {message.content && (
           <>

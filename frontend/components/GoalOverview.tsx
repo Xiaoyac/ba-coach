@@ -137,7 +137,7 @@ export default function GoalOverview({open,sessionId,refreshKey,onClose,onOpenRe
           </>:<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{visible.map(goal=><GoalCard key={goal.id} goal={goal} current={currentGoal===goal.id} onOpen={()=>openGoal(goal)} />)}</div>}
           {!loading&&!error&&!!overview?.activity_records?.length&&<details className="mt-7 text-sm"><summary className="cursor-pointer py-3 text-ink-muted">未归属目标的近期活动 · {overview.activity_records.length}</summary><p className="mb-3 text-xs text-ink-faint">临时活动与想法不会自动成为目标，也不算完成其他目标。</p><div className="space-y-2">{overview.activity_records.map(record=><div key={record.id} className="flex items-start justify-between gap-4 rounded-xl bg-panel p-3"><span>{record.activity_content}</span><span className="shrink-0 text-xs text-ink-muted">{eventKindLabel[record.event_kind]}</span></div>)}</div></details>}
         </div>
-        <footer className="shrink-0 px-6 py-3 text-xs leading-5 text-ink-faint sm:px-9">这里保留现有的计划版本与执行历史。暂停不等于失败；想继续时，在新对话中选择这个目标。</footer>
+        <footer className="shrink-0 px-6 py-3 text-xs leading-5 text-ink-faint sm:px-9">这里保留现有的计划版本与执行历史。过往的讨论可以在对应的历史对话中查看。</footer>
       </>}
     </div>
   </dialog>;

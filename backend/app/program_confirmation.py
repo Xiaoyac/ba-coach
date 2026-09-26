@@ -20,14 +20,15 @@ def confirmation_memory(memory):
     """Invalidate operation markers without discarding durable dialogue facts."""
     transient = {"dialogue_draft", "module_extraction_freshness", "pa_card",
         "current_transition_evidence", "last_module", "current_module", "next_module",
-        "phase", "current_phase", "current_step", "module_steps"}
+        "phase", "current_phase", "current_step", "module_steps", "fresh_m1"}
     return {key:value for key,value in (memory or {}).items() if key not in transient}
 
 
 async def draft(db, state, user_id):
     table = schema.tables[TABLES[state["current_module"]]]
     if state["current_module"] == "module_1":
-        scope = table.c.user_id == user_id
+        from .v2_workflow import m1_draft
+        return await m1_draft(db, user_id, state=state)
     elif state["current_module"] == "module_4":
         scope = table.c.cycle_id == state["active_cycle_id"]
     else:
@@ -225,6 +226,7 @@ async def commit_confirmation(db, *, conversation, state, user_id, pending, mess
         m1 = schema.tables["user_module_one_state"]
         await db.execute(update(m1).where(m1.c.user_id == user_id).values(status="completed",
             confirmed_formulation_id=pending["id"], completion_source="user_confirmed", evidence_status="available",
+            completed_steps=list(MODULE_STEP_KEYS["module_1"]),
             row_version=m1.c.row_version + 1, updated_at=now()))
         await db.execute(update(profiles).where(profiles.c.uuid == user_id).values(module1_done_flag=True, updated_at=now()))
         next_module = "module_2"

@@ -70,7 +70,7 @@ function sleep(ms) {
     const detailFor = (id) => rooms[id === "room-b" ? "B" : "A"];
 
     if (url.pathname === "/api/auth/me") {
-      return json({ username: "fixture", nickname: "测试用户", role: "user", profile_uuid: "fixture",
+      return json({ username: "fixture", nickname: "测试用户", role: "admin", profile_uuid: "fixture",
         email_required: false, email_verified: true });
     }
     if (url.pathname === "/api/conversations" && request.method() === "GET") {

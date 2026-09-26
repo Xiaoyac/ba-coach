@@ -31,7 +31,7 @@ async def load_routing_snapshot(state, context):
     from sqlalchemy import select
     from .database_v2_schema import metadata as schema
     from .models import ConversationMessage
-    from .v2_workflow import runtime_for
+    from .v2_workflow import runtime_for, fresh_m1
     async with context.sessionmaker() as db:
         conversation, persisted = await runtime_for(db, state["session_id"])
         if not conversation or conversation.subject_id != state["subject_id"] or not persisted:
@@ -49,7 +49,8 @@ async def load_routing_snapshot(state, context):
             plans.c.goal_id == goals.c.id, plans.c.record_status == "confirmed",
             plans.c.confirmation_status == "confirmed")))
         m1 = schema.tables["user_module_one_state"]
-        compact["m1_status"] = await db.scalar(select(m1.c.status).where(m1.c.user_id == state["subject_id"]))
+        compact["m1_status"] = ("in_progress" if fresh_m1(persisted) else
+            await db.scalar(select(m1.c.status).where(m1.c.user_id == state["subject_id"])))
         if persisted["current_module"] == "module_3":
             from .knowledge_context import read_recording_state
             recording = await read_recording_state(db, state["subject_id"], persisted)

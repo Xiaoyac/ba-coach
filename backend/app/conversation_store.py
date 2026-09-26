@@ -31,7 +31,7 @@ SANDBOX_TITLE_PREFIX = "沙盒 · "
 
 
 async def create_conversation_with_opening(
-    db: AsyncSession, *, subject_id: str, session_id: str
+    db: AsyncSession, *, subject_id: str, session_id: str, start_from_m1: bool = False
 ) -> Conversation:
     """Create a durable conversation whose first turn is the BA opening.
 
@@ -47,11 +47,12 @@ async def create_conversation_with_opening(
     db.add(conversation)
     await db.flush()
     from .v2_profile import enabled as v2_enabled
-    initial = None
+    initial = "module_1" if start_from_m1 else None
     opening_text = OPENING_MESSAGE_TEXT
     if v2_enabled():
         from .v2_repository import initial_module
-        initial = await initial_module(db, user_id=subject_id)
+        if not start_from_m1:
+            initial = await initial_module(db, user_id=subject_id)
         if initial == "module_2":
             opening_text = "欢迎回来。之前的问题理解进度会保留；你可以继续一个已有目标，或直接告诉我想讨论的新方向，我们一起把它具体化。"
     db.add(
@@ -66,7 +67,7 @@ async def create_conversation_with_opening(
         ConversationRuntimeState(
             conversation_id=conversation.id,
             module=initial,
-            memory={},
+            memory={"fresh_m1": True} if start_from_m1 else {},
         )
     )
     await db.commit()

@@ -14,6 +14,7 @@ const {chromium} = require('playwright');
       const detail=()=>({session_id:'fixture',title:'测试',updated_at:new Date().toISOString(),revision:f.revision,messages:f.messages,next_module:'module_1'});
       const json=(data,status=200)=>Promise.resolve(new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}}));
       if(p==='/api/auth/me')return json({username:'fixture',nickname:'被试',role:'user',profile_uuid:'fixture',email_required:false,email_verified:true});
+      if(p==='/api/conversations/current')return json(detail());
       if(p==='/api/conversations')return json([{...detail(),messages:undefined}]);
       if(p.endsWith('/revision'))return json({revision:f.revision});
       if(p==='/api/conversations/fixture')return json(detail());
@@ -50,9 +51,9 @@ const {chromium} = require('playwright');
     await input.fill('第二次');await input.press('Enter');
     await page.waitForFunction(()=>document.querySelectorAll('strong').length===2,{},{timeout:15000});
     await page.waitForFunction(()=>!document.querySelector('textarea').disabled);
-    // Mobile drawer entry is available to a non-admin account.
-    await page.getByRole('button',{name:'切换对话侧栏',exact:true}).click();
-    await page.getByRole('button',{name:'记录今日',exact:true}).click();
+    // Members enter daily records directly beside the single conversation.
+    assert.equal(await page.getByRole('button',{name:'切换对话侧栏',exact:true}).count(),0);
+    await page.getByRole('button',{name:'每日记录',exact:true}).click();
     await page.getByRole('button',{name:'查看历史',exact:true}).click();
     await page.getByRole('heading',{name:'历史每日记录'}).waitFor();
     await page.getByText('还没有历史记录').waitFor();

@@ -104,6 +104,19 @@ export async function createConversation(
   return parse(res, "Starting a conversation");
 }
 
+/** Resume the latest real chat, creating its opening once across tabs/devices. */
+export async function getCurrentConversation(
+  signal?: AbortSignal,
+): Promise<ConversationDetail> {
+  const res = await fetch(`${API_BASE}/api/conversations/current`, {
+    method: "POST",
+    headers: apiHeaders(),
+    signal,
+    cache: "no-store",
+  });
+  return parse(res, "Loading your conversation");
+}
+
 export async function fetchConversation(
   sessionId: string,
   signal?: AbortSignal,

@@ -120,9 +120,13 @@ async def assemble_knowledge_context(maker, user_id, session_id, *, module=None,
         if "module_one_record" in requested:
             table = metadata.tables["module_one_record"]
             # Preserve the actual confirmation state, including recent drafts.
-            row = (await db.execute(select(table).where(
-                table.c.user_id == user_id, table.c.record_status != "superseded"
-            ).order_by(table.c.version_no.desc()).limit(1))).mappings().one_or_none()
+            from .v2_workflow import fresh_m1, m1_draft
+            if fresh_m1(state):
+                row = await m1_draft(db, user_id, state=state, session_id=session_id)
+            else:
+                row = (await db.execute(select(table).where(
+                    table.c.user_id == user_id, table.c.record_status != "superseded"
+                ).order_by(table.c.version_no.desc()).limit(1))).mappings().one_or_none()
             fact(table.name, row)
             return result
 
