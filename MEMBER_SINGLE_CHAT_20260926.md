@@ -38,4 +38,4 @@
 
 ## 发布状态
 
-本次实现尚未部署到线上。
+已部署到 https://bacoach.xyz/ 。线上代码提交为 `19f7d5f815866d0c67631f695f0e61472f4fefd5`，发布目录 `/opt/bacoach/releases/20260926T062759Z`。发布详情见 `DEPLOYMENT_MEMBER_CHAT_20260926.md`。
