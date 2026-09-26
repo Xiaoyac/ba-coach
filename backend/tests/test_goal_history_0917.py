@@ -66,3 +66,29 @@ async def test_bad_cross_goal_plan_reference_does_not_leak_content(goal_api):
     result=(await client.get('/api/program/goals/g1/history')).json()
     assert result['cycles'][0]['activity_content'] is None
     assert result['plans']==[]
+
+
+@pytest.mark.asyncio
+async def test_history_preserves_coping_and_numeric_difficulty_without_inventing_support(goal_api):
+    client, db, _ = goal_api
+    plans = schema.tables['module_two_record']
+    barriers = ['下雨', '容易忘记']
+    coping = [{'barrier': '下雨', 'plan': '在室内走'}, {'barrier': '容易忘记', 'plan': '饭后设置提醒'}]
+    await db.execute(insert(plans), {'id': 'draft', 'goal_id': 'g1', 'version_no': 2,
+        'timezone': 'Asia/Shanghai', 'potential_barriers': barriers, 'barrier_coping_plan': coping,
+        'difficulty_rating': 0, 'record_status': 'draft'})
+    await db.execute(insert(plans), {'id': 'legacy', 'goal_id': 'g1', 'version_no': 1,
+        'timezone': 'Asia/Shanghai'})
+    await db.execute(insert(schema.tables['pa_plan_details']), {'plan_id': 'legacy',
+        'difficulty': '有一点难', 'resources': ['家人愿意提醒']})
+    await db.commit()
+    response = await client.get('/api/program/goals/g1/history')
+    assert response.status_code == 200
+    current, legacy = response.json()['plans']
+    assert current['potential_barriers'] == barriers
+    assert current['barrier_coping_plan'] == coping
+    assert current['difficulty_rating'] == 0
+    assert current['companion'] is None and current['resources'] is None
+    assert current['record_status'] == 'draft'
+    assert legacy['difficulty_rating'] is None and legacy['difficulty'] == '有一点难'
+    assert legacy['resources'] == ['家人愿意提醒']

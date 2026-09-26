@@ -82,6 +82,76 @@ async def test_m1_dialogue_consent_does_not_create_goal(goal_api, consent, expec
 
 SUMMARY = '计划是晚饭后散步十分钟，每天晚饭后，在小区，每次10分钟，每天；遇到下雨就室内走。你愿意按这个计划试试吗？'
 
+COMPOUND_BARRIER_CARD = (
+    "活动：散步\n时间：饭后\n地点：公司附近或学校附近\n时长：10分钟\n频率：一周1到2次\n"
+    "潜在障碍：不想动，很难坚持\n"
+    "应对方案：先从一周1到2次、每次10分钟开始，做起来没那么费劲了再慢慢加\n"
+    "这个目标你确认吗？有想改的地方随时说。")
+
+
+def compound_barrier_plan(schedule="一周1到2次"):
+    return {"activity_content": "散步", "schedule_text": schedule,
+            "location": "公司附近或者学校附近吧", "duration_minutes": 10,
+            "frequency_rule": {"schema_version": 1, "text": "一周1到2次"},
+            "potential_barriers": ["很难坚持吧，不想动"],
+            "barrier_coping_plan": [{"barrier": "不想动，很难坚持",
+                "plan": "先从一周1到2次、每次10分钟开始，做起来没那么费劲了再慢慢加"}],
+            "difficulty_rating": 5, "difficulty_evidence": {"rating": {
+                "value": 5, "message_id": 17, "quote": "5分", "score_text": "5"}}}
+
+
+@pytest.mark.parametrize("schedule", ["一周1到2次", "一周1到2次、每次10分钟", "饭后，一周1到2次，每次10分钟"])
+def test_compound_barrier_summary_accepts_only_cosmetic_changes(schedule):
+    assert summary_present("module_2", COMPOUND_BARRIER_CARD, compound_barrier_plan(schedule))
+
+
+@pytest.mark.parametrize("change", [
+    {"location": "公司附近或者公园附近吧"},
+    {"potential_barriers": ["很难坚持吧，不想动", "下雨"],
+     "barrier_coping_plan": [{"barrier": "很难坚持，不想动，下雨", "plan": "改在室内走"}]},
+    {"schedule_text": "明天饭后，一周1到2次，每次10分钟"},
+    {"schedule_text": "饭后，一周1到2次，每次20分钟"},
+    {"schedule_text": "饭后，一周3到4次，每次10分钟"},
+])
+def test_compound_barrier_summary_rejects_undisplayed_plan_content(change):
+    assert not summary_present("module_2", COMPOUND_BARRIER_CARD, {**compound_barrier_plan(), **change})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("schedule", ["一周1到2次", "一周1到2次、每次10分钟"])
+async def test_compound_barrier_card_marker_then_user_confirmation_commits_m3(goal_api, schedule):
+    _, db, _ = goal_api
+    await seed_m2(db)
+    plans, goals = schema.tables["module_two_record"], schema.tables["pa_goals"]
+    await db.execute(update(plans).where(plans.c.id == "m2-draft").values(**compound_barrier_plan(schedule)))
+    await db.execute(update(goals).where(goals.c.id == "g1").values(status="draft"))
+    await db.execute(update(ConversationMessage).where(ConversationMessage.id == 17).values(content="5分"))
+    await db.execute(update(ConversationMessage).where(ConversationMessage.id == 20).values(content=COMPOUND_BARRIER_CARD))
+    await record_steps(db, session_id="chat-a", user_id="a", module="module_2",
+        requested_target="module_2", steps=[], assistant_message_id=20, allow_transition=False)
+    await db.commit()
+    _, runtime = await runtime_for(db, "chat-a")
+    marker = runtime["memory"]["dialogue_draft"]
+    assert marker["assistant_message_id"] == 20 and marker["summary_verified"]
+    assert marker["field_complete"] and runtime["last_transition_reason"] == "awaiting_record_confirmation"
+    assert runtime["current_module"] == "module_2"
+
+    await db.execute(insert(ConversationMessage), {"id": 21, "conversation_id": 1,
+        "position": 2, "role": "user", "content": "可以"})
+    await db.commit()
+    receipt = await precommit_user_confirmation(db, session_id="chat-a", user_id="a", user_message_id=21)
+    await db.commit()
+    assert receipt and receipt[0] == "module_3"
+    _, runtime = await runtime_for(db, "chat-a")
+    assert runtime["current_module"] == "module_3"
+    plan = (await db.execute(select(plans).where(plans.c.id == "m2-draft"))).mappings().one()
+    assert plan["record_status"] == "confirmed" and plan["confirmation_status"] == "confirmed"
+    assert plan["confirmation_message_id"] == 21 and plan["difficulty_rating"] == 5
+    assert plan["difficulty_evidence"]["rating"]["message_id"] == 17
+    assert plan["potential_barriers"] == ["很难坚持吧，不想动"]
+    assert plan["barrier_coping_plan"] == compound_barrier_plan()["barrier_coping_plan"]
+    assert (await db.execute(select(goals.c.status).where(goals.c.id == "g1"))).scalar_one() == "active"
+
 
 class SemanticConfirmationStub:
     def __init__(self, quote):

@@ -112,6 +112,86 @@ def test_plan_change_accepts_a_new_user_score_from_same_turn():
     assert changed["difficulty_rating"] == 2
 
 
+def confirmed_score_context(user_text="可以"):
+    old = {**complete_plan(), "record_status": "draft", "duration_minutes": 10,
+           "schedule_text": "一周1到2次", "location": "公司附近或者学校附近吧"}
+    messages = score_messages() + [
+        SimpleNamespace(id=4, position=4, role="assistant", conversation_id=2,
+                        content="在公司附近或学校附近，每周1到2次，每次10分钟，可以吗？"),
+        SimpleNamespace(id=5, position=5, role="user", conversation_id=2, content=user_text)]
+    return old, messages
+
+
+def test_confirmation_cosmetic_plan_rewrite_keeps_source_verified_score():
+    old, messages = confirmed_score_context()
+    values = {"schedule_text": "一周1到2次、每次10分钟", "location": "公司附近或学校附近",
+              **difficulty_values(scoring(), messages)}
+    changed = invalidate_stale_difficulty(values, old, messages)
+    assert changed["difficulty_rating"] == 4
+    assert changed["difficulty_evidence"]["rating"]["message_id"] == 3
+
+
+@pytest.mark.parametrize("field,value", [
+    ("activity_content", "跑步"), ("schedule_text", "一周3到4次、每次10分钟"),
+    ("schedule_text", "一周1到2次、每次20分钟"), ("location", "体育馆"),
+    ("duration_minutes", 20), ("companion", "朋友"),
+    ("frequency_rule", {"schema_version": 1, "text": "每天"}),
+])
+def test_confirmation_cannot_reuse_score_for_materially_changed_plan(field, value):
+    old, messages = confirmed_score_context()
+    if field in {"companion", "frequency_rule"}:
+        old[field] = "独自" if field == "companion" else {"schema_version": 1, "text": "一周1到2次"}
+    values = {field: value, **difficulty_values(scoring(), messages)}
+    changed = invalidate_stale_difficulty(values, old, messages)
+    assert changed["difficulty_rating"] is None
+    assert field in changed["difficulty_evidence"]["invalidated_plan_fields"]
+
+
+@pytest.mark.parametrize("user_text", ["可以，但把地点改成学校附近", "助手说可以", "我还没有同意"])
+def test_cosmetic_exemption_requires_user_confirmation(user_text):
+    old, messages = confirmed_score_context(user_text)
+    values = {"location": "公司附近或学校附近", **difficulty_values(scoring(), messages)}
+    assert invalidate_stale_difficulty(values, old, messages)["difficulty_rating"] is None
+
+
+def test_cosmetic_exemption_does_not_restore_invalid_or_old_other_plan_score():
+    old, messages = confirmed_score_context()
+    values = {"location": "公司附近或学校附近", **difficulty_values(scoring(), messages)}
+    old["difficulty_evidence"] = {"rating": {"value": 4, "message_id": 999, "quote": "4分"}}
+    assert invalidate_stale_difficulty(values, old, messages)["difficulty_rating"] is None
+
+
+@pytest.mark.parametrize("ready_before_confirmation", [True, False])
+async def test_persist_confirmation_preserves_score_across_reordered_barriers_and_cosmetic_fields(goal_api, ready_before_confirmation):
+    from test_extraction_freshness_0916 import seed_m2
+    from sqlalchemy import update
+    _, db, _ = goal_api
+    await seed_m2(db)
+    plans = schema.tables["module_two_record"]
+    coping = [{"barrier": "不想动，很难坚持", "plan": "先每周1到2次，每次10分钟，慢慢加"}]
+    await db.execute(update(plans).where(plans.c.id == "m2-draft").values(
+        schedule_text="一周1到2次", location="公司附近或者学校附近吧",
+        potential_barriers=["很难坚持吧，不想动"] if ready_before_confirmation else [],
+        barrier_coping_plan=coping))
+    await db.execute(insert(ConversationMessage), [
+        {"id": 21, "conversation_id": 1, "position": 2, "role": "user", "content": "可以"},
+        {"id": 22, "conversation_id": 1, "position": 3, "role": "assistant", "content": "我理解了你的安排。"}])
+    await db.commit()
+    await persist_record(async_sessionmaker(db.bind, expire_on_commit=False), module="module_2", user_id="a",
+        cycle_id="m2-cycle", data={
+            "schedule_text": "一周1到2次、每次10分钟", "target_activity_location": "公司附近或学校附近",
+            "target_activity_duration_minutes": 10, "potential_barriers": ["不想动", "很难坚持"],
+            "barrier_coping_plan": coping, "difficulty_rating": 4,
+            "difficulty_evidence": {"rating": {"message_id": 17, "quote": "这个散步计划我觉得4分难。", "score_text": "4"}},
+            "_source_session_id": "chat-a", "_source_assistant_message_id": 22})
+    plan = (await db.execute(select(plans).where(plans.c.id == "m2-draft"))).mappings().one()
+    assert plan["difficulty_rating"] == 4
+    assert plan["difficulty_evidence"]["rating"]["message_id"] == 17
+    assert "invalidated_plan_fields" not in plan["difficulty_evidence"]
+    assert missing_plan_fields(plan) == []
+    assert plan["record_status"] == "draft"  # Persistence alone does not invent consent.
+
+
 async def test_post_reply_can_anchor_card_without_committing_confirmation(goal_api):
     from test_extraction_freshness_0916 import seed_m2
     from sqlalchemy import update

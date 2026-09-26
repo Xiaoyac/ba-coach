@@ -57,7 +57,7 @@ from ..prompts import (
     build_system_segments,
 )
 from ..providers.base import LLMProvider, ProviderError, as_text
-from ..reasoning import ThinkingTagStreamGuard, normalize_reasoning_channels
+from ..reasoning import ThinkingTagStreamGuard, normalize_reasoning_channels, contains_internal_protocol
 from ..retrieval import DatabaseKnowledgeBase
 from ..retrieval_intent import decide_retrieval
 from ..router_agent import extract_pa_card
@@ -166,6 +166,12 @@ def _finish_stream_channels(
     for safe_delta in content_guard.finish_passthrough():
         pending_deltas.extend(reply_buffer.push(safe_delta))
     blocked = blocked or content_guard.mode == "blocked"
+
+    if content_guard.invalid_protocol or contains_internal_protocol(content_guard.raw):
+        # A tool envelope cannot become prose merely because it also contains
+        # a repairable thinking tag. The caller may retry the failed generation;
+        # no part of this payload is reused as an answer or conversation evidence.
+        return "", "", []
 
     buffered_reply, final_deltas = reply_buffer.finish()
     normalized = normalize_reasoning_channels(
@@ -458,8 +464,9 @@ def make_module_node(module_name: str, config: ModuleConfig):
             except Exception:
                 return {"available": False}
         pending_output: list[dict] = []
+        force_reply_validation = False
         def emit_output(event):
-            if runtime.context.settings.answer_validator_enabled or authoritative:
+            if runtime.context.settings.answer_validator_enabled or authoritative or force_reply_validation:
                 pending_output.append(event)
             else:
                 _emit(event)
@@ -756,6 +763,13 @@ def make_module_node(module_name: str, config: ModuleConfig):
 
         if context.stream:
             telemetry["raw_model_reply"] = content_guard.raw
+        invalid_protocol = contains_internal_protocol(telemetry.get("raw_model_reply"))
+        if invalid_protocol and not update.get("error"):
+            # Match the streaming guard for non-streaming calls too. Never
+            # unwrap a tool-call envelope into an apparently successful answer.
+            update.update(final_response="", reasoning_content="")
+            pending_output.clear()
+            force_reply_validation = True
         telemetry["normalized_reply"] = update.get("final_response", "")
         receipt = state.get('confirmation_receipt') or {}
         if update.get('error') and receipt.get('module') == module_name:
@@ -767,7 +781,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 pending_output.clear()
                 emit_output({'type': 'delta', 'text': receipt_text})
 
-        # A reasoning budget exhausted without a visible answer is a generation
+        # Budget exhaustion or an invalid provider envelope is a generation
         # failure, not inappropriate user input or a semantic validator rejection.
         if not update.get("error") and not update.get("final_response", "").strip():
             from ..reply_recovery import recover_empty_reply, GENERATION_INTERRUPTED_REPLY
@@ -775,7 +789,8 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 provider=context.provider, system=system, messages=messages,
                 elapsed_seconds=perf_counter() - generation_started,
                 total_timeout_seconds=context.settings.provider_request_timeout_seconds,
-                finish_reason=telemetry.get("finish_reason"), usage=update.get("usage", {}))
+                finish_reason=telemetry.get("finish_reason"), usage=update.get("usage", {}),
+                invalid_protocol=invalid_protocol)
             telemetry["reply_recovery"] = recovery
             pending_output.clear()  # never disclose the abandoned answer's reasoning
             update["reasoning_content"] = ""
@@ -787,6 +802,8 @@ def make_module_node(module_name: str, config: ModuleConfig):
             if recovered:
                 normalized = normalize_reasoning_channels(unwrap_chat_reply(recovered.text), "")
                 update["final_response"] = normalized.reply
+                if not normalized.reply:
+                    recovery["status"] = "invalid_normalized_completion"
                 update["model"] = recovered.model
                 telemetry["finish_reason"] = recovered.finish_reason
                 telemetry["provider_request_id"] = recovered.request_id
@@ -796,13 +813,14 @@ def make_module_node(module_name: str, config: ModuleConfig):
             else:
                 update["final_response"] = GENERATION_INTERRUPTED_REPLY
                 update["error"] = "回复生成中断，请稍后重试，无需重新解释"
-                telemetry["error_code"] = "reasoning_budget_exhausted" if recovery.get("original_finish_reason") == "length" else "empty_completion"
+                telemetry["error_code"] = ("invalid_protocol_completion" if invalid_protocol else
+                    "reasoning_budget_exhausted" if recovery.get("original_finish_reason") == "length" else "empty_completion")
                 emit_output({"type": "delta", "text": update["final_response"]})
 
         generation_finished = perf_counter()
         record_span(telemetry, "main_generation", generation_started, origin=state.get("turn_started_monotonic"), status="failed" if update.get("error") else "completed")
         validator_started = perf_counter()
-        if context.settings.answer_validator_enabled or authoritative:
+        if context.settings.answer_validator_enabled or authoritative or force_reply_validation:
             authority = await reply_authority()  # recheck after generation, including other-chat updates
             validation = validate_answer(reply=update.get("final_response", ""), module=module_name,
                 evidence_ids=[str(k.id) for k in guided_knowledge], workflow=authority,

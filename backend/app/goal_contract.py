@@ -192,6 +192,26 @@ def difficulty_values(data, messages, *, existing=None):
     return values
 
 
+def _plan_wording(field, value, *, duration=None):
+    """Normalize only known cosmetic location/schedule wording."""
+    value = value.strip().rstrip("。！!？?,，；;吧呀啊呢 ")
+    if field == "location":
+        value = value.replace("或者", "或")
+    if field == "schedule_text" and type(duration) is int and duration > 0:
+        # The duration already exists in its own unchanged column. Merely
+        # repeating it in the narrative schedule adds no new demand.
+        value = re.sub(r"(?:每次|单次)\s*" + str(duration) + r"\s*分钟", "", value)
+    return re.sub(r"[\s，,。；;、]", "", value)
+
+
+def _same_plan_wording(field, old, new, *, duration):
+    """Recognize narrow formatting changes, never general semantic similarity."""
+    if not isinstance(old, str) or not isinstance(new, str):
+        return False
+    canonical = _plan_wording(field, old, duration=duration)
+    return field in {"location", "schedule_text"} and bool(canonical) and canonical == _plan_wording(field, new, duration=duration)
+
+
 def invalidate_stale_difficulty(values, existing, messages):
     """A changed, already specified plan cannot inherit the old plan's score.
 
@@ -211,6 +231,24 @@ def invalidate_stale_difficulty(values, existing, messages):
     rating = evidence.get("rating")
     source = source_reference(rating, messages)
     latest_user = next((m for m in reversed(messages) if m.role == "user"), None)
+    if latest_user is not None:
+        from .dialogue_confirmation import affirmative
+        old_evidence = existing.get("difficulty_evidence") or {}
+        old_rating = old_evidence.get("rating") if isinstance(old_evidence, dict) else None
+        old_source = source_reference(old_rating, messages)
+        duration = existing.get("duration_minutes")
+        if (affirmative(latest_user.content) and old_source is not None
+                and old_rating.get("value") == existing.get("difficulty_rating")
+                and source is not None and source.id == old_source.id
+                and rating.get("value") == old_rating.get("value")
+                and values.get("duration_minutes", duration) == duration):
+            # A plain confirmation does not make a score reusable for a new
+            # plan. Only these provably cosmetic field rewrites are exempt;
+            # all other edits continue to invalidate the old rating below.
+            changed = [key for key in changed if not _same_plan_wording(
+                key, existing[key], values[key], duration=duration)]
+            if not changed:
+                return values
     if source is not None and latest_user is not None and source.position >= latest_user.position:
         return values
     if rating:

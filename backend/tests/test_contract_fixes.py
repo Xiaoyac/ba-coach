@@ -44,6 +44,40 @@ def test_unrelated_uncovered_barrier_still_blocks():
     plan = {**PLAN, "potential_barriers": ["忘记", "下雨"]}
     assert "barrier_coping_plan" in missing_plan_fields(plan)
 
+
+@pytest.mark.parametrize(("barriers", "coping_keys"), [
+    (["很难坚持吧，不想动"], ["不想动，很难坚持"]),
+    (["不想动，很难坚持"], ["很难坚持吧，不想动"]),
+    (["不想动", "很难坚持"], ["很难坚持，不想动"]),
+    (["很难坚持吧，不想动"], ["不想动", "很难坚持"]),
+    (["可能就是不想动吧；很难坚持呀"], ["很难坚持、不想动"]),
+    (["很难坚持,不想动"], ["不想动\n很难坚持"]),
+])
+def test_all_barriers_match_across_order_grouping_and_conversational_wrappers(barriers, coping_keys):
+    plan = {**PLAN, "potential_barriers": barriers,
+            "barrier_coping_plan": [{"barrier": key, "plan": "每次先做10分钟"} for key in coping_keys]}
+    assert missing_plan_fields(plan) == []
+
+
+@pytest.mark.parametrize(("barriers", "coping_keys"), [
+    (["不想动，很难坚持"], ["不想动"]),
+    (["不想动，没时间"], ["不想动"]),
+    (["忘记，下雨"], ["忘记"]),
+    (["下雨；忘记"], ["忘记"]),
+    (["很难坚持吧，不想动", "下雨"], ["不想动，很难坚持"]),
+    (["不想动、没时间"], ["不想动，很难坚持"]),
+])
+def test_compound_barrier_does_not_accept_partial_coverage(barriers, coping_keys):
+    plan = {**PLAN, "potential_barriers": barriers,
+            "barrier_coping_plan": [{"barrier": key, "plan": "每次先做10分钟"} for key in coping_keys]}
+    assert "barrier_coping_plan" in missing_plan_fields(plan)
+
+
+def test_compound_barrier_requires_a_nonempty_coping_plan():
+    plan = {**PLAN, "potential_barriers": ["不想动，很难坚持"],
+            "barrier_coping_plan": [{"barrier": "很难坚持，不想动", "plan": ""}]}
+    assert "barrier_coping_plan" in missing_plan_fields(plan)
+
 @pytest.mark.parametrize("valid", [True,False])
 async def test_router_revocation_requires_current_quote(provider,valid):
     provider.route_result=json.dumps(dict(target_module='3',completed_steps=list(MODULE_STEP_KEYS['module_2']),
