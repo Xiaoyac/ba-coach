@@ -109,6 +109,13 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
     started = perf_counter()
     history = "\n".join(f"{message.role}：{message.content}" for message in
                         prepared.get("routing_history", prepared.get("chat_history", [])))
+    # Match the provider's thinking-call budget. The classifier deadline must
+    # not cancel native reasoning before the final routing JSON can arrive.
+    router_timeout = (
+        context.settings.router_request_timeout_seconds
+        if context.settings.module_router_reasoning_effort == "disabled"
+        else context.settings.background_model_timeout_seconds
+    )
     try:
         decision = await asyncio.wait_for(decide_target_module_with_reasoning(context.router_provider,
             current_module=current, user_input=state["user_input"],
@@ -116,7 +123,7 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
             conversation_context=history, business_state=prepared["routing_state"],
             system_prompt=context.router_prompt, max_tokens=context.settings.router_reasoning_max_tokens,
             completed_steps=(prepared.get("module_steps") or {}).get(current, [])),
-            timeout=context.settings.router_request_timeout_seconds)
+            timeout=router_timeout)
     except asyncio.TimeoutError:
         decision = RouterDecision(target_module=current, reasoning_content="", model="", completed_steps=[],
                                   usage={}, error_code="router_timeout")

@@ -117,10 +117,10 @@ async def test_same_full_prompt_and_history_one_request(provider_type,stream,lat
 
 async def test_qwen_reasoning_alias_is_copied_into_the_thinking_channel():
     provider = object.__new__(DeepSeekProvider)
-    provider.model = 'qwen-max'
+    provider.model = 'qwen3.8-max'
     provider._settings = Settings(_env_file=None)
     response = SimpleNamespace(
-        model='qwen-max', usage=None,
+        model='qwen3.8-max', usage=None,
         choices=[SimpleNamespace(
             message=SimpleNamespace(content='可见答复', reasoning_content=None, reasoning='Qwen 原生思考'),
             finish_reason='stop')],
@@ -135,7 +135,46 @@ async def test_qwen_reasoning_alias_is_copied_into_the_thinking_channel():
 
     assert result.text == '可见答复'
     assert result.reasoning_content == 'Qwen 原生思考'
-    assert result.model == 'qwen-max'
+    assert result.model == 'qwen3.8-max'
+
+
+@pytest.mark.parametrize('content,enabled', [
+    ('<user_message>好的</user_message>', False),
+    ('<user_message>好的，但最近还是很困难</user_message>', True),
+    ('<user_message>好的，但我不想活了</user_message>', True),
+    ('<user_message>好的</user_message>另外还有一个问题', True),
+])
+def test_graph_envelope_preserves_ack_thinking_policy(content, enabled):
+    options = main_thinking_options(Settings(_env_file=None), 'deepseek',
+        [Message(role='user', content=content)])
+    assert options['enable_thinking'] is enabled
+
+
+@pytest.mark.parametrize('model,expected', [
+    ('qwen3.8-max', {'enable_thinking': False}),
+    ('deepseek-chat', {'thinking': {'type': 'disabled'}}),
+])
+@pytest.mark.parametrize('path', ['classification', 'disabled_router', 'recovery'])
+async def test_explicit_non_thinking_tasks_use_model_specific_switch(model, expected, path):
+    provider = object.__new__(DeepSeekProvider)
+    provider.model = model
+    provider._settings = Settings(_env_file=None, deepseek_model=model,
+        deepseek_router_model=model, deepseek_base_url='https://api.deepseek.com',
+        module_router_reasoning_effort='disabled')
+    create = AsyncMock(return_value=SimpleNamespace(model=model, usage=None, choices=[SimpleNamespace(
+        message=SimpleNamespace(content='{}'), finish_reason='stop')]))
+    provider._client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    provider._client.with_options = Mock(return_value=provider._client)
+    if path == 'recovery':
+        result = await provider.complete_without_reasoning(system='test',
+            messages=[Message(role='user', content='test')])
+    elif path == 'disabled_router':
+        result = await provider.route_with_reasoning(system='test', user='test')
+    else:
+        result = await provider.route_detailed(system='test', user='test', include_reasoning=False)
+    assert result.text == '{}'
+    assert create.call_args.kwargs['extra_body'] == expected
+    assert create.call_args.kwargs['model'] == model
 
 
 @pytest.mark.parametrize('provider_type',[DeepSeekProvider,DoubaoProvider])

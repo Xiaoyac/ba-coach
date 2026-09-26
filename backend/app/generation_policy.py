@@ -15,31 +15,42 @@ def is_simple_ack(value: str) -> bool:
     return clean.strip(" .。!！,，;；") in FAST_ACKS
 
 
-def main_thinking_options(settings, provider: str, messages) -> dict:
-    latest = messages[-1] if messages else None
-    fast = (getattr(settings, "chat_fast_ack_enabled", True) and latest is not None
-            and latest.role == "user" and is_simple_ack(latest.content))
-    configured_effort = getattr(settings, f"{provider}_reasoning_effort", None)
-    explicitly_disabled = configured_effort == "disabled"
-    model_name = str(getattr(settings, f"{provider}_model", "") or "").casefold()
+def native_thinking_options(settings, provider: str, *, enabled: bool, model: str | None = None) -> dict:
+    """Use the selected model's wire format for both on and off requests."""
+    model_name = str(model or getattr(settings, f"{provider}_model", "") or "").casefold()
     base_url = str(getattr(settings, f"{provider}_base_url", "") or "").casefold()
     # DashScope's OpenAI-compatible Qwen endpoints do not use DeepSeek's
     # ``thinking: {type: ...}`` extension.  They require the Qwen wire field
-    # ``enable_thinking``; when enabled, thinking_budget is required by some
-    # Qwen hybrid deployments and is harmless for compatible Qwen models.
+    # ``enable_thinking``. In particular, Qwen3.8 defaults to thinking, so an
+    # unrecognised off switch can consume a classifier's entire output budget.
     qwen_compatible = model_name.startswith("qwen") or "dashscope.aliyuncs.com" in base_url
     if qwen_compatible:
-        options = {"enable_thinking": not (fast or explicitly_disabled)}
-        if options["enable_thinking"]:
+        options = {"enable_thinking": enabled}
+        if enabled:
             options["thinking_budget"] = int(getattr(settings, "qwen_thinking_budget", 1024))
     else:
-        options = {"thinking": {"type": "disabled" if fast or explicitly_disabled else "enabled"}}
+        options = {"thinking": {"type": "enabled" if enabled else "disabled"}}
+    return options
+
+
+def main_thinking_options(settings, provider: str, messages) -> dict:
+    latest = messages[-1] if messages else None
+    content = latest.content if latest is not None else ""
+    # The graph wraps the final user message as data. Inspect only that outer
+    # envelope; preserve the original payload and never prefix-match an ack.
+    if content.startswith("<user_message>") and content.endswith("</user_message>"):
+        content = content[len("<user_message>"):-len("</user_message>")]
+    fast = (getattr(settings, "chat_fast_ack_enabled", True) and latest is not None
+            and latest.role == "user" and is_simple_ack(content))
+    configured_effort = getattr(settings, f"{provider}_reasoning_effort", None)
+    explicitly_disabled = configured_effort == "disabled"
+    options = native_thinking_options(settings, provider, enabled=not (fast or explicitly_disabled))
     # Keep the same model, full system prompt/history/profile, and all guards.
     # This controls native hidden reasoning only; it never fabricates a reply.
     effort = configured_effort
     # DashScope Qwen uses enable_thinking/thinking_budget rather than the
     # DeepSeek reasoning_effort field; sending both can be rejected.
-    if (not qwen_compatible and not fast and not explicitly_disabled
+    if ("enable_thinking" not in options and not fast and not explicitly_disabled
             and effort and effort != "provider_default"):
         options["reasoning_effort"] = effort
     return options
