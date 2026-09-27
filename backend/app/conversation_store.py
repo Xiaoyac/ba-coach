@@ -31,7 +31,8 @@ SANDBOX_TITLE_PREFIX = "沙盒 · "
 
 
 async def create_conversation_with_opening(
-    db: AsyncSession, *, subject_id: str, session_id: str, start_from_m1: bool = False
+    db: AsyncSession, *, subject_id: str, session_id: str, start_from_m1: bool = False,
+    routing_mode: str = "router_code",
 ) -> Conversation:
     """Create a durable conversation whose first turn is the BA opening.
 
@@ -67,7 +68,7 @@ async def create_conversation_with_opening(
         ConversationRuntimeState(
             conversation_id=conversation.id,
             module=initial,
-            memory={"fresh_m1": True} if start_from_m1 else {},
+            memory={"fresh_m1": True, "routing_mode": routing_mode} if start_from_m1 else {},
         )
     )
     await db.commit()

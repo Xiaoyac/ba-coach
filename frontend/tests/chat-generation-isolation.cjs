@@ -23,6 +23,7 @@ const rooms = {
     revision: 1,
     messages: [{ role: "assistant", content: "这是 A 对话。" }],
     next_module: "module_1",
+    routing_mode: "router_only",
   },
   B: {
     session_id: "room-b",
@@ -32,6 +33,7 @@ const rooms = {
     revision: 1,
     messages: [{ role: "assistant", content: "这是 B 对话。" }],
     next_module: "module_1",
+    routing_mode: "router_code",
   },
 };
 let streamCount = 0;
@@ -50,7 +52,7 @@ function sleep(ms) {
 }
 
 (async () => {
-  const browser = await chromium.launch({ headless: true, channel: "msedge" });
+  const browser = await chromium.launch({ headless: true, channel: process.env.PLAYWRIGHT_CHANNEL || "msedge" });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -144,6 +146,8 @@ function sleep(ms) {
   try {
     await page.goto(base);
     await page.getByText("这是 A 对话。", { exact: true }).waitFor();
+    assert.equal(await page.getByLabel("当前对话模式", { exact: true }).innerText(), "仅 Router");
+    assert.equal(await page.getByRole("dialog", { name: "选择新对话模式", exact: true }).count(), 0);
 
     const input = page.getByLabel("Message", { exact: true });
     await input.fill("请回复 A");
@@ -156,6 +160,7 @@ function sleep(ms) {
     // target the exact title text rather than the whole button name.
     await page.getByText("另一条对话", { exact: true }).click();
     await page.getByText("这是 B 对话。", { exact: true }).waitFor();
+    assert.equal(await page.getByLabel("当前对话模式", { exact: true }).innerText(), "Router + 代码");
     assert.equal(await page.locator('[data-generation-status]').count(), 0,
       "the hidden room's typing status leaked into the visible room");
     assert.equal(await page.getByLabel("Send", { exact: true }).count(), 1,
@@ -166,6 +171,7 @@ function sleep(ms) {
     await sleep(900);
     await page.getByText("正在写作的对话", { exact: true }).click();
     await page.getByText("A 的回复已经保存。", { exact: true }).waitFor();
+    assert.equal(await page.getByLabel("当前对话模式", { exact: true }).innerText(), "仅 Router");
     assert.equal(await page.locator('[data-generation-status]').count(), 0);
 
     // Second turn: durable reply arrives before the stream does. This is the

@@ -42,6 +42,7 @@ from ..opening import OPENING_MESSAGE
 from ..reasoning import normalize_reasoning_channels
 from ..session import SessionStore, get_session_store
 from ..schemas import (
+    ConversationCreate,
     ConversationDetail,
     ConversationMessageDetail,
     MessageTiming,
@@ -85,7 +86,8 @@ def _summary(c: Conversation) -> ConversationSummary:
     )
 
 
-def _detail(c: Conversation, *, next_module: str | None = None) -> ConversationDetail:
+def _detail(c: Conversation, *, next_module: str | None = None,
+            routing_mode: str = "router_code") -> ConversationDetail:
     def project_message(message: ConversationMessage) -> ConversationMessageDetail:
         normalized = normalize_reasoning_channels(
             message.content, message.reasoning_content
@@ -122,6 +124,7 @@ def _detail(c: Conversation, *, next_module: str | None = None) -> ConversationD
         messages=[project_message(message) for message in c.messages],
         revision=c.revision,
         next_module=next_module,
+        routing_mode=routing_mode,
     )
 
 
@@ -130,13 +133,17 @@ async def _detail_with_runtime(
 ) -> ConversationDetail:
     """Build a transcript together with its durable graph module pointer."""
     runtime = await db.get(ConversationRuntimeState, conversation.id)
+    from ..routing_modes import effective_routing_mode
+    mode = await effective_routing_mode(db, conversation=conversation,
+        state={"memory": runtime.memory if runtime else {}}, user_id=conversation.subject_id)
     return _detail(
-        conversation, next_module=runtime.module if runtime else None
+        conversation, next_module=runtime.module if runtime else None, routing_mode=mode
     )
 
 
 @router.post("", response_model=ConversationDetail, status_code=status.HTTP_201_CREATED)
 async def create_conversation(
+    payload: ConversationCreate | None = None,
     subject_id: str = Depends(require_subject_id),
     db: AsyncSession = Depends(get_db),
     store: SessionStore = Depends(get_session_store),
@@ -152,6 +159,13 @@ async def create_conversation(
     role = (await db.execute(select(AccountSettings.role)
         .join(UserAccount, UserAccount.id == AccountSettings.account_id)
         .where(UserAccount.profile_uuid == subject_id))).scalar_one_or_none()
+    mode = payload.routing_mode if payload else "router_code"
+    if mode == "router_only":
+        if role != "admin":
+            raise HTTPException(status_code=403, detail="只有管理员可以创建仅 Router 模式对话")
+        from ..v2_profile import enabled as v2_enabled
+        if not v2_enabled():
+            raise HTTPException(status_code=409, detail="当前数据库版本不支持仅 Router 模式")
     session = await store.get_or_create(None)
     await store.append(session.session_id, OPENING_MESSAGE)
     try:
@@ -160,6 +174,7 @@ async def create_conversation(
             subject_id=subject_id,
             session_id=session.session_id,
             start_from_m1=role == "admin",
+            routing_mode=mode,
         )
     except Exception:
         await db.rollback()

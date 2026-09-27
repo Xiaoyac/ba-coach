@@ -2,6 +2,7 @@
 import hashlib
 import json
 import re
+from types import SimpleNamespace
 from fastapi import HTTPException
 from sqlalchemy import select, update, insert, func
 from .database_v2_schema import metadata as schema
@@ -321,18 +322,23 @@ async def commit_confirmation(db, *, conversation, state, user_id, pending, mess
         # Other chats may be continuing this SAME cycle. They must not
         # keep stale module pointers or advance a completed cycle.
         from .models import Conversation
-        others = select(rt.c.conversation_id, rt.c.memory).join(Conversation, Conversation.id == rt.c.conversation_id).where(
+        others = select(rt.c.conversation_id, rt.c.memory, Conversation.subject_id).join(Conversation, Conversation.id == rt.c.conversation_id).where(
             rt.c.active_cycle_id == cycle_id, Conversation.subject_id == user_id,
-            rt.c.conversation_id != conversation.id)
+            rt.c.conversation_id != conversation.id).with_for_update()
         other_rows = (await db.execute(others)).mappings().all()
-        other_ids = [row["conversation_id"] for row in other_rows]
+        other_ids = []
+        from .routing_modes import effective_routing_mode, ROUTER_ONLY
+        for other in other_rows:
+            owned = SimpleNamespace(id=other["conversation_id"], subject_id=other["subject_id"])
+            if await effective_routing_mode(db, conversation=owned, state=other, user_id=user_id, lock=True) == ROUTER_ONLY:
+                continue  # Shared business facts do not own this chat's Router stage.
+            other_ids.append(other["conversation_id"])
+            await db.execute(update(rt).where(rt.c.conversation_id == other["conversation_id"]).values(
+                current_module=next_module if module != "module_4" else "module_4",
+                flow_status=flow if module != "module_4" else "completed",
+                memory=confirmation_memory(other["memory"]),
+                row_version=rt.c.row_version + 1, last_transition_reason="cycle_updated_in_other_chat"))
         if other_ids:
-            for other in other_rows:
-                await db.execute(update(rt).where(rt.c.conversation_id == other["conversation_id"]).values(
-                    current_module=next_module if module != "module_4" else "module_4",
-                    flow_status=flow if module != "module_4" else "completed",
-                    memory=confirmation_memory(other["memory"]),
-                    row_version=rt.c.row_version + 1, last_transition_reason="cycle_updated_in_other_chat"))
             await db.execute(update(Conversation).where(Conversation.id.in_(other_ids)).values(revision=Conversation.revision + 1))
     await db.execute(update(rt).where(rt.c.conversation_id == conversation.id).values(
         current_module=next_module, active_goal_id=next_goal, active_cycle_id=next_cycle, flow_status=flow,

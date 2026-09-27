@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const {chromium} = require('playwright');
 (async () => {
-  const browser = await chromium.launch({headless:true,channel:'msedge'});
+  const browser = await chromium.launch({headless:true,channel:process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
   const page = await browser.newPage({viewport:{width:390,height:844}});
   const errors=[]; page.on('pageerror',e=>errors.push(e.message));
   await page.addInitScript(() => {
@@ -53,6 +53,8 @@ const {chromium} = require('playwright');
     await page.waitForFunction(()=>!document.querySelector('textarea').disabled);
     // Members enter daily records directly beside the single conversation.
     assert.equal(await page.getByRole('button',{name:'切换对话侧栏',exact:true}).count(),0);
+    assert.equal(await page.getByLabel('当前对话模式',{exact:true}).count(),0);
+    assert.equal(await page.getByRole('dialog',{name:'选择新对话模式',exact:true}).count(),0);
     await page.getByRole('button',{name:'每日记录',exact:true}).click();
     await page.getByRole('button',{name:'查看历史',exact:true}).click();
     await page.getByRole('heading',{name:'历史每日记录'}).waitFor();

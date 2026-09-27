@@ -6,7 +6,7 @@ from datetime import date, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 Role = Literal["user", "assistant"]
 
@@ -656,6 +656,13 @@ class AuthResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ConversationCreate(BaseModel):
+    """A mode is selected once, at creation; chat metadata cannot change it."""
+
+    model_config = ConfigDict(extra="forbid")
+    routing_mode: Literal["router_code", "router_only"] = "router_code"
+
+
 class ConversationSummary(BaseModel):
     """One row in the sidebar's conversation list."""
 
@@ -685,6 +692,7 @@ class ConversationDetail(ConversationSummary):
     # Durable pointer for the next turn. This is deliberately not called
     # `module`: the latest assistant reply may belong to the previous module.
     next_module: str | None = None
+    routing_mode: Literal["router_code", "router_only"] = "router_code"
 
 
 class AdminSandboxConversation(ConversationDetail):

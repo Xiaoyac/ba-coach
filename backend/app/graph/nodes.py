@@ -61,6 +61,7 @@ from ..reasoning import ThinkingTagStreamGuard, normalize_reasoning_channels, co
 from ..retrieval import DatabaseKnowledgeBase
 from ..retrieval_intent import decide_retrieval
 from ..router_agent import extract_pa_card
+from ..routing_modes import ROUTER_CODE, ROUTER_ONLY
 from ..schemas import Message
 from ..workflow_state import (
     load_conversation_workflow,
@@ -454,6 +455,9 @@ def make_module_node(module_name: str, config: ModuleConfig):
     async def module_node(state: AgentState, runtime: Runtime[GraphContext]) -> dict:
         from ..answer_validator import validate_answer, SAFE_REPLY, INTEGRITY_CODES, recovery_reply
         from ..reply_workflow import read_reply_workflow, workflow_prompt, truthful_workflow_reply
+        # This is the pre-reply node's server-authorized result, never a
+        # client metadata flag or an unverified memory preference.
+        router_only = state.get("routing_mode") == ROUTER_ONLY
         authoritative = (runtime.context.settings.database_schema_version == "v2" and
                          bool(state.get("subject_id")) and not (state.get("memory") or {}).get("sandbox_mode"))
         async def reply_authority():
@@ -601,14 +605,15 @@ def make_module_node(module_name: str, config: ModuleConfig):
             system.append(SystemPromptSegment(guidance_block, cacheable=False))
         authority = await reply_authority()
         if authority is not None:
-            system.append(SystemPromptSegment(workflow_prompt(authority), cacheable=False))
+            system.append(SystemPromptSegment(workflow_prompt(authority,
+                routing_mode=ROUTER_ONLY if router_only else ROUTER_CODE), cacheable=False))
         # If a pure acknowledgement could not commit because the generated
         # summary was not verifiable, display the actual complete draft. This
         # introduces a reviewable version, never a confirmation or transition.
         from ..dialogue_confirmation import affirmative
         card = (authority or {}).get('confirmation_summary')
         show_confirmation_card = False
-        if authoritative and card and module_name == 'module_2':
+        if authoritative and not router_only and card and module_name == 'module_2':
             show_confirmation_card = affirmative(user_input)
             if not show_confirmation_card:
                 from ..confirmation_intent import may_redisplay_unchanged_plan
@@ -1520,6 +1525,7 @@ async def _run_background_routing(
     from sqlalchemy import select
     from ..models import ConversationMessage
     from ..v2_workflow import (runtime_for, create_goal_from_agent_dialogue, record_steps)
+    from ..routing_modes import effective_routing_mode
     from ..goal_contract import evidence_messages, capture_activities, save_m2_activity_context
     from ..ai_telemetry import add_ai_event
 
@@ -1599,6 +1605,8 @@ async def _run_background_routing(
                 conversation, persisted, messages = await current_source(db)
                 if not messages or not still_current():
                     return
+                mode = await effective_routing_mode(db, conversation=conversation,
+                    state=persisted, user_id=subject_id)
                 diagnostics = {}
                 if current == "module_2" and data:
                     # Trials and secondary activities are useful even when a
@@ -1612,9 +1620,16 @@ async def _run_background_routing(
                         await create_goal_from_agent_dialogue(db, session_id=session_id, user_id=subject_id,
                             data=data, completed_steps=[], assistant_message_id=assistant_message_id,
                             diagnostics=diagnostics)
-                await record_steps(db, session_id=session_id, user_id=subject_id, module=current,
-                    requested_target=current, steps=[], assistant_message_id=assistant_message_id,
-                    diagnostics=diagnostics, allow_transition=False)
+                if mode == ROUTER_ONLY:
+                    # Source-backed drafts and activities may be refreshed,
+                    # but code progress/confirmation must not reinterpret the
+                    # already committed Router module decision.
+                    diagnostics["routing_mode"] = ROUTER_ONLY
+                    diagnostics["progress_commit"] = "skipped_router_only"
+                else:
+                    await record_steps(db, session_id=session_id, user_id=subject_id, module=current,
+                        requested_target=current, steps=[], assistant_message_id=assistant_message_id,
+                        diagnostics=diagnostics, allow_transition=False)
                 _, durable = await runtime_for(db, session_id)
                 published_memory = durable["memory"] or {}
                 telemetry["database_write"] = {"status": "completed", "record_id": record_id,
@@ -1629,7 +1644,8 @@ async def _run_background_routing(
                 conversation.revision += 1
                 await db.commit()
             await context.store.set_memory(session_id, published_memory)
-            await context.store.set_module(session_id, durable["current_module"])
+            if mode != ROUTER_ONLY:
+                await context.store.set_module(session_id, durable["current_module"])
     except Exception:
         logger.exception("post-reply persistence failed session=%s", session_id)
         if still_current():

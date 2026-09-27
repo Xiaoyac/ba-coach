@@ -49,6 +49,8 @@ class AgentState(TypedDict, total=False):
     memory: dict[str, str]
     # Committed business module, refreshed before the current-turn router.
     current_module: str | None
+    # Server-authorized conversation experiment; never read from chat metadata.
+    routing_mode: str
     routing_state: dict[str, Any]
     transition_from_module: str
     knowledge_task: str

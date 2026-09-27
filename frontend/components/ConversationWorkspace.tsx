@@ -10,13 +10,16 @@ import {
   getCurrentConversation,
   isMissing,
   listConversations,
+  routingModeLabels,
   subscribeConversation,
   updateConversation,
   type ConversationDetail,
   type ConversationSummary,
+  type ConversationRoutingMode,
 } from "@/lib/conversations";
 import { downloadMarkdown } from "@/lib/markdown";
 import Chat from "@/components/Chat";
+import ConversationModeModal from "@/components/ConversationModeModal";
 import ConversationSidebar from "@/components/ConversationSidebar";
 import ChangePasswordModal from "@/components/ChangePasswordModal";
 import EmailSettingsModal from "@/components/EmailSettingsModal";
@@ -112,6 +115,10 @@ export default function ConversationWorkspace({
   const isAdmin = accountRole === "admin";
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [conversationRoutingMode, setConversationRoutingMode] = useState<ConversationRoutingMode>("router_code");
+  const [modeChooserOpen, setModeChooserOpen] = useState(false);
+  const [modeChooserBusy, setModeChooserBusy] = useState(false);
+  const [modeChooserError, setModeChooserError] = useState<string | null>(null);
   const activeSessionIdRef = useRef<string | null>(sessionId);
   // Navigation reads use a version; streams have their own per-room task.
   // Late navigation loads cannot replace a newer room, and a stream can
@@ -206,6 +213,7 @@ export default function ConversationWorkspace({
   function showConversation(detail: ConversationDetail) {
     activeSessionIdRef.current = detail.session_id;
     setSessionId(detail.session_id);
+    setConversationRoutingMode(detail.routing_mode ?? "router_code");
     const turn = turns.current.get(detail.session_id);
     if (turn) {
       publishTurn(turn);
@@ -240,6 +248,7 @@ export default function ConversationWorkspace({
     // snapshot while React is switching views. Keep its sidebar metadata,
     // but never attach its module state or messages to the active chat.
     if (activeSessionIdRef.current !== detail.session_id) return;
+    setConversationRoutingMode(detail.routing_mode ?? "router_code");
 
     // Some mobile/proxy connections keep the POST body open after the server
     // has committed the assistant row and the client never receives the SSE
@@ -341,7 +350,17 @@ export default function ConversationWorkspace({
     }
   }
 
-  async function beginConversation(): Promise<ConversationDetail | null> {
+  async function beginConversation(mode?: ConversationRoutingMode): Promise<ConversationDetail | null> {
+    if (isAdmin && mode === undefined) {
+      setModeChooserError(null);
+      setModeChooserOpen(true);
+      setSidebarOpen(false);
+      if (!activeSessionIdRef.current) setLoadingConversation(false);
+      return null;
+    }
+    // The ref changes synchronously, so two clicks before React rerenders
+    // cannot start two administrative POSTs with different mode selections.
+    if (isAdmin && creatingConversationRef.current) return null;
     const generation = ++viewGenerationRef.current;
     activeSessionIdRef.current = null;
     setSessionId(null);
@@ -358,7 +377,7 @@ export default function ConversationWorkspace({
       // while it is in flight so one visible draft cannot create two rows.
       const request =
         creatingConversationRef.current ??
-        (creatingConversationRef.current = isAdmin ? createConversation() : getCurrentConversation());
+        (creatingConversationRef.current = isAdmin ? createConversation(mode!) : getCurrentConversation());
       const detail = await request;
       if (generation !== viewGenerationRef.current) return null;
       showConversation(detail);
@@ -465,6 +484,7 @@ export default function ConversationWorkspace({
   }
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       if (!isAdmin) {
         await beginConversation();
@@ -472,6 +492,7 @@ export default function ConversationWorkspace({
         return;
       }
       const list = await refreshConversations();
+      if (cancelled) return;
       if (list === null) {
         setError("对话暂时加载失败，请刷新重试。已保存的对话会继续保留。");
         setLoadingConversation(false);
@@ -484,6 +505,7 @@ export default function ConversationWorkspace({
         await beginConversation();
       }
     })();
+    return () => { cancelled = true; };
   }, []);
 
   /** Cross-device live sync for the conversation currently on screen. */
@@ -764,6 +786,20 @@ export default function ConversationWorkspace({
     await beginConversation();
   }
 
+  async function handleModeChoice(mode: ConversationRoutingMode) {
+    if (!isAdmin || creatingConversationRef.current) return;
+    setModeChooserBusy(true);
+    setModeChooserError(null);
+    try {
+      const detail = await beginConversation(mode);
+      if (!mountedRef.current) return;
+      if (detail) setModeChooserOpen(false);
+      else setModeChooserError("新对话未能创建，请稍后重试。你的历史对话仍会保留。");
+    } finally {
+      if (mountedRef.current) setModeChooserBusy(false);
+    }
+  }
+
   async function handleSelect(targetSessionId: string) {
     setSidebarOpen(false);
     if (targetSessionId === activeSessionIdRef.current) return;
@@ -952,10 +988,17 @@ export default function ConversationWorkspace({
             local state (the draft input, composer height, scroll position)
             resets the same way a fresh page load would rather than carrying
             over from whatever was being typed in the previous conversation. */}
-        <Chat
+        {isAdmin && !sessionId && !loadingConversation ? <section className="workspace-card flex h-full w-full flex-col items-center justify-center px-6 text-center">
+          <h1 className="text-lg font-semibold">开始一段新对话</h1>
+          <p className="mt-3 max-w-sm text-sm leading-6 text-ink-muted">先选择这段对话的模块跳转方式，再从模块一开始。目前还没有创建新对话。</p>
+          {error && <p role="alert" className="mt-3 max-w-sm text-sm text-alert-ink">{error}</p>}
+          <button type="button" onClick={handleNew} className="mt-6 min-h-11 rounded-xl bg-accent px-5 text-sm text-on-accent">选择对话模式</button>
+          <div className="mt-3 flex gap-3"><button type="button" onClick={() => { if (desktopLayout) setSidebarCollapsed(false); else setSidebarOpen(true); }} className="min-h-11 px-2 text-sm text-ink-muted">查看对话历史</button><button type="button" onClick={onLogout} className="min-h-11 px-2 text-sm text-ink-muted">退出登录</button></div>
+        </section> : <Chat
           key={sessionId ?? "draft"}
           messages={messages}
           routing={routing}
+          headerContent={isAdmin ? <><h1 className="truncate text-[0.92rem] font-semibold tracking-[0.02em] text-ink">对话</h1>{sessionId && !loadingConversation && <p aria-label="当前对话模式" title="本段对话创建时选定，不能在对话中切换" className="mt-0.5 text-xs leading-4 text-accent-ink">{routingModeLabels[conversationRoutingMode]}</p>}</> : undefined}
           busy={busy}
           generationStartedAt={sessionId ? turns.current.get(sessionId)?.startedAt : undefined}
           loading={loadingConversation}
@@ -982,9 +1025,12 @@ export default function ConversationWorkspace({
           onOpenAdminDailyRecords={accountRole === "admin" ? () => setAdminDailyOpen(true) : undefined}
           onReportIssue={() => { void openIssueReport(); }}
           reportPreparing={reportPreparing}
-        />
+        />}
         </div>
       </div>
+
+      {isAdmin && modeChooserOpen && <ConversationModeModal busy={modeChooserBusy} error={modeChooserError}
+        onChoose={handleModeChoice} onClose={() => { if (!creatingConversationRef.current) setModeChooserOpen(false); }} />}
 
       {isAdmin && <GoalOverview open={goalsOpen} sessionId={sessionId} busy={busy || loadingConversation}
         onOpenReminders={() => setPushSettingsOpen(true)}
