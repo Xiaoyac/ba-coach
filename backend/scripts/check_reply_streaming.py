@@ -12,6 +12,7 @@ from time import perf_counter
 
 from app.config import get_settings
 from app.graph import get_graph
+from app.generation_control import GenerationControl
 from app.graph.state import GraphContext
 from app.providers.base import Completion, LLMProvider, StreamDelta
 from app.retrieval import StubKnowledgeBase
@@ -64,16 +65,18 @@ async def main():
     context = GraphContext(provider=main_provider, router_provider=probe,
         store=InMemorySessionStore(ttl_seconds=60, max_messages=40),
         knowledge_base=StubKnowledgeBase(), settings=settings, stream=True)
+    control = GenerationControl()
+    context.generation = control
     started = perf_counter()
     first = None
     chunks = []
     final = None
     received_before_eof = False
     try:
-        async for kind, value in get_graph().astream(
+        async for kind, value in control.iterate(get_graph().astream(
                 {'user_input': '这是合成连通测试，请用四个完整句子说明散步如何开始，不涉及个人记录。',
                  'forced_module': 'module_1'}, context=context,
-                stream_mode=['custom', 'values']):
+                stream_mode=['custom', 'values'])):
             if kind == 'values':
                 final = value
             elif value.get('type') == 'delta' and value.get('text'):

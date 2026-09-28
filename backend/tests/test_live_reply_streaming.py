@@ -70,8 +70,13 @@ async def test_partial_stream_is_never_replaced_by_receipt_or_recovery(
     assert 'confirmation_receipt_recovery' not in result['telemetry']
 
 
-async def test_real_graph_custom_stream_releases_first_delta_before_eof(context, provider, monkeypatch):
+@pytest.mark.parametrize("implicit_writer_available", [False, True])
+async def test_real_graph_custom_stream_releases_first_delta_before_eof(context, provider, monkeypatch, implicit_writer_available):
     from app.graph import get_graph
+    if not implicit_writer_available:
+        def unavailable():
+            raise RuntimeError("Python 3.10 async context unavailable")
+        monkeypatch.setattr(nodes, "get_stream_writer", unavailable)
     received = asyncio.Event()
 
     async def stream(**kwargs):
@@ -92,3 +97,60 @@ async def test_real_graph_custom_stream_releases_first_delta_before_eof(context,
             final = value
     assert final['final_response'] == '第一段。第二段。'
     assert ''.join(e['text'] for e in events if e['type'] == 'delta') == final['final_response']
+
+
+def test_injected_writer_binds_config_without_async_context_propagation():
+    from contextvars import Context
+    from langgraph.config import get_config
+    events = []
+
+    def injected_writer(event):
+        events.append((get_config()['metadata']['probe'], event))
+
+    first = nodes._node_writer(injected_writer, {'metadata': {'probe': 'first'}})
+    second = nodes._node_writer(injected_writer, {'metadata': {'probe': 'second'}})
+    empty = Context()
+    empty.run(first, {'type': 'delta', 'text': 'A'})
+    empty.run(second, {'type': 'delta', 'text': 'B'})
+    assert [label for label, _ in events] == ['first', 'second']
+    with pytest.raises(RuntimeError):
+        empty.run(get_config)
+
+
+@pytest.mark.parametrize('fence', ['', '```json\n'])
+async def test_json_wrapped_reply_streams_before_eof(context, provider, monkeypatch, fence):
+    from app.graph import get_graph
+    received = asyncio.Event()
+
+    async def stream(**kwargs):
+        yield StreamDelta(kind='content', text=fence + '{\n"chat_reply": "第一段。')
+        await asyncio.wait_for(received.wait(), timeout=1)
+        yield StreamDelta(kind='content', text='第二段。"}\n' + ('```' if fence else ''))
+
+    monkeypatch.setattr(provider, 'stream', stream)
+    events, final = [], None
+    async for kind, value in get_graph().astream(
+            {'user_input': '你好', 'forced_module': 'module_1'},
+            context=replace(context, stream=True), stream_mode=['custom', 'values']):
+        if kind == 'custom':
+            events.append(value)
+            if value.get('type') == 'delta':
+                assert value['text'] == ('第一段。' if not received.is_set() else '第二段。')
+                received.set()
+        else:
+            final = value
+    assert final['final_response'] == '第一段。第二段。'
+    assert ''.join(e['text'] for e in events if e['type'] == 'delta') == final['final_response']
+
+
+@pytest.mark.parametrize('chunk_size', [1, 2, 3, 7, 19])
+def test_json_stream_handles_split_escapes_without_exposing_other_fields(chunk_size):
+    import json
+    reply = '引号"、反斜线\\、换行\n、中文、emoji🙂。'
+    raw = '```json\n' + json.dumps({'chat_reply': reply, 'private': 'MUST_NOT_SHOW'}, ensure_ascii=True) + '\n```'
+    buffer = nodes.VisibleReplyBuffer.create()
+    emitted = []
+    for pos in range(0, len(raw), chunk_size):
+        emitted += buffer.push(raw[pos:pos + chunk_size])
+    final, tail = buffer.finish()
+    assert ''.join(emitted + tail) == final == reply

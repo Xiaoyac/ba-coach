@@ -31,8 +31,11 @@ import re
 from dataclasses import dataclass
 from time import perf_counter
 
+from langchain_core.runnables import RunnableConfig
+from langchain_core.runnables.config import set_config_context
 from langgraph.config import get_stream_writer
 from langgraph.runtime import Runtime
+from langgraph.types import StreamWriter
 
 from ..ai_telemetry import save_ai_event
 from ..trace_timing import record_span, prompt_source
@@ -118,22 +121,76 @@ def unwrap_chat_reply(text: str) -> str:
 
 @dataclass
 class VisibleReplyBuffer:
-    """Delay only possible JSON envelopes; ordinary prose still streams."""
+    """Stream prose and incrementally decode the provider's chat_reply wrapper."""
 
     raw_parts: list[str]
     buffered_parts: list[str]
-    mode: str = "deciding"  # deciding | holding | passthrough
+    mode: str = "deciding"  # deciding | holding | passthrough | json
+    json_pending: str = ""
+    json_visible: str = ""
+    json_done: bool = False
 
     @classmethod
     def create(cls) -> "VisibleReplyBuffer":
         return cls(raw_parts=[], buffered_parts=[])
 
+    def _decode_json_delta(self) -> list[str]:
+        """Decode complete characters only; keep split escapes for the next delta."""
+        text, pos, output = self.json_pending, 0, []
+        while pos < len(text) and not self.json_done:
+            char = text[pos]
+            if char == '"':
+                self.json_done = True
+                break
+            if char != "\\":
+                output.append(char)
+                pos += 1
+                continue
+            if pos + 1 >= len(text):
+                break
+            size = 6 if text[pos + 1] == 'u' else 2
+            if len(text) - pos < size:
+                break
+            if size == 6:
+                try:
+                    code = int(text[pos + 2:pos + 6], 16)
+                except ValueError:
+                    break
+                if 0xD800 <= code <= 0xDBFF:
+                    # A UTF-16 surrogate pair may straddle provider chunks.
+                    if len(text) - pos < 12:
+                        break
+                    size = 12
+            try:
+                decoded = json.loads('"' + text[pos:pos + size] + '"')
+                decoded.encode('utf-8')
+            except (ValueError, UnicodeError):
+                break
+            output.append(decoded)
+            pos += size
+        self.json_pending = '' if self.json_done else text[pos:]
+        visible = ''.join(output)
+        self.json_visible += visible
+        return [visible] if visible else []
+
     def push(self, delta: str) -> list[str]:
         self.raw_parts.append(delta)
         if self.mode == "passthrough":
             return [delta]
+        if self.mode == "json":
+            if self.json_done:
+                return []
+            self.json_pending += delta
+            return self._decode_json_delta()
         self.buffered_parts.append(delta)
-        preview = "".join(self.buffered_parts).lstrip().lower()
+        buffered = "".join(self.buffered_parts)
+        wrapper = re.match(r'^\s*(?:```json\s*)?\{\s*"chat_reply"\s*:\s*"', buffered)
+        if wrapper:
+            self.mode = "json"
+            self.json_pending = buffered[wrapper.end():]
+            self.buffered_parts.clear()
+            return self._decode_json_delta()
+        preview = buffered.lstrip().lower()
         if not preview:
             return []
         structured_prefixes = ("{", "```json")
@@ -148,6 +205,8 @@ class VisibleReplyBuffer:
         return [visible]
 
     def finish(self) -> tuple[str, list[str]]:
+        if self.mode == "json":
+            return self.json_visible, []
         raw = "".join(self.raw_parts)
         visible = unwrap_chat_reply(raw)
         if self.mode != "passthrough":
@@ -202,26 +261,48 @@ def _emit(event: dict) -> None:
         logger.debug("stream writer unavailable", exc_info=True)
 
 
+def _node_writer(writer: StreamWriter | None, config: RunnableConfig | None):
+    """Bind the injected config for LangGraph's Python 3.10 async writer.
+
+    Some versions' injected writer itself calls get_config(). Use the public
+    config context helper for the synchronous emission, with no global state
+    or dependence on asyncio's Python 3.11 context propagation.
+    """
+    if writer is None:
+        return _emit
+    if config is None:
+        return writer
+
+    def send(event):
+        with set_config_context(config) as ctx:
+            ctx.run(writer, event)
+    return send
+
+
 # ---------------------------------------------------------------------------
 # Step 2 — pre-processing
 # ---------------------------------------------------------------------------
 
 
 async def extract_memory_node(
-    state: AgentState, runtime: Runtime[GraphContext]
+    state: AgentState, runtime: Runtime[GraphContext],
+    writer: StreamWriter = None,
+    config: RunnableConfig = None,
 ) -> dict:
     """Load prior context for this session: chat history + durable memory.
 
     Reads through the session store, so swapping the store for Redis gives the
     graph cross-process memory with no change here.
     """
+    # Explicit injection also works in async graphs on Python 3.10.
+    _send = _node_writer(writer, config)
     started = perf_counter()
     origin = state.get("turn_started_monotonic", started)
     telemetry = dict(state.get("telemetry") or {})
     context = runtime.context
     session = await context.store.get_or_create(state.get("session_id"))
 
-    _emit(
+    _send(
         {
             "type": "trace",
             "node": "extract_memory",
@@ -261,7 +342,9 @@ async def extract_memory_node(
 
 
 async def analyze_intent_node(
-    state: AgentState, runtime: Runtime[GraphContext]
+    state: AgentState, runtime: Runtime[GraphContext],
+    writer: StreamWriter = None,
+    config: RunnableConfig = None,
 ) -> dict:
     """Initialize the module before the pre-reply routing stage.
 
@@ -269,9 +352,11 @@ async def analyze_intent_node(
     default. The pre-reply router subsequently evaluates the current input;
     this initializer does not decide a formal business transition.
     """
+    # Explicit injection also works in async graphs on Python 3.10.
+    _send = _node_writer(writer, config)
 
     def decided(module: str, routed_by: str) -> dict:
-        _emit(
+        _send(
             {
                 "type": "meta",
                 "node": "analyze_intent",
@@ -302,7 +387,9 @@ def route_after_intent(state: AgentState) -> str:
 
 
 async def recall_memory_node(
-    state: AgentState, runtime: Runtime[GraphContext]
+    state: AgentState, runtime: Runtime[GraphContext],
+    writer: StreamWriter = None,
+    config: RunnableConfig = None,
 ) -> dict:
     """Pull recent Memos entries into this turn's prompt — but not every turn.
 
@@ -321,6 +408,8 @@ async def recall_memory_node(
     "just arrived" from "already here". `last_module` still holds the module
     from the turn *before* this one, which can.
     """
+    # Explicit injection also works in async graphs on Python 3.10.
+    _send = _node_writer(writer, config)
     subject_id = state.get("subject_id")
     memos = runtime.context.memos
     sessionmaker = runtime.context.sessionmaker
@@ -383,7 +472,7 @@ async def recall_memory_node(
         except Exception:  # noqa: BLE001 — never fail a turn over context loading
             logger.exception("loading clinical context failed for %s", subject_id[:8])
 
-    _emit(
+    _send(
         {
             "type": "trace",
             "node": "recall_memory",
@@ -452,7 +541,11 @@ def make_module_node(module_name: str, config: ModuleConfig):
     register that instead — the graph wiring in builder.py does not care.
     """
 
-    async def module_node(state: AgentState, runtime: Runtime[GraphContext]) -> dict:
+    module_config = config
+
+    async def module_node(state: AgentState, runtime: Runtime[GraphContext], writer: StreamWriter = None, config: RunnableConfig = None) -> dict:
+        # Explicit injection also works in async graphs on Python 3.10.
+        _send = _node_writer(writer, config)
         from ..answer_validator import validate_answer
         from ..reply_workflow import read_reply_workflow, workflow_prompt
         # This is the pre-reply node's server-authorized result, never a
@@ -475,13 +568,13 @@ def make_module_node(module_name: str, config: ModuleConfig):
             if context.stream:
                 if event.get("type") == "delta":
                     emitted_content.append(event["text"])
-                _emit(event)
+                _send(event)
         context = runtime.context
         user_input = state["user_input"]
 
         knowledge = []
         retrieval_metrics = {}
-        if config.retrieve:
+        if module_config.retrieve:
             gate_started = perf_counter()
             decision = decide_retrieval(
                 state, enabled=context.settings.knowledge_intent_gate_enabled
@@ -493,7 +586,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
             try:
                 if decision.retrieve:
                     outcome = "error"
-                    search_args = {"module": module_name, "query": _knowledge_query(state), "top_k": config.top_k}
+                    search_args = {"module": module_name, "query": _knowledge_query(state), "top_k": module_config.top_k}
                     if isinstance(context.knowledge_base, DatabaseKnowledgeBase):
                         subject, session = state.get("subject_id"), state.get("session_id")
                         scope = (subject, session, str(bool((state.get("memory") or {}).get("sandbox_mode")))) if subject and session else None
@@ -521,7 +614,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 }
                 # Structured server log: no query, transcript, user ID, or reference text.
                 logger.info("retrieval_gate %s", json.dumps(retrieval_metrics, ensure_ascii=False))
-            _emit(
+            _send(
                 {
                     "type": "trace",
                     "node": module_name,
@@ -581,7 +674,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
         guided_knowledge, guidance_block, mediator_metrics = await mediate_knowledge(
             state=mediator_state, module=module_name, knowledge=knowledge, provider=context.router_provider,
             settings=context.settings, prompt=mediator_prompt, debug_output=mediator_debug)
-        _emit({"type":"trace", "node":"knowledge_mediator", "detail":mediator_metrics})
+        _send({"type":"trace", "node":"knowledge_mediator", "detail":mediator_metrics})
         logger.info("knowledge_mediator %s", json.dumps({k:v for k,v in mediator_metrics.items() if k not in ("guidance","cautions","selections","applications","note")},ensure_ascii=False))
         if context.sessionmaker is not None and mediator_metrics["status"] != "skipped":
             await save_ai_event(context.sessionmaker, stage="knowledge_mediator", session_id=state.get("session_id"),
@@ -623,20 +716,20 @@ def make_module_node(module_name: str, config: ModuleConfig):
                     user_text=user_input, proposal_text=card['text'], module=module_name)
         if show_confirmation_card:
             if context.stream:
-                _emit({'type': 'delta', 'text': card['text']})
+                _send({'type': 'delta', 'text': card['text']})
             return {'retrieved_knowledge': [], 'provider': 'workflow_state',
                     'model': 'BA Coach 状态机', 'final_response': card['text'],
                     'reasoning_content': '', 'usage': {}, 'error': None,
                     'telemetry': {**(state.get('telemetry') or {}), 'main_generation_duration_ms': 0,
                         'rendered_confirmation': {k: card[k] for k in ('record_id', 'record_hash')}}}
         telemetry = dict(state.get("telemetry") or {})
-        if config.retrieve:
+        if module_config.retrieve:
             record_span(telemetry, "retrieval", retrieval_started,
                         origin=state.get("turn_started_monotonic"), status=outcome)
         record_span(telemetry, "knowledge_mediator", mediator_started,
                     origin=state.get("turn_started_monotonic"), status=mediator_metrics["status"])
         telemetry["execution_timeline"][-1]["duration_ms"] = mediator_metrics["duration_ms"]
-        if config.retrieve:
+        if module_config.retrieve:
             telemetry["execution_timeline"][-2]["duration_ms"] = retrieval_metrics["total_duration_ms"]
         from ..prompts import GLOBAL_PROMPT, MODULE_PROMPTS
         telemetry["prompt_sources"] = [*(telemetry.get("prompt_sources") or []),
@@ -845,7 +938,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
             validation["progression_held"] = False
             validation["display_source"] = "original_model_reply"
             record_span(telemetry, "answer_validator", validator_started, origin=state.get("turn_started_monotonic"), status=validation["status"])
-            _emit({"type": "trace", "node": "answer_validator", "detail": {k: v for k, v in validation.items() if k not in {"original_reply", "replacement_reply"}}})
+            _send({"type": "trace", "node": "answer_validator", "detail": {k: v for k, v in validation.items() if k not in {"original_reply", "replacement_reply"}}})
         else:
             telemetry["answer_validator"] = {"status": "disabled", "llm_calls": 0, "display_source": "original_model_reply"}
 
@@ -880,7 +973,7 @@ MODULE_NODES = {
 # ---------------------------------------------------------------------------
 
 
-async def risk_gate_node(state: AgentState, runtime: Runtime[GraphContext]) -> dict:
+async def risk_gate_node(state: AgentState, runtime: Runtime[GraphContext], writer: StreamWriter = None, config: RunnableConfig = None) -> dict:
     """Screen this turn *before* answering, and divert if it is a crisis.
 
     This is the one place in the graph that deliberately spends latency. Every
@@ -898,6 +991,8 @@ async def risk_gate_node(state: AgentState, runtime: Runtime[GraphContext]) -> d
     failed screen would be both wrong and alarming, and the module prompts
     still carry their own risk-handling instructions underneath.
     """
+    # Explicit injection also works in async graphs on Python 3.10.
+    _send = _node_writer(writer, config)
     telemetry = dict(state.get("telemetry") or {})
     if not runtime.context.settings.risk_gate_enabled:
         telemetry["risk_gate_duration_ms"] = 0
@@ -942,7 +1037,7 @@ async def risk_gate_node(state: AgentState, runtime: Runtime[GraphContext]) -> d
 
     record_span(telemetry, "risk_gate", started, origin=state.get("turn_started_monotonic"))
     flagged = bool(risk.get("risk_status"))
-    _emit({"type": "trace", "node": "risk_gate", "detail": {"flagged": flagged}})
+    _send({"type": "trace", "node": "risk_gate", "detail": {"flagged": flagged}})
 
     if flagged:
         logger.warning(
@@ -960,7 +1055,7 @@ def route_after_risk(state: AgentState) -> str:
     return route_after_intent(state)
 
 
-async def crisis_node(state: AgentState, runtime: Runtime[GraphContext]) -> dict:
+async def crisis_node(state: AgentState, runtime: Runtime[GraphContext], writer: StreamWriter = None, config: RunnableConfig = None) -> dict:
     """Answer a flagged turn. Replaces the module entirely for this turn.
 
     The empathic half is generated — it has to respond to what this person
@@ -972,6 +1067,8 @@ async def crisis_node(state: AgentState, runtime: Runtime[GraphContext]) -> dict
     On a provider failure the resources still go out on their own. That is the
     one part of this reply that genuinely must not be lost.
     """
+    # Explicit injection also works in async graphs on Python 3.10.
+    _send = _node_writer(writer, config)
     context = runtime.context
     messages = [
         *(state.get("chat_history") or []),
@@ -1021,7 +1118,7 @@ async def crisis_node(state: AgentState, runtime: Runtime[GraphContext]) -> dict
                     first_content_seen = True
                 for guarded_delta in content_guard.push(delta.text):
                     for visible_delta in reply_buffer.push(guarded_delta):
-                        _emit({"type": "delta", "text": visible_delta})
+                        _send({"type": "delta", "text": visible_delta})
         else:
             completion = await context.provider.complete(system=system, messages=messages)
             normalized = normalize_reasoning_channels(
@@ -1052,10 +1149,10 @@ async def crisis_node(state: AgentState, runtime: Runtime[GraphContext]) -> dict
             content_guard, reply_buffer, reasoning_parts
         )
         for visible_delta in final_deltas:
-            _emit({"type": "delta", "text": visible_delta})
+            _send({"type": "delta", "text": visible_delta})
         if disclosed_reasoning:
-            _emit({"type": "reasoning_delta", "text": disclosed_reasoning})
-        _emit({"type": "delta", "text": CRISIS_RESOURCES})
+            _send({"type": "reasoning_delta", "text": disclosed_reasoning})
+        _send({"type": "delta", "text": CRISIS_RESOURCES})
     else:
         visible = unwrap_chat_reply("".join(reply_buffer.raw_parts))
         disclosed_reasoning = "".join(reasoning_parts)
@@ -1075,9 +1172,13 @@ async def crisis_node(state: AgentState, runtime: Runtime[GraphContext]) -> dict
 
 
 async def route_next_module_node(
-    state: AgentState, runtime: Runtime[GraphContext]
+    state: AgentState, runtime: Runtime[GraphContext],
+    writer: StreamWriter = None,
+    config: RunnableConfig = None,
 ) -> dict:
     """Keep the committed pre-reply decision and schedule fact bookkeeping."""
+    # Explicit injection also works in async graphs on Python 3.10.
+    _send = _node_writer(writer, config)
     current = state.get("extracted_intent", DEFAULT_MODULE)
     result = {"next_module": current,
         "routing_reasoning_content": state.get("routing_reasoning_content", ""),
@@ -1088,7 +1189,7 @@ async def route_next_module_node(
     if state.get("risk"):
         explanation = "本轮触发危机应答；风险判断先于模块路由和业务提交，本轮保留原有业务进度。"
         result.update(routing_reasoning_content=explanation, router_model_name="规则引擎")
-        _emit({"type": "routing_reasoning", "text": explanation, "model": "规则引擎"})
+        _send({"type": "routing_reasoning", "text": explanation, "model": "规则引擎"})
     return result
 
 
@@ -1669,13 +1770,15 @@ def schedule_background_routing(
     task.add_done_callback(_remove)
 
 
-async def summarizer_node(state: AgentState, runtime: Runtime[GraphContext]) -> dict:
+async def summarizer_node(state: AgentState, runtime: Runtime[GraphContext], writer: StreamWriter = None, config: RunnableConfig = None) -> dict:
     """Persist risk and summarize the module just left, without blocking reply.
 
     V2 record extraction happens at its sourced pre/post-reply boundaries.
     A transition summary includes earlier dialogue and the current user input,
     never the new module's generated response.
     """
+    # Explicit injection also works in async graphs on Python 3.10.
+    _send = _node_writer(writer, config)
     current = state.get("transition_from_module", state.get("extracted_intent", DEFAULT_MODULE))
     target = state.get("next_module", current)
     subject_id = state.get("subject_id")
@@ -1694,7 +1797,7 @@ async def summarizer_node(state: AgentState, runtime: Runtime[GraphContext]) -> 
     # and transitions can be tested, but risk rows, module extraction, Memos,
     # and `user_profile.current_module` must not be polluted by test dialogue.
     if (state.get("memory") or {}).get("sandbox_mode") == "true":
-        _emit(
+        _send(
             {
                 "type": "trace",
                 "node": "summarizer",
@@ -1714,7 +1817,7 @@ async def summarizer_node(state: AgentState, runtime: Runtime[GraphContext]) -> 
         )
 
     if not changed:
-        _emit({"type": "trace", "node": "summarizer", "detail": {"risk_only": True}})
+        _send({"type": "trace", "node": "summarizer", "detail": {"risk_only": True}})
         return {}
 
     transcript = "\n".join(f"{m.role}：{m.content}" for m in state.get("chat_history") or [])
@@ -1755,7 +1858,7 @@ async def summarizer_node(state: AgentState, runtime: Runtime[GraphContext]) -> 
             )
         )
 
-    _emit(
+    _send(
         {
             "type": "trace",
             "node": "summarizer",
@@ -1826,7 +1929,9 @@ def _derive_memory(state: AgentState) -> dict[str, str]:
 
 
 async def update_memory_and_format_node(
-    state: AgentState, runtime: Runtime[GraphContext]
+    state: AgentState, runtime: Runtime[GraphContext],
+    writer: StreamWriter = None,
+    config: RunnableConfig = None,
 ) -> dict:
     """Convergence node: persist the turn, update memory, publish the result.
 
@@ -1838,6 +1943,8 @@ async def update_memory_and_format_node(
     into `text/event-stream` frames stays in routes/chat.py — the graph should
     not know what transport is carrying it.
     """
+    # Explicit injection also works in async graphs on Python 3.10.
+    _send = _node_writer(writer, config)
     context = runtime.context
     session_id = state["session_id"]
     reply = state.get("final_response", "")
@@ -1861,9 +1968,9 @@ async def update_memory_and_format_node(
     )
 
     if error:
-        _emit({"type": "error", "node": "update_memory_and_format", "detail": error})
+        _send({"type": "error", "node": "update_memory_and_format", "detail": error})
     else:
-        _emit(
+        _send(
             {
                 "type": "done",
                 "node": "update_memory_and_format",
