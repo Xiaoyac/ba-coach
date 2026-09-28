@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     knowledge_result_cache_max_bytes: int = Field(default=8388608, ge=1024, le=134217728)
     knowledge_intent_gate_enabled: bool = True
     knowledge_mediator_enabled: bool = True
+    # Record post-generation findings without buffering or replacing replies.
     answer_validator_enabled: bool = True
     # The mediator is a bounded selector, not a second conversational model.
     # Eight seconds is an upper bound for the user-visible critical path;

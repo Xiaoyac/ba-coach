@@ -453,8 +453,8 @@ def make_module_node(module_name: str, config: ModuleConfig):
     """
 
     async def module_node(state: AgentState, runtime: Runtime[GraphContext]) -> dict:
-        from ..answer_validator import validate_answer, SAFE_REPLY, INTEGRITY_CODES, recovery_reply
-        from ..reply_workflow import read_reply_workflow, workflow_prompt, truthful_workflow_reply
+        from ..answer_validator import validate_answer
+        from ..reply_workflow import read_reply_workflow, workflow_prompt
         # This is the pre-reply node's server-authorized result, never a
         # client metadata flag or an unverified memory preference.
         router_only = state.get("routing_mode") == ROUTER_ONLY
@@ -467,12 +467,14 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 return await read_reply_workflow(runtime.context.sessionmaker, state['subject_id'], state['session_id'])
             except Exception:
                 return {"available": False}
-        pending_output: list[dict] = []
+        # Validation is diagnostic only. Once sent, visible text must also be
+        # the text persisted, including when the provider fails mid-stream.
+        emitted_content: list[str] = []
         force_reply_validation = False
         def emit_output(event):
-            if runtime.context.settings.answer_validator_enabled or authoritative or force_reply_validation:
-                pending_output.append(event)
-            else:
+            if context.stream:
+                if event.get("type") == "delta":
+                    emitted_content.append(event["text"])
                 _emit(event)
         context = runtime.context
         user_input = state["user_input"]
@@ -709,8 +711,6 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 )
                 for visible_delta in final_deltas:
                     emit_output({"type": "delta", "text": visible_delta})
-                if disclosed_reasoning:
-                    emit_output({"type": "reasoning_delta", "text": disclosed_reasoning})
                 update["final_response"] = visible
                 update["reasoning_content"] = disclosed_reasoning
                 update.setdefault("usage", {})
@@ -753,8 +753,6 @@ def make_module_node(module_name: str, config: ModuleConfig):
             )
             for visible_delta in final_deltas:
                 emit_output({"type": "delta", "text": visible_delta})
-            if disclosed_reasoning:
-                emit_output({"type": "reasoning_delta", "text": disclosed_reasoning})
             update["final_response"] = visible
             update["reasoning_content"] = disclosed_reasoning
             update["error"] = str(exc)
@@ -772,18 +770,21 @@ def make_module_node(module_name: str, config: ModuleConfig):
         if invalid_protocol and not update.get("error"):
             # Match the streaming guard for non-streaming calls too. Never
             # unwrap a tool-call envelope into an apparently successful answer.
-            update.update(final_response="", reasoning_content="")
-            pending_output.clear()
+            update.update(final_response="".join(emitted_content), reasoning_content="")
             force_reply_validation = True
+            if emitted_content:
+                update["error"] = "回复生成中断，请重试；已显示的内容已保留。"
+                telemetry["error_code"] = "invalid_protocol_completion"
+        if emitted_content:
+            update["final_response"] = "".join(emitted_content)
         telemetry["normalized_reply"] = update.get("final_response", "")
         receipt = state.get('confirmation_receipt') or {}
-        if update.get('error') and receipt.get('module') == module_name:
+        if update.get('error') and not update.get('final_response') and receipt.get('module') == module_name:
             receipt_text = '本轮确认已保存，但后续回复生成中断。已有对话和记录已保留。'
             if receipt_text:
                 telemetry['confirmation_receipt_recovery'] = telemetry.get('error_code')
                 update.update(final_response=receipt_text, reasoning_content='', error=None,
                               model='BA Coach 状态机')
-                pending_output.clear()
                 emit_output({'type': 'delta', 'text': receipt_text})
 
         # Budget exhaustion or an invalid provider envelope is a generation
@@ -797,7 +798,6 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 finish_reason=telemetry.get("finish_reason"), usage=update.get("usage", {}),
                 invalid_protocol=invalid_protocol)
             telemetry["reply_recovery"] = recovery
-            pending_output.clear()  # never disclose the abandoned answer's reasoning
             update["reasoning_content"] = ""
             recovery_usage = recovery.get("usage", {})
             original_usage = update.get("usage", {})
@@ -822,6 +822,13 @@ def make_module_node(module_name: str, config: ModuleConfig):
                     "reasoning_budget_exhausted" if recovery.get("original_finish_reason") == "length" else "empty_completion")
                 emit_output({"type": "delta", "text": update["final_response"]})
 
+        if context.stream:
+            # Keep the saved answer byte-for-byte aligned with delivered deltas;
+            # normalization must not silently rewrite already visible prose.
+            update["final_response"] = "".join(emitted_content)
+            if update.get("reasoning_content"):
+                emit_output({"type": "reasoning_delta", "text": update["reasoning_content"]})
+
         generation_finished = perf_counter()
         record_span(telemetry, "main_generation", generation_started, origin=state.get("turn_started_monotonic"), status="failed" if update.get("error") else "completed")
         validator_started = perf_counter()
@@ -831,45 +838,12 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 evidence_ids=[str(k.id) for k in guided_knowledge], workflow=authority,
                 current_user=user_input)
             telemetry["answer_validator"] = validation
-            original_reply = update.get("final_response", "")
-            block_codes = {f['code'] for f in validation['findings'] if f['severity'] == 'block'}
-            if block_codes and not block_codes.intersection(INTEGRITY_CODES) and not update.get('error'):
-                workflow_only = block_codes <= {'uncommitted_workflow_claim', 'panel_confirmation_instruction', 'confirmation_claim'}
-                update['final_response'] = (truthful_workflow_reply(authority or {'available': False})
-                    if workflow_only else recovery_reply(module_name))
-                update['reasoning_content'] = ''
-                # Correcting a premature success claim must not discard the
-                # user's independently valid activity selection. Only the
-                # replacement reply reaches persistence/extraction; the bad
-                # assistant draft is never evidence. Other safety/integrity
-                # failures keep the existing full progression hold.
-                preserve_user_evidence = bool(workflow_only and authoritative
-                    and (authority or {}).get('available')
-                    and module_name in {'module_2', 'module_3'})
-                update['reply_held'] = not preserve_user_evidence
-                validation['status'] = 'corrected'
-                validation['replacement_source'] = 'database_workflow' if workflow_only else 'module_safe_recovery'
-                validation['original_status'] = 'blocked'
-                validation['progression_held'] = not preserve_user_evidence
-                validation['user_evidence_retained'] = preserve_user_evidence
-                if context.stream:
-                    _emit({'type':'delta','text':update['final_response']})
-            elif validation["status"] == "blocked":
-                # An upstream failure with no answer keeps its existing error
-                # contract; do not invent a successful assistant turn for it.
-                update["final_response"] = "" if update.get("error") and not update.get("final_response") else SAFE_REPLY
-                update["reasoning_content"] = ""
-                update["error"] = update.get("error") or "回复未通过完整性检查"
-                if context.stream and update["final_response"]:
-                    _emit({"type": "delta", "text": update["final_response"]})
-            else:
-                for event in pending_output:
-                    _emit(event)
-            if update.get("final_response", "") != original_reply:
-                validation["original_reply"] = original_reply
-                validation["replacement_reply"] = update.get("final_response", "")
-            else:
-                validation["display_source"] = "original_model_reply"
+            validation["mode"] = "diagnostic_only"
+            validation["original_status"] = validation["status"]
+            if validation["status"] == "blocked":
+                validation["status"] = "review"
+            validation["progression_held"] = False
+            validation["display_source"] = "original_model_reply"
             record_span(telemetry, "answer_validator", validator_started, origin=state.get("turn_started_monotonic"), status=validation["status"])
             _emit({"type": "trace", "node": "answer_validator", "detail": {k: v for k, v in validation.items() if k not in {"original_reply", "replacement_reply"}}})
         else:

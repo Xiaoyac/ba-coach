@@ -341,7 +341,7 @@ def test_conversational_card_confirmation_is_not_a_panel_instruction():
 
 @pytest.mark.parametrize('module,reply', BAD_REPLIES)
 @pytest.mark.parametrize('stream', [False, True])
-async def test_bad_drafts_never_leak_or_drive_workflow(context, provider, monkeypatch, module, reply, stream):
+async def test_reply_findings_preserve_output_and_history(context, provider, monkeypatch, module, reply, stream):
     import dataclasses
     from app.graph import get_graph
     from app.graph import nodes
@@ -366,28 +366,17 @@ async def test_bad_drafts_never_leak_or_drive_workflow(context, provider, monkey
             context=ctx, stream_mode=['custom','values']):
         if kind == 'custom': events.append(value)
         else: final = value
-    if reply in QUALITY_REPLIES:
-        assert final['final_response'] == reply and not final.get('reply_held')
-        assert final['telemetry']['answer_validator']['status'] == 'review'
-        assert 'replacement_reply' not in final['telemetry']['answer_validator']
-        if stream:
-            assert ''.join(e['text'] for e in events if e['type'] == 'delta') == reply
-        return
-    assert not final.get('error') and final['reply_held']
-    assert final['next_module'] == module and final['routing_pending'] is False
-    assert final['reasoning_content'] == '' and final['final_response'] != reply
+    assert final['final_response'] == reply and not final.get('reply_held')
     validation = final['telemetry']['answer_validator']
-    assert validation['original_status'] == 'blocked' and validation['status'] == 'corrected'
-    assert validation['progression_held'] and validation['llm_calls'] == 0
+    assert validation['status'] == 'review'
+    assert validation['mode'] == 'diagnostic_only'
+    assert not validation['progression_held'] and validation['llm_calls'] == 0
+    assert 'replacement_reply' not in validation
+    assert not final.get('error')
     if stream:
-        assert ''.join(e['text'] for e in events if e['type'] == 'delta') == final['final_response']
-    assert not any(e['type'] == 'reasoning_delta' for e in events)
-    assert any(e['type'] == 'done' for e in events)
+        assert ''.join(e['text'] for e in events if e['type'] == 'delta') == reply
     saved = await context.store.get(final['session_id'])
-    assert saved.messages[-1].content == final['final_response']
-    nodes.schedule_background_routing(final,ctx,assistant_message_id=None)
-    # Defense in depth even when a direct caller incorrectly sets pending=True.
-    nodes.schedule_background_routing({**final,'routing_pending':True},ctx,assistant_message_id=None)
+    assert saved.messages[-1].content == reply
 
 
 @pytest.mark.parametrize('stream', [False,True])

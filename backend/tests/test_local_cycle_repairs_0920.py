@@ -69,7 +69,7 @@ async def test_review_request_renders_saved_version_after_nonproposal_reply(
 @pytest.mark.asyncio
 @pytest.mark.parametrize('stream', [False, True])
 @pytest.mark.parametrize('unsafe', [False, True])
-async def test_workflow_reply_correction_retains_only_safe_user_evidence(
+async def test_workflow_reply_findings_do_not_replace_or_hold(
     context, provider, monkeypatch, stream, unsafe,
 ):
     original = '好的，计划就这么定了。' + ('不要再找借口。' if unsafe else '')
@@ -91,14 +91,14 @@ async def test_workflow_reply_correction_retains_only_safe_user_evidence(
         'session_id': 'local-regression', 'subject_id': 'local-user',
         'user_input': '我选择晚饭后散步，每天十分钟。', 'chat_history': [],
     }, Runtime(context=ctx))
-    assert result['final_response'] != original
-    assert result['reply_held'] is unsafe
+    assert result['final_response'] == original
+    assert not result['reply_held']
     audit = result['telemetry']['answer_validator']
-    assert audit['progression_held'] is unsafe
-    assert audit['user_evidence_retained'] is (not unsafe)
+    assert not audit['progression_held']
+    assert audit['mode'] == 'diagnostic_only'
     if stream:
         assert ''.join(e['text'] for e in events if e['type'] == 'delta') == result['final_response']
-        assert original not in str(events)
+        assert original in str(events)
 
 
 @pytest.mark.parametrize('stream', [False, True])
@@ -158,7 +158,7 @@ async def test_provider_failure_uses_only_a_real_confirmation_receipt(
     if committed:
         state['confirmation_receipt'] = {'module': module, 'cycle_id': 'committed-cycle'}
     result = await nodes.MODULE_NODES[module](state, Runtime(context=ctx))
-    if committed:
+    if committed and not stream:
         expected = '本轮确认已保存，但后续回复生成中断。已有对话和记录已保留。'
         assert result['final_response'] == expected
         assert result['error'] is None
@@ -168,5 +168,8 @@ async def test_provider_failure_uses_only_a_real_confirmation_receipt(
             assert '未完成的故障草稿' not in str(events)
     else:
         assert result['error'] == 'upstream model failed'
+        if stream:
+            assert result['final_response'] == '未完成的故障草稿'
+            assert ''.join(e['text'] for e in events if e['type'] == 'delta') == result['final_response']
         assert '已确认并保存' not in result['final_response']
         assert 'confirmation_receipt_recovery' not in result['telemetry']

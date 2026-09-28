@@ -57,7 +57,7 @@ async def test_only_router_uses_main_model_instead_of_confirmation_card(context,
     ("你就是懒。", "shaming_prescription"),
 ])
 @pytest.mark.parametrize("stream", [False, True])
-async def test_only_router_still_checks_real_save_claims_and_safety(context, provider, monkeypatch, reply, code, stream):
+async def test_only_router_records_save_and_safety_findings_without_replacement(context, provider, monkeypatch, reply, code, stream):
     async def authority(*args):
         return {"available": True, "current_module": "module_3", "plan_confirmed": False}
 
@@ -78,10 +78,11 @@ async def test_only_router_still_checks_real_save_claims_and_safety(context, pro
         "session_id": "owned-admin", "subject_id": "admin-profile", "user_input": "继续吧",
         "routing_mode": "router_only",
     }, Runtime(context=ctx))
-    assert result["final_response"] != reply
+    assert result["final_response"] == reply
+    assert not result["reply_held"]
     assert any(finding["code"] == code for finding in result["telemetry"]["answer_validator"]["findings"])
     if stream:
-        assert reply not in "".join(event.get("text", "") for event in events if event["type"] == "delta")
+        assert reply == "".join(event.get("text", "") for event in events if event["type"] == "delta")
 
 
 def test_only_router_business_facts_do_not_reinstate_progress_gates():
