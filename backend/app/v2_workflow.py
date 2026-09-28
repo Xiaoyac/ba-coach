@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import select, update, insert, func
 from .database_v2_schema import metadata as schema
 from .models import Conversation, ConversationMessage
-from .v2_repository import new_id, now, owned_goal, active_memories, create_goal, start_cycle
+from .v2_repository import new_id, now, owned_goal, reply_memories, create_goal, start_cycle
 from .workflow_contract import MODULE_STEP_KEYS
 
 
@@ -904,6 +904,6 @@ async def clinical_context(maker, user_id, session_id):
                     }, ensure_ascii=False))
         elif state and state["current_module"] != "module_1":
             lines.append("本聊天目标绑定状态：" + json.dumps({"active_goal_id": None}, ensure_ascii=False))
-        for memory in await active_memories(db, user_id=user_id):
+        for memory in await reply_memories(db, user_id=user_id):
             lines.append(f"长期记忆（{memory['confirmation_status']} / {memory['source_kind']}）：{memory['content']}")
     return lines

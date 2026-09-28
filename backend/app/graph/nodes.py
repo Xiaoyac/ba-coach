@@ -291,8 +291,8 @@ async def extract_memory_node(
 ) -> dict:
     """Load prior context for this session: chat history + durable memory.
 
-    Reads through the session store, so swapping the store for Redis gives the
-    graph cross-process memory with no change here.
+    Persisted turns use a fresh, owned database history at the request boundary.
+    The session store supplies runtime memory and non-persisted test sessions.
     """
     # Explicit injection also works in async graphs on Python 3.10.
     _send = _node_writer(writer, config)
@@ -302,13 +302,29 @@ async def extract_memory_node(
     context = runtime.context
     session = await context.store.get_or_create(state.get("session_id"))
 
+    history = list(session.messages)
+    history_source = "session"
+    if (context.sessionmaker is not None and state.get("subject_id")
+            and state.get("user_message_id") is not None):
+        from ..conversation_store import load_reply_history
+        # The route already holds the turn lock. A fresh read avoids the
+        # pre-lock snapshot and restores input from interrupted turns.
+        async with context.sessionmaker() as db:
+            history = await load_reply_history(db, subject_id=state["subject_id"],
+                session_id=session.session_id, user_message_id=state["user_message_id"],
+                limit=context.settings.max_history_messages)
+        history_source = "durable_message_boundary"
+    telemetry["history_source"] = history_source
+    telemetry["history_messages"] = len(history)
+
     _send(
         {
             "type": "trace",
             "node": "extract_memory",
             "detail": {
                 "session_id": session.session_id,
-                "history_messages": len(session.messages),
+                "history_messages": len(history),
+                "history_source": history_source,
                 "memory_keys": sorted(session.memory),
             },
         }
@@ -329,7 +345,7 @@ async def extract_memory_node(
         "session_id": session.session_id,
         "turn_started_monotonic": origin,
         "telemetry": telemetry,
-        "chat_history": list(session.messages),
+        "chat_history": history,
         "memory": dict(session.memory),
         # Session metadata accumulates across turns; the request's own metadata
         # was merged into it by the route before the graph ran.

@@ -30,6 +30,36 @@ TITLE_MAX_CHARS = 28
 SANDBOX_TITLE_PREFIX = "沙盒 · "
 
 
+async def load_reply_history(db: AsyncSession, *, subject_id: str, session_id: str,
+                             user_message_id: int, limit: int):
+    """Read owned, durable history at the current request's message boundary.
+
+    Called inside the generation turn lock with a fresh transaction. Incomplete
+    turns still contribute their saved user message; concurrently queued future
+    input must not leak into this reply. Never infer ordering from text equality.
+    """
+    from .schemas import Message
+    boundary = (await db.execute(select(
+        ConversationMessage.conversation_id, ConversationMessage.position,
+    ).join(Conversation, Conversation.id == ConversationMessage.conversation_id).where(
+        Conversation.session_id == session_id, Conversation.subject_id == subject_id,
+        ConversationMessage.id == user_message_id, ConversationMessage.role == "user",
+    ))).one_or_none()
+    if boundary is None:
+        raise ValueError("current_user_message_not_owned")
+    rows = (await db.execute(select(
+        ConversationMessage.role, ConversationMessage.content,
+        ConversationMessage.reasoning_content,
+    ).where(
+        ConversationMessage.conversation_id == boundary.conversation_id,
+        ConversationMessage.position < boundary.position,
+        ConversationMessage.role.in_(["user", "assistant"]),
+    ).order_by(ConversationMessage.position.desc(), ConversationMessage.id.desc())
+      .limit(max(1, limit)))).all()
+    return [Message(role=row.role, content=normalize_reasoning_channels(
+        row.content, row.reasoning_content).reply) for row in reversed(rows)]
+
+
 async def create_conversation_with_opening(
     db: AsyncSession, *, subject_id: str, session_id: str, start_from_m1: bool = False,
     routing_mode: str = "router_code",
@@ -345,7 +375,7 @@ async def finish_turn(
             "time_to_first_reasoning_token_ms": metrics.get("time_to_first_reasoning_token_ms"),
             "time_to_first_content_token_ms": metrics.get("time_to_first_content_token_ms"),
             "reply_recovery": metrics.get("reply_recovery"),
-            **{key: metrics.get(key) for key in ("main_input", "reply_trace", "prompt_sources",
+            **{key: metrics.get(key) for key in ("main_input", "reply_trace", "prompt_sources", "history_source", "history_messages",
                 "execution_timeline", "time_to_first_visible_content_ms", "first_visible_measurement",
                 "router_pre_reply")},
             # Permission-controlled execution trace; never include this in

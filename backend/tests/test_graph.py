@@ -229,7 +229,7 @@ async def test_background_router_receives_prior_module_history(
     )
 
     router_input = next(
-        call for call in provider.route_calls if "本 Session 对话记录" in call
+        call for call in provider.route_calls if "本 Session 此前对话记录" in call
     )
     assert "较早轮次里我讲过一次具体的加班事件" in router_input
     assert "已经结合这件事解释过行为和情绪循环" in router_input
@@ -803,7 +803,10 @@ async def test_memory_is_fed_back_into_the_prompt(context, provider) -> None:
     )
     system = as_text(provider.systems[-1])
     assert "# Recalled Context" in system
-    assert "turn_count" in system
+    assert "我该怎么办？" in system  # Early background anchor remains.
+    assert "turn_count" not in system
+    assert "last_user_message" not in system
+    assert provider.seen[-1][-1].content == "<user_message>再说说</user_message>"
 
 
 async def test_long_user_message_is_truncated_in_memory(context) -> None:
