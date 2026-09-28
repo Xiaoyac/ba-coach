@@ -1,6 +1,6 @@
 # Conversation sharing — first version
 
-The conversation menu's **分享** action creates a read-only snapshot link instead of downloading Markdown. The owner can create a link, copy it, and revoke it from the same dialog. Anyone holding an active link can read that snapshot without signing in.
+The chat header's **分享当前对话** action (and the administrator's conversation-menu **分享** action) creates a read-only snapshot link instead of downloading Markdown. The owner can create a link, copy it, and revoke it from the same dialog. Anyone holding an active link can read that snapshot without signing in.
 
 ## What is shared
 
@@ -54,16 +54,18 @@ Processing guards use the application's existing single-worker session locks. Th
 | `frontend/app/share/[token]/page.tsx` | Add a dynamic public route with non-indexing and referrer metadata. |
 | `frontend/components/SharedConversationView.tsx` | Render a read-only snapshot, access/error states, and access rechecks on tab return. |
 | `frontend/components/MessageRow.tsx` | Extract the existing message display for identical rendering in live and shared conversations. |
-| `frontend/components/Chat.tsx` | Use the extracted message component without changing the live chat flow. |
+| `frontend/components/Chat.tsx` | Reuse message rendering, retain administrator-only live diagnostics, and expose sharing in the member chat header. |
 | `frontend/components/ReasoningDetails.tsx` | Pass snapshot detail data through the existing four-panel UI. |
 | `frontend/components/KnowledgeReferenceDetails.tsx` | Render supplied reference data without private fetches; expose saved mediator reasoning in a nested disclosure. |
 | `frontend/next.config.mjs` | Add no-store, no-referrer, and non-indexing headers to share pages. |
 | `frontend/tests/share-browser.cjs` | Exercise desktop/mobile panel interactions, credential isolation, unavailable/revoked snapshots, and owner create/copy/revoke workflows. |
+| `infra/deploy/server-deploy-sharing.sh` | Build an isolated release, apply only the share-table migration, and restore the previous release if cutover fails. |
 | `CONVERSATION_SHARING.md` | Document behavior, lifecycle, deployment, verification, and the reasons for each changed file. |
 
 ## Local validation
 
 - Backend: 59 passing tests across conversation sharing, existing conversation operations, and knowledge-reference persistence; includes 13 new sharing/migration cases. Tests use isolated databases and stub models.
+- After merging the current `main`: the complete backend suite passed in isolated per-file processes (1,799 passed, two optional skips across 107 test files). Sharing browser checks and existing member/admin single-chat browser regressions also passed against the merged source.
 - Frontend: TypeScript typecheck and optimized Next.js production build pass; `/share/[token]` is emitted as a dynamic route.
 - Browser: desktop (1280 px) and mobile (390 px) share-page tests pass; all four panels and saved mediator reasoning open, no private APIs or viewer credentials are used, missing details stay unavailable, revoked links fail on reload, and unsafe markup renders as text.
 - Owner dialog: unfinished-turn rejection, retry, creation, manual-copy fallback, revocation, and reopening the saved share list pass with synthetic API responses.
@@ -82,3 +84,18 @@ SHARE_QA_URL=http://127.0.0.1:3108 node tests/share-browser.cjs
 ```
 
 Use `PLAYWRIGHT_CHANNEL` to select another installed supported browser. The browser test uses synthetic API fixtures, not production data.
+
+## Scoped production release runner
+
+`infra/deploy/server-deploy-sharing.sh` builds a separate release, checks that the backend requirements match the current release before reusing its Python environment, and runs only the additive sharing migration. It does not run legacy migrations, backfills, or knowledge imports. Protected configuration remains in `/etc/bacoach`; the runner does not include or copy secrets into the release.
+
+After uploading the production source archive and runner, run on the deployment server as root, using the actual release ID and independently verified database name:
+
+```sh
+bash /path/to/server-deploy-sharing.sh \
+  YYYYMMDDTHHMMSSZ /tmp/bacoach-YYYYMMDDTHHMMSSZ.tar.gz ACTUAL_DATABASE_NAME
+```
+
+The runner checks mediator configuration without generating a reply, previews and applies the share-table migration, verifies its resulting schema, and only then switches `/opt/bacoach/current` and restarts the services. It restores the previous code and the reminder worker's prior active state if cutover fails. The additive share table remains on rollback so existing snapshots are not deleted. The previous release and its Python environment must remain available for rollback and environment reuse.
+
+This runner does not replace release acceptance: verify public HTTPS, anonymous share access, all saved detail panels, owner-only management, and revocation after deployment. Protect bearer-token paths in actual proxy and application access logs before sharing real conversations. The commands above document the procedure; their presence is not evidence that a deployment has been performed.
