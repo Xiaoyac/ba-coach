@@ -1,5 +1,7 @@
 # Conversation sharing deployment — 2026-09-28
 
+The initial rollout is recorded below. The later **Share history and revocation removal** section records the current production release and supersedes the initial interface/revocation behavior.
+
 ## Release identity
 
 - Site: https://bacoach.xyz
@@ -51,3 +53,17 @@ Live production checks used one explicitly marked synthetic conversation, two sy
 - User acceptance with a real completed conversation remains a product check. These tests establish synthetic end-to-end behavior, not the quality or completeness of historical participant traces.
 
 Rollback restores the previous release symlink and restarts the three services, retaining the additive table. Do not delete the previous release or its Python environment while it is used by the new release.
+
+## Share history and revocation removal
+
+- Deployed source: `cc92a3bb309b293debc6b47c1e0bb2bc18268a2e`, pushed to `main`.
+- Release: `/opt/bacoach/releases/20260928T092504Z`; previous release: `/opt/bacoach/releases/20260928T073901Z`.
+- Archive SHA-256: `cf9077d8413c645d72120a54ed16622789ea246959e770a720ffdc620bdd8d14`.
+- Removed the history section, its frontend requests/state, revocation controls, and the backend list/revocation endpoints. Creation, copy, preview, and public snapshot detail panels remain.
+- Existing schema was verified compatible; no new schema or data migration was needed. Legacy invalidation markers remain read-only so previously revoked links are not republished.
+- Before rollout, the previous release's 233 packaged files matched its recorded source. After rollout, all 233 new packaged files matched the committed archive; release metadata was saved on the server.
+- Production frontend build and type checks passed. Backend, frontend, and PA worker were active with zero restart counters at final verification; health and public home returned 200.
+- Public HTTPS probes verified removed listing returns 405, removed revocation returns 404, unauthenticated creation returns 401, and nonexistent public shares return 404.
+- Browser checks against the deployed frontend passed: no history section, no history request on dialog reopen, no revocation button, working creation/copy UI, and desktop/mobile shared detail panels. These browser checks used synthetic API fixtures; no production account, participant conversation, or database row was created or modified for acceptance.
+- The preceding local change validation passed all 13 sharing backend tests, TypeScript validation, and the updated browser suite. The local Python HTTPS probe lacked a configured CA chain; public checks were completed with system curl and Chrome with normal certificate verification.
+- Approximately 6.1 GB disk space remained. The documentation-only follow-up commit is separate from the deployed runtime source.

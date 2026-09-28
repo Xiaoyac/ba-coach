@@ -26,7 +26,7 @@ Snapshots do not include the owner's account identifiers, other conversations, f
 
 Deployed to `https://bacoach.xyz` on 2026-09-28, including the production share-table migration and synthetic desktop/mobile acceptance. See [DEPLOYMENT_SHARING_20260928.md](DEPLOYMENT_SHARING_20260928.md) for the exact source commit, release, verification, and remaining boundaries. Real participant acceptance is separate from these synthetic checks.
 
-The subsequent removal of **已有分享** and revocation is a local change until separately deployed; the original deployment record describes the previous interface and endpoints.
+The removal of **已有分享** and revocation was also deployed on 2026-09-28, from commit `cc92a3bb309b293debc6b47c1e0bb2bc18268a2e`. The deployment record's follow-up section describes this release; its original section preserves the initial rollout history.
 
 V2 disables automatic startup DDL. Before deploying this feature, an operator must add the new app-owned `conversation_shares` table to the intended database. From `backend`, using the deployment's Python environment and existing `DATABASE_URL`:
 
