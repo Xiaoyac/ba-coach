@@ -1416,6 +1416,12 @@ def _dispatch_transition_jobs(
 _routing_tasks: dict[str, asyncio.Task] = {}
 
 
+def has_pending_routing(session_id: str) -> bool:
+    """Non-blocking publication guard; do not await a job under a turn lock."""
+    task = _routing_tasks.get(session_id)
+    return task is not None and not task.done()
+
+
 async def wait_for_pending_routing(
     session_id: str | None,
     *,

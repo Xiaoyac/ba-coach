@@ -2,7 +2,7 @@
 
 import { useId, useState } from "react";
 import type { ChatMessage } from "@/lib/api";
-import KnowledgeReferenceDetails from "@/components/KnowledgeReferenceDetails";
+import KnowledgeReferenceDetails, { type KnowledgeReferenceSource } from "@/components/KnowledgeReferenceDetails";
 
 function durationLabel(value: number | null | undefined, pending: boolean) {
   if (typeof value === "number" && Number.isFinite(value) && value >= 0) return `${(value / 1000).toFixed(1)} 秒`;
@@ -10,10 +10,11 @@ function durationLabel(value: number | null | undefined, pending: boolean) {
 }
 
 /** Separate disclosures; switching channels never mixes their text or model. */
-export default function ReasoningDetails({ message, replyPending, routingPending }: {
+export default function ReasoningDetails({ message, replyPending, routingPending, knowledgeSource }: {
   message: ChatMessage;
   replyPending: boolean;
   routingPending: boolean;
+  knowledgeSource?: KnowledgeReferenceSource;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [active, setActive] = useState<"reply" | "router" | "knowledge" | "mediator" | null>(null);
@@ -61,7 +62,7 @@ export default function ReasoningDetails({ message, replyPending, routingPending
       {(["knowledge", "mediator"] as const).map(view => <section key={view} id={`${id}-${view}-panel`} role="region" aria-labelledby={`${id}-${view}-button`}
         hidden={active !== view}
         className="zen-scroll mt-2 max-h-96 overflow-y-auto rounded-xl bg-panel/60 px-3 py-3 text-[0.78rem] font-normal leading-[1.75] tracking-normal text-ink-muted [overflow-wrap:anywhere]">
-        {expanded && active === view && <KnowledgeReferenceDetails messageId={message.id} pending={replyPending} view={view} />}
+        {expanded && active === view && <KnowledgeReferenceDetails messageId={message.id} pending={replyPending} view={view} source={knowledgeSource} />}
       </section>)}
       {channels.map(channel => (
         <section key={channel.key} id={`${id}-${channel.key}-panel`} role="region"

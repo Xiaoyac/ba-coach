@@ -725,6 +725,30 @@ class ConversationMessage(Base):
         return f"<ConversationMessage {self.role} {self.content[:20]!r}>"
 
 
+class ConversationShare(Base):
+    """An immutable, explicitly published transcript with revocable access.
+
+    Only the token digest is retained. Neither the snapshot nor its public
+    schema contains the original session, account or database message IDs.
+    Deleting the source conversation deletes its published copies as well.
+    """
+
+    __tablename__ = "conversation_shares"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
+    )
+    token_digest: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=_utcnow)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+
+    __table_args__ = (
+        Index("ix_conversation_share_created", "conversation_id", "created_at"),
+    )
+
+
 class ConversationRuntimeState(Base):
     """Durable graph state needed to resume the correct coaching workflow.
 

@@ -14,8 +14,8 @@ import {
   type ConversationDetail,
   type ConversationSummary,
 } from "@/lib/conversations";
-import { downloadMarkdown } from "@/lib/markdown";
 import Chat from "@/components/Chat";
+import ConversationShareModal from "@/components/ConversationShareModal";
 import ConversationSidebar from "@/components/ConversationSidebar";
 import ChangePasswordModal from "@/components/ChangePasswordModal";
 import EmailSettingsModal from "@/components/EmailSettingsModal";
@@ -188,6 +188,7 @@ export default function ConversationWorkspace({
   const [reportCaptureError, setReportCaptureError] = useState<string | null>(null);
   const [sandboxStarting, setSandboxStarting] = useState(false);
   const [testWorkbenchOpen, setTestWorkbenchOpen] = useState(false);
+  const [shareTarget, setShareTarget] = useState<{ sessionId: string; title: string } | null>(null);
   const creatingConversationRef = useRef<Promise<ConversationDetail> | null>(null);
   // The live-sync stream can observe a deletion just before the DELETE fetch
   // resolves. Mark locally initiated deletions so only one code path chooses
@@ -818,21 +819,10 @@ export default function ConversationWorkspace({
     await loadConversation(targetSessionId);
   }
 
-  async function handleShare(targetSessionId: string) {
-    // The sidebar only holds summaries; reuse the messages already in memory
-    // for the open conversation rather than re-fetching them.
+  function handleShare(targetSessionId: string) {
     const summary = conversations.find((c) => c.session_id === targetSessionId);
-    const title = summary?.title || "对话记录";
-    try {
-      const detail =
-        targetSessionId === sessionId
-          ? { messages }
-          : await fetchConversation(targetSessionId);
-      downloadMarkdown(title, detail.messages);
-    } catch (err) {
-      if (isMissing(err)) dropMissingConversation(targetSessionId);
-      else setError(err instanceof Error ? err.message : String(err));
-    }
+    setSidebarOpen(false);
+    setShareTarget({ sessionId: targetSessionId, title: summary?.title || "对话记录" });
   }
 
   /** Rename / pin. Optimistic, then reconciled against the server's row. */
@@ -1036,6 +1026,13 @@ export default function ConversationWorkspace({
         onOpenReminders={() => setPushSettingsOpen(true)}
         refreshKey={programRefreshKey} onClose={() => setGoalsOpen(false)} />
       {pushSettingsOpen && <PushReminderModal onClose={() => setPushSettingsOpen(false)} />}
+      {shareTarget && <ConversationShareModal
+        key={shareTarget.sessionId}
+        sessionId={shareTarget.sessionId}
+        title={shareTarget.title}
+        generationPending={turns.current.has(shareTarget.sessionId) || (shareTarget.sessionId === sessionId && (busy || !!routing.routing_pending))}
+        onClose={() => setShareTarget(null)}
+      />}
       <GoalStartChooser open={goalStartOpen} sessionId={sessionId} busy={busy || loadingConversation || goalSelecting} refreshKey={programRefreshKey}
         onClose={() => setGoalStartOpen(false)} onDiscussNew={() => setGoalStartOpen(false)} onSelectExisting={async (goalId, resume) => { await handleChooseGoal({ goal_id: goalId, resume }); setGoalStartOpen(false); }} />
 

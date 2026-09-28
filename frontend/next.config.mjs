@@ -2,8 +2,17 @@
 const nextConfig = {
   reactStrictMode: true,
   async headers() {
-    return [{source:'/pa-push-sw.js',headers:[{key:'Cache-Control',value:'no-cache, no-store, must-revalidate'},
-      {key:'Service-Worker-Allowed',value:'/'}]}];
+    return [
+      {source:'/pa-push-sw.js',headers:[{key:'Cache-Control',value:'no-cache, no-store, must-revalidate'},
+        {key:'Service-Worker-Allowed',value:'/'}]},
+      // A share token is a read capability. Keep it out of referrers/search
+      // indexes and prevent browser/proxy caching of revocable snapshots.
+      { source: '/share/:path*', headers: [
+        { key: 'Cache-Control', value: 'private, no-store, max-age=0' },
+        { key: 'Referrer-Policy', value: 'no-referrer' },
+        { key: 'X-Robots-Tag', value: 'noindex, nofollow, noarchive' },
+      ] },
+    ];
   },
   // Hides the floating Next.js "N" badge in the bottom-left corner during
   // `next dev`. It is dev-only tooling and never ships, but it sits exactly

@@ -1,0 +1,171 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import type { ChatMessage } from "@/lib/api";
+import type { KnowledgeReferenceSource } from "@/components/KnowledgeReferenceDetails";
+import MessageMarkdown from "@/components/MessageMarkdown";
+import ReasoningDetails from "@/components/ReasoningDetails";
+import { CheckMark, CopyMark, EnsoMark, UserMark } from "@/components/icons";
+
+export default function MessageRow({
+  message,
+  pending,
+  generationStartedAt,
+  routingPending,
+  animate,
+  knowledgeSource,
+}: {
+  message: ChatMessage;
+  pending: boolean;
+  generationStartedAt?: number;
+  routingPending: boolean;
+  /** Only the newly submitted turn floats in; loaded history stays still. */
+  animate: boolean;
+  knowledgeSource?: KnowledgeReferenceSource;
+}) {
+  const isUser = message.role === "user";
+  const reasoning = message.reasoning_content?.trim() ?? "";
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyResetRef.current) clearTimeout(copyResetRef.current);
+    };
+  }, []);
+
+  async function handleCopy() {
+    try {
+      let copied = false;
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(message.content);
+          copied = true;
+        } catch {
+          // Some embedded browsers expose the API but deny its permission.
+          // Fall through to the selection-based path below in that case.
+        }
+      }
+
+      if (!copied) {
+        // Clipboard is unavailable in some embedded or older browsers. Keep a
+        // synchronous fallback so the action still works there.
+        const textarea = document.createElement("textarea");
+        textarea.value = message.content;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = document.execCommand("copy");
+        textarea.remove();
+        if (!copied) throw new Error("Copy command was rejected");
+      }
+      setCopyState("copied");
+    } catch {
+      setCopyState("error");
+    }
+
+    if (copyResetRef.current) clearTimeout(copyResetRef.current);
+    copyResetRef.current = setTimeout(() => setCopyState("idle"), 1800);
+  }
+
+  return (
+    <div
+      className={`mx-auto flex w-full max-w-5xl items-start gap-3 ${isUser ? "flex-row-reverse" : ""} ${
+        animate ? (isUser ? "zen-message-user" : "zen-message-agent") : ""
+      }`}
+    >
+      <Avatar isUser={isUser} />
+      <div
+        className={`group/message flex min-w-0 max-w-[min(90%,42rem)] items-end gap-1.5 ${
+          isUser ? "flex-row-reverse" : ""
+        }`}
+      >
+        <div className="min-w-0">
+        {message.content && <div
+          data-message-bubble={message.role}
+          className={`min-w-0 max-w-[42rem] px-4 py-3 text-[0.95rem] leading-[1.85] tracking-[0.01em] break-words whitespace-pre-wrap sm:px-5 ${
+            isUser
+              ? "rounded-2xl rounded-tr-md bg-mine text-mine-ink depth-bubble"
+              : "rounded-2xl rounded-tl-md bg-agent-bubble text-ink depth-bubble"
+          }`}
+        >
+          {message.role === "assistant" ? <MessageMarkdown text={message.content} /> : message.content}
+          {!isUser && (
+            <ReasoningDetails message={message} replyPending={pending && !routingPending} routingPending={routingPending} knowledgeSource={knowledgeSource} />
+          )}
+        </div>}
+        {!isUser && pending && !routingPending && <TypingDots startedAt={generationStartedAt} hasReasoning={Boolean(reasoning)} hasContent={Boolean(message.content)} />}
+        {!isUser && !message.content && <ReasoningDetails message={message} replyPending={pending && !routingPending} routingPending={routingPending} knowledgeSource={knowledgeSource} />}
+        </div>
+        {message.content && (
+          <>
+            <button
+              type="button"
+              onClick={handleCopy}
+              aria-label={copyState === "copied" ? "已复制消息" : "复制消息"}
+              title={copyState === "error" ? "复制失败，请重试" : copyState === "copied" ? "已复制" : "复制"}
+              className={`mb-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-transparent transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-edge sm:opacity-0 sm:group-hover/message:opacity-100 sm:focus-visible:opacity-100 ${
+                copyState === "error"
+                  ? "border-alert-edge bg-alert-wash text-alert-ink opacity-100"
+                  : copyState === "copied"
+                    ? "border-accent-edge bg-accent-wash text-accent-ink opacity-100"
+                    : "text-ink-faint opacity-60 hover:border-line hover:bg-accent-wash hover:text-accent-ink"
+              }`}
+            >
+              {copyState === "copied" ? (
+                <CheckMark className="h-4 w-4" />
+              ) : (
+                <CopyMark className="h-4 w-4" />
+              )}
+            </button>
+            <span className="sr-only" role="status" aria-live="polite">
+              {copyState === "copied" ? "消息已复制到剪贴板" : copyState === "error" ? "消息复制失败" : ""}
+            </span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Avatar({ isUser }: { isUser: boolean }) {
+  return (
+    <span
+      className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
+        isUser
+          ? "bg-mine text-accent"
+          : "bg-accent-wash text-accent-ink"
+      }`}
+    >
+      {isUser ? (
+        <UserMark className="h-4 w-4" />
+      ) : (
+        <EnsoMark className="h-4 w-4" />
+      )}
+    </span>
+  );
+}
+
+function TypingDots({ hasReasoning = false, hasContent = false, startedAt }: { hasReasoning?: boolean; hasContent?: boolean; startedAt?: number }) {
+  const [seconds, setSeconds] = useState(() => startedAt ? Math.max(0, Math.floor((Date.now() - startedAt) / 1000)) : 0);
+  useEffect(() => {
+    const started = startedAt ?? Date.now();
+    const timer = window.setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [startedAt]);
+  return (
+    <span data-generation-status className="flex min-w-0 items-start gap-2 px-1 py-2" aria-label="Thinking">
+      <span aria-hidden="true" className="mt-1.5 flex shrink-0 items-center gap-1.5">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="zen-breathe h-1.5 w-1.5 rounded-full bg-accent"
+            style={{ animationDelay: `${i * 0.18}s` }}
+          />
+        ))}
+      </span>
+      <span className="text-xs leading-relaxed text-ink-faint">{seconds >= 20 ? `仍在生成，已等待 ${seconds} 秒；请勿重复提交` : hasContent ? "正在生成回复" : hasReasoning ? "正在深度思考" : "正在准备回复"}</span>
+    </span>
+  );
+}
