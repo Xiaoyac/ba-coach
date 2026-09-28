@@ -24,7 +24,7 @@ Snapshots do not include the owner's account identifiers, other conversations, f
 
 ## Deployment and verification
 
-This is a local implementation. Production database migration, deployment, and real user acceptance must be performed separately. See the migration script and validation notes below when deploying.
+Deployed to `https://bacoach.xyz` on 2026-09-28, including the production share-table migration and synthetic desktop/mobile acceptance. See [DEPLOYMENT_SHARING_20260928.md](DEPLOYMENT_SHARING_20260928.md) for the exact source commit, release, verification, and remaining boundaries. Real participant acceptance is separate from these synthetic checks.
 
 V2 disables automatic startup DDL. Before deploying this feature, an operator must add the new app-owned `conversation_shares` table to the intended database. From `backend`, using the deployment's Python environment and existing `DATABASE_URL`:
 
@@ -69,7 +69,7 @@ Processing guards use the application's existing single-worker session locks. Th
 - Frontend: TypeScript typecheck and optimized Next.js production build pass; `/share/[token]` is emitted as a dynamic route.
 - Browser: desktop (1280 px) and mobile (390 px) share-page tests pass; all four panels and saved mediator reasoning open, no private APIs or viewer credentials are used, missing details stay unavailable, revoked links fail on reload, and unsafe markup renders as text.
 - Owner dialog: unfinished-turn rejection, retry, creation, manual-copy fallback, revocation, and reopening the saved share list pass with synthetic API responses.
-- `git diff --check` passes. Production database migration and deployment have not been run.
+- `git diff --check` passes. Production deployment and migration results are recorded separately in the deployment record linked above.
 
 Reproduce backend checks from `backend`:
 
