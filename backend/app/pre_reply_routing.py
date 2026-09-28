@@ -13,6 +13,7 @@ from langgraph.config import get_stream_writer
 from .router_agent import RouterDecision, decide_target_module_with_reasoning, format_routing_reasoning
 from .schemas import Message
 from .trace_timing import record_span, prompt_source
+from .routing_modes import ROUTER_CODE, ROUTER_ONLY, effective_routing_mode
 
 logger = logging.getLogger(__name__)
 MODULES = {"module_1", "module_2", "module_3", "module_4"}
@@ -23,7 +24,7 @@ async def load_routing_snapshot(state, context):
     current = state.get("current_module") or state.get("extracted_intent") or "module_1"
     memory = state.get("memory") or {}
     snapshot = {"current_module": current, "memory": memory,
-                "active_cycle_id": state.get("active_cycle_id")}
+                "active_cycle_id": state.get("active_cycle_id"), "routing_mode": ROUTER_CODE}
     compact = {"current_module": current, "has_pa_card": bool(memory.get("pa_card"))}
     if (context.settings.database_schema_version != "v2" or context.sessionmaker is None
             or not state.get("subject_id")):
@@ -31,14 +32,17 @@ async def load_routing_snapshot(state, context):
     from sqlalchemy import select
     from .database_v2_schema import metadata as schema
     from .models import ConversationMessage
-    from .v2_workflow import runtime_for
+    from .v2_workflow import runtime_for, fresh_m1
     async with context.sessionmaker() as db:
         conversation, persisted = await runtime_for(db, state["session_id"])
         if not conversation or conversation.subject_id != state["subject_id"] or not persisted:
             raise ValueError("owned_routing_state_unavailable")
         snapshot.update(current_module=persisted["current_module"],
                         memory=persisted["memory"] or {}, active_cycle_id=persisted["active_cycle_id"])
+        snapshot["routing_mode"] = await effective_routing_mode(
+            db, conversation=conversation, state=persisted, user_id=state["subject_id"])
         compact = {key: persisted[key] for key in ("current_module", "flow_status", "active_goal_id", "active_cycle_id", "row_version")}
+        compact["routing_mode"] = snapshot["routing_mode"]
         plans, goals, cycles = (schema.tables[name] for name in ("module_two_record", "pa_goals", "pa_cycles"))
         compact["has_pa_card"] = bool(await db.scalar(select(plans.c.id).join(goals,
             goals.c.current_plan_record_id == plans.c.id).join(cycles,
@@ -49,7 +53,8 @@ async def load_routing_snapshot(state, context):
             plans.c.goal_id == goals.c.id, plans.c.record_status == "confirmed",
             plans.c.confirmation_status == "confirmed")))
         m1 = schema.tables["user_module_one_state"]
-        compact["m1_status"] = await db.scalar(select(m1.c.status).where(m1.c.user_id == state["subject_id"]))
+        compact["m1_status"] = ("in_progress" if fresh_m1(persisted) else
+            await db.scalar(select(m1.c.status).where(m1.c.user_id == state["subject_id"])))
         if persisted["current_module"] == "module_3":
             from .knowledge_context import read_recording_state
             recording = await read_recording_state(db, state["subject_id"], persisted)
@@ -87,7 +92,7 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
     forced = state.get("forced_module")
     if forced and forced not in MODULES:
         raise ValueError(f"Unknown module {forced!r}")
-    if state.get("risk") or forced or (state.get("memory") or {}).get("sandbox_mode") == "true":
+    if state.get("risk") or (state.get("memory") or {}).get("sandbox_mode") == "true":
         selected = current if state.get("risk") else forced or current
         return {"extracted_intent": selected, "next_module": selected,
                 "routed_by": "risk_hold" if state.get("risk") else "explicit" if forced else "sandbox",
@@ -105,28 +110,44 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
         return {"extracted_intent": current, "next_module": current, "routed_by": "state_read_failed", "telemetry": telemetry}
     record_span(telemetry, "state_load", started, origin=origin)
     current = prepared["current_module"]
+    if forced and prepared["routing_mode"] != ROUTER_ONLY:
+        return {"extracted_intent": forced, "next_module": forced, "routed_by": "explicit",
+                "routing_pending": False}
+    if forced:
+        telemetry["ignored_forced_module"] = forced
     started = perf_counter()
     history = "\n".join(f"{message.role}：{message.content}" for message in
                         prepared.get("routing_history", prepared.get("chat_history", [])))
+    # Match the provider's thinking-call budget. The classifier deadline must
+    # not cancel native reasoning before the final routing JSON can arrive.
+    router_timeout = (
+        context.settings.router_request_timeout_seconds
+        if context.settings.module_router_reasoning_effort == "disabled"
+        else context.settings.background_model_timeout_seconds
+    )
     try:
         decision = await asyncio.wait_for(decide_target_module_with_reasoning(context.router_provider,
             current_module=current, user_input=state["user_input"],
             has_pa_card=bool(prepared["routing_state"].get("has_pa_card")),
             conversation_context=history, business_state=prepared["routing_state"],
             system_prompt=context.router_prompt, max_tokens=context.settings.router_reasoning_max_tokens,
+            routing_mode=prepared["routing_mode"],
             completed_steps=(prepared.get("module_steps") or {}).get(current, [])),
-            timeout=context.settings.router_request_timeout_seconds)
+            timeout=router_timeout)
     except asyncio.TimeoutError:
         decision = RouterDecision(target_module=current, reasoning_content="", model="", completed_steps=[],
                                   usage={}, error_code="router_timeout")
     routing_ms = round((perf_counter() - started) * 1000, 3)
     record_span(telemetry, "router_pre_reply", started, origin=origin,
                 status="failed" if decision.error_code else "completed")
-    from .router_agent import ROUTER_AGENT_PROMPT, ROUTER_RUNTIME_CONTRACT
+    from .router_agent import ROUTER_AGENT_PROMPT, ROUTER_RUNTIME_CONTRACT, ROUTER_ONLY_RUNTIME_CONTRACT
     from .knowledge_context import KNOWLEDGE_TASKS
-    router_system = (context.router_prompt or ROUTER_AGENT_PROMPT) + "\n\n" + ROUTER_RUNTIME_CONTRACT
+    runtime_contract = ROUTER_ONLY_RUNTIME_CONTRACT if prepared["routing_mode"] == ROUTER_ONLY else ROUTER_RUNTIME_CONTRACT
+    router_system = (context.router_prompt or ROUTER_AGENT_PROMPT) + "\n\n" + runtime_contract
     router_system += "\nknowledge_task 可用值：" + ", ".join(KNOWLEDGE_TASKS)
     source = prompt_source("router_admin" if context.router_prompt else "router_default", router_system)
+    source.update(routing_mode=prepared["routing_mode"],
+                  database_transition_preconditions_disabled=prepared["routing_mode"] == ROUTER_ONLY)
     telemetry["prompt_sources"] = [*(telemetry.get("prompt_sources") or []), source]
     if context.sessionmaker is not None and state.get("subject_id"):
         from .ai_telemetry import save_ai_event
@@ -137,6 +158,8 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
             error_code=decision.error_code, prompt_version=source["version"],
             event_metadata={"phase":"pre_reply", "from_module":current,
                 "proposed_module":decision.target_module, "knowledge_task":decision.knowledge_task,
+                "routing_mode":prepared["routing_mode"],
+                "database_transition_preconditions_disabled":prepared["routing_mode"] == ROUTER_ONLY,
                 "json_recovery":decision.json_recovery, "user_message_id":state.get("user_message_id")})
     applied = {}
     authoritative = context.settings.database_schema_version == "v2" and context.sessionmaker is not None and state.get("subject_id")
@@ -144,8 +167,12 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
         started = perf_counter()
         try:
             if apply_decision is None:
-                from .turn_confirmation import apply_pre_reply_decision
-                apply_decision = apply_pre_reply_decision
+                if prepared["routing_mode"] == ROUTER_ONLY:
+                    from .routing_modes import apply_router_only_decision
+                    apply_decision = apply_router_only_decision
+                else:
+                    from .turn_confirmation import apply_pre_reply_decision
+                    apply_decision = apply_pre_reply_decision
             applied = await apply_decision(prepared, context, decision)
             if isinstance(applied, dict) and isinstance(applied.get("telemetry"), dict):
                 hook_metrics = applied.pop("telemetry")
@@ -167,7 +194,8 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
             except Exception:
                 applied = {"current_module": current}
             applied["clinical_context"] = []
-            applied["diagnostics"] = {"block_reasons": ["业务状态提交或刷新失败，未把路由建议作为已提交状态"]}
+            applied["diagnostics"] = {"policy": prepared["routing_mode"],
+                "block_reasons": ["状态提交或刷新失败，保留实际已提交模块"]}
             record_span(telemetry, "workflow_commit", started, origin=origin, status="failed")
     else:
         # In-memory direct graph tests have no durable business records.
@@ -187,6 +215,7 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
     knowledge_task = decision.knowledge_task if valid_knowledge_task(decision.knowledge_task, selected) else "general"
     telemetry["router_duration_ms"] = routing_ms
     telemetry["router_pre_reply"] = {
+        "routing_mode": prepared["routing_mode"],
         "input_sources": ["当前用户输入", "此前对话", "已提交的紧凑业务状态"],
         "selected_module": selected, "database_module": selected if authoritative else None,
         "database_module_before": current if authoritative else None,
@@ -199,8 +228,9 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
     _emit({"type": "meta", "node": "pre_reply_router", "reply_module": selected, "routed_by": "pre_reply_router"})
     _emit({"type": "routing_reasoning", "text": reasoning, "model": decision.model})
     _emit({"type": "trace", "node": "pre_reply_router", "detail": telemetry["router_pre_reply"]})
-    return {**{key: value for key, value in prepared.items() if key in {"current_module", "memory", "active_cycle_id", "routing_state", "recording_status", "recording_decision_scope"}},
+    return {**{key: value for key, value in prepared.items() if key in {"current_module", "memory", "active_cycle_id", "routing_state", "routing_mode", "recording_status", "recording_decision_scope"}},
             **{key: value for key, value in applied.items() if key != "diagnostics"},
+            **({"forced_module": None} if prepared["routing_mode"] == ROUTER_ONLY else {}),
             "transition_from_module": current, "knowledge_task": knowledge_task,
             "extracted_intent": selected, "next_module": selected, "routed_by": "pre_reply_router",
             "routing_reasoning_content": reasoning, "router_model_name": decision.model, "telemetry": telemetry}

@@ -1,10 +1,8 @@
-"""DeepSeek provider.
+"""OpenAI-compatible provider, currently configured for Qwen3.8-Max.
 
-DeepSeek does not ship its own SDK — its documented client is the official
-OpenAI SDK pointed at `https://api.deepseek.com`. The wire format is
-OpenAI-compatible, so `system` is the first entry in `messages` rather than a
-separate parameter, and system segments are joined into one string (there is
-no prompt-cache breakpoint to place).
+The internal ``deepseek`` key and environment variable names are retained for
+existing accounts and deployments. Requests use the configured URL/model and
+model-specific thinking parameters. System segments are joined into one string.
 
 Current thinking-capable models return `reasoning_content` separately from
 the user-facing `content`; both are preserved so the UI can disclose the
@@ -22,7 +20,7 @@ import openai
 from ..config import Settings
 from ..schemas import Message
 from .deadline import timeout
-from ..generation_policy import main_thinking_options
+from ..generation_policy import main_thinking_options, native_thinking_options
 from .base import (
     Completion,
     LLMProvider,
@@ -71,10 +69,10 @@ class DeepSeekProvider(LLMProvider):
                 model=self.model,
                 messages=self._payload(system, messages),
                 max_tokens=min(self._settings.deepseek_max_tokens, 1200),
-                extra_body={"thinking": {"type": "disabled"}},
+                extra_body=native_thinking_options(self._settings, self.name, enabled=False, model=self.model),
             )
         except openai.OpenAIError as exc:
-            raise ProviderError("DeepSeek reply recovery failed") from exc
+            raise ProviderError(f"{self.model} reply recovery failed") from exc
         choice = response.choices[0]
         usage = response.usage
         return Completion(
@@ -102,15 +100,15 @@ class DeepSeekProvider(LLMProvider):
                 )
         except (TimeoutError, asyncio.TimeoutError, openai.APITimeoutError) as exc:
             raise ProviderError(
-                "DeepSeek request timed out after "
+                f"{self.model} request timed out after "
                 f"{getattr(self._settings, 'provider_request_timeout_seconds', 60.0):g}s"
             ) from exc
         except openai.APIStatusError as exc:
             raise ProviderError(
-                f"DeepSeek API error {exc.status_code}: {exc.message}"
+                f"{self.model} API error {exc.status_code}: {exc.message}"
             ) from exc
         except openai.APIConnectionError as exc:
-            raise ProviderError("Could not reach the DeepSeek API") from exc
+            raise ProviderError(f"Could not reach the {self.model} API") from exc
 
         choice = response.choices[0]
         usage = response.usage
@@ -192,15 +190,15 @@ class DeepSeekProvider(LLMProvider):
                 )
         except (TimeoutError, asyncio.TimeoutError, openai.APITimeoutError) as exc:
             raise ProviderError(
-                "DeepSeek stream timed out after "
+                f"{self.model} stream timed out after "
                 f"{getattr(self._settings, 'provider_request_timeout_seconds', 60.0):g}s"
             ) from exc
         except openai.APIStatusError as exc:
             raise ProviderError(
-                f"DeepSeek API error {exc.status_code}: {exc.message}"
+                f"{self.model} API error {exc.status_code}: {exc.message}"
             ) from exc
         except openai.APIConnectionError as exc:
-            raise ProviderError("Could not reach the DeepSeek API") from exc
+            raise ProviderError(f"Could not reach the {self.model} API") from exc
 
         finally:
             if stream is not None and callable(getattr(stream, "close", None)):
@@ -226,7 +224,8 @@ class DeepSeekProvider(LLMProvider):
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},
                     ],
-                    extra_body={"thinking": {"type": "disabled"}},
+                    extra_body=native_thinking_options(self._settings, self.name, enabled=False,
+                                                       model=self._settings.deepseek_router_model),
                 )
             choice = response.choices[0]
             usage = response.usage
@@ -283,19 +282,9 @@ class DeepSeekProvider(LLMProvider):
             timeout_seconds = getattr(
                 self._settings, "background_model_timeout_seconds", 30.0
             )
-            qwen_compatible = (
-                model.casefold().startswith("qwen")
-                or "dashscope.aliyuncs.com" in str(
-                    getattr(self._settings, "deepseek_base_url", "") or ""
-                ).casefold()
-            )
-            thinking_body = (
-                {"enable_thinking": True,
-                 "thinking_budget": int(getattr(self._settings, "qwen_thinking_budget", 1024))}
-                if qwen_compatible else {"thinking": {"type": "enabled"}}
-            )
+            thinking_body = native_thinking_options(self._settings, self.name, enabled=True, model=model)
             request_options = {}
-            if reasoning_effort and not qwen_compatible:
+            if reasoning_effort and "enable_thinking" not in thinking_body:
                 request_options["reasoning_effort"] = reasoning_effort
             async with timeout(timeout_seconds):
                 response = await client.chat.completions.create(

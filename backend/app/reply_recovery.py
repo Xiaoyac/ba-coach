@@ -1,4 +1,4 @@
-"""Bounded recovery of a reasoning-only, length-exhausted main reply.
+"""Bounded recovery of an empty main reply after a known transport failure.
 
 Only produces a candidate: graph normalization/validation still run afterwards.
 No raw retrieved knowledge, new user message or synthetic workflow transition.
@@ -7,6 +7,7 @@ import asyncio
 from time import perf_counter
 
 from .providers.base import ProviderError
+from .reasoning import contains_internal_protocol
 
 GENERATION_INTERRUPTED_REPLY = (
     "抱歉，这次回复生成中断了，不是你说得不清楚。"
@@ -16,13 +17,17 @@ RECOVERY_MAX_SECONDS = 8.0
 
 
 async def recover_empty_reply(*, provider, system, messages, elapsed_seconds,
-                              total_timeout_seconds, finish_reason, usage):
+                              total_timeout_seconds, finish_reason, usage,
+                              invalid_protocol=False):
     diagnostic = {"attempted": False, "original_finish_reason": finish_reason,
                   "original_usage": dict(usage), "status": "not_eligible"}
-    # Called only when the normalized visible reply is empty. Refusals, normal
-    # stops and errors do not get silently re-requested as if they were truncation.
-    if finish_reason != "length":
+    # Called only when the normalized visible reply is empty. A literal tool
+    # envelope from a no-tools call is a transport failure, not a refusal. The
+    # caller must verify it with the shared protocol predicate before setting
+    # invalid_protocol. Ordinary empty stops, refusals and filters stay ineligible.
+    if finish_reason != "length" and not (finish_reason == "stop" and invalid_protocol):
         return None, diagnostic
+    diagnostic["reason"] = "invalid_protocol" if invalid_protocol else "reasoning_budget_exhausted"
     recovery = getattr(provider, "complete_without_reasoning", None)
     if not callable(recovery):
         diagnostic["status"] = "unsupported_provider"
@@ -37,7 +42,8 @@ async def recover_empty_reply(*, provider, system, messages, elapsed_seconds,
         result = await asyncio.wait_for(recovery(system=system, messages=messages), timeout=budget)
         diagnostic.update(finish_reason=result.finish_reason, usage=result.usage,
                           request_id=result.request_id)
-        if not result.text.strip() or result.finish_reason != "stop":
+        if (not result.text.strip() or result.finish_reason != "stop"
+                or contains_internal_protocol(result.text)):
             diagnostic["status"] = "invalid_completion"
             return None, diagnostic
         diagnostic["status"] = "recovered"

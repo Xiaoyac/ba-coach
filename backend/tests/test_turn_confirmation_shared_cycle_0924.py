@@ -53,6 +53,7 @@ async def test_shared_cycle_review_reaches_other_chat_and_preserves_its_memory(g
     await db.commit()
     context.settings.database_schema_version = "v2"
     context.settings.router_reasoning_max_tokens = 1000
+    context.settings.module_router_reasoning_effort = "disabled"
     context.router_prompt = None
     context.router_provider.name = "isolated-router"
     context.router_provider.route_detailed = AsyncMock(return_value=Completion(

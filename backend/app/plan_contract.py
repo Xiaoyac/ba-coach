@@ -48,7 +48,28 @@ def _barrier_family(value):
     return None
 
 
-def _barrier_is_covered(barrier, coping_keys):
+def _barrier_clauses(value):
+    """Compare every listed obstacle, independently of list order/grouping.
+
+    Extractors can join two obstacles into one JSON item or reverse their
+    order.  Matching a substring of that item used to both reject reordered
+    lists and accept a coping plan that covered only one of the obstacles.
+    Split only explicit list separators. A clearly marked consequence stays
+    attached to the preceding obstacle instead of becoming a new obstacle.
+    """
+    clauses = []
+    for part in re.split(r"[，,、；;\n]+", str(value or "")):
+        clause = _barrier_normalized(part)
+        if not clause:
+            continue
+        if clauses and re.match(r"^(?:可能|就|也)?(?:会)?(?:影响|导致|造成)|^(?:所以|因此|以致|以至于)", clause):
+            clauses[-1] += "，" + clause
+        else:
+            clauses.append(clause)
+    return clauses
+
+
+def _barrier_clause_is_covered(barrier, coping_keys):
     barrier_key = _barrier_normalized(barrier)
     normalized_keys = {_barrier_normalized(key) for key in coping_keys}
     if barrier in coping_keys or (barrier_key and any(
@@ -59,6 +80,14 @@ def _barrier_is_covered(barrier, coping_keys):
     if family is None:
         return False
     return any(_barrier_family(key) == family for key in coping_keys)
+
+
+def _barrier_is_covered(barrier, coping_keys):
+    barriers = _barrier_clauses(barrier)
+    coping_clauses = {part for key in coping_keys for part in _barrier_clauses(key)}
+    return bool(barriers) and all(
+        _barrier_clause_is_covered(part, coping_clauses) for part in barriers
+    )
 
 
 def missing_plan_fields(plan):

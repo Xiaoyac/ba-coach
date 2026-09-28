@@ -14,6 +14,7 @@ export default function MessageRow({
   routingPending,
   animate,
   knowledgeSource,
+  showDiagnostics = true,
 }: {
   message: ChatMessage;
   pending: boolean;
@@ -22,6 +23,7 @@ export default function MessageRow({
   /** Only the newly submitted turn floats in; loaded history stays still. */
   animate: boolean;
   knowledgeSource?: KnowledgeReferenceSource;
+  showDiagnostics?: boolean;
 }) {
   const isUser = message.role === "user";
   const reasoning = message.reasoning_content?.trim() ?? "";
@@ -91,12 +93,12 @@ export default function MessageRow({
           }`}
         >
           {message.role === "assistant" ? <MessageMarkdown text={message.content} /> : message.content}
-          {!isUser && (
+          {!isUser && showDiagnostics && (
             <ReasoningDetails message={message} replyPending={pending && !routingPending} routingPending={routingPending} knowledgeSource={knowledgeSource} />
           )}
         </div>}
         {!isUser && pending && !routingPending && <TypingDots startedAt={generationStartedAt} hasReasoning={Boolean(reasoning)} hasContent={Boolean(message.content)} />}
-        {!isUser && !message.content && <ReasoningDetails message={message} replyPending={pending && !routingPending} routingPending={routingPending} knowledgeSource={knowledgeSource} />}
+        {!isUser && !message.content && showDiagnostics && <ReasoningDetails message={message} replyPending={pending && !routingPending} routingPending={routingPending} knowledgeSource={knowledgeSource} />}
         </div>
         {message.content && (
           <>

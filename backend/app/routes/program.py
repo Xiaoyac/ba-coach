@@ -96,6 +96,8 @@ async def get_program(session_id: str, user_id=Depends(require_subject_id), db=D
     if not enabled():
         return {"enabled": False}
     conversation, state = await own_state(db, session_id, user_id)
+    from ..routing_modes import effective_routing_mode
+    routing_mode = await effective_routing_mode(db, conversation=conversation, state=state, user_id=user_id)
     goals = schema.tables["pa_goals"]
     rows = (await db.execute(select(goals).where(goals.c.user_id == user_id)
         .order_by(goals.c.updated_at.desc()))).mappings().all()
@@ -132,14 +134,14 @@ async def get_program(session_id: str, user_id=Depends(require_subject_id), db=D
         public_draft["phase_c"] = {k: v for k, v in public_draft["phase_c"].items() if k != "_m4_contract"}
     from ..goal_contract import public_goal_details, public_activities
     details = await public_goal_details(db, user_id)
-    return {"enabled": True, "runtime": dict(state), "goals": [{**dict(row), **details.get(row["id"],
+    return {"enabled": True, "routing_mode": routing_mode, "runtime": dict(state), "goals": [{**dict(row), **details.get(row["id"],
                 {"goal_kind": "unclassified", "long_term_direction": None})} for row in rows],
             "goal_context": details.get(state["active_goal_id"], {"goal_kind": "unclassified", "long_term_direction": None}) if state["active_goal_id"] else None,
             "review_action": review_action,
             "activity_records": await public_activities(db, user_id, conversation_id=conversation.id),
             "draft": public_draft, "record_hash": record_hash(pending) if pending else None,
             "m1_contract": m1_contract,
-            "can_confirm": bool(pending and not missing and (readiness is None or readiness["ready"])
+            "can_confirm": bool(routing_mode != "router_only" and pending and not missing and (readiness is None or readiness["ready"])
                                 and state["last_transition_reason"] == "awaiting_record_confirmation"),
             "missing_fields": missing,
             "readiness": {k: readiness[k] for k in ("ready", "module", "missing_fields", "reasons")} if readiness else None,
@@ -157,6 +159,9 @@ async def select_goal(session_id: str, payload: Selection, user_id=Depends(requi
         profiles = schema.tables["user_profile"]
         await db.execute(select(profiles.c.uuid).where(profiles.c.uuid == user_id).with_for_update())
         state = (await db.execute(select(rt).where(rt.c.conversation_id == conversation.id).with_for_update())).mappings().one()
+        from ..routing_modes import effective_routing_mode
+        if await effective_routing_mode(db, conversation=conversation, state=state, user_id=user_id) == "router_only":
+            raise HTTPException(409, "本对话使用仅 Router 模式，目标选择不能覆盖 Router 的模块判断；请新建 Router + 代码对话使用此操作")
         if state["row_version"] != payload.row_version:
             raise HTTPException(409, "进度已更新，请刷新后再操作")
         if await initial_module(db, user_id=user_id) != "module_2":
@@ -212,6 +217,9 @@ async def confirm_record(session_id: str, payload: Confirmation, user_id=Depends
         profiles, rt = schema.tables["user_profile"], schema.tables["conversation_runtime_states"]
         await db.execute(select(profiles.c.uuid).where(profiles.c.uuid == user_id).with_for_update())
         state = (await db.execute(select(rt).where(rt.c.conversation_id == conversation.id).with_for_update())).mappings().one()
+        from ..routing_modes import effective_routing_mode
+        if await effective_routing_mode(db, conversation=conversation, state=state, user_id=user_id) == "router_only":
+            raise HTTPException(409, "本对话使用仅 Router 模式，网页确认不能覆盖 Router 的模块判断；请在对话中继续测试")
         pending, review_action = await validate_confirmation(db, conversation=conversation, state=state,
             user_id=user_id, session_id=session_id, payload=payload)
         module = state["current_module"]

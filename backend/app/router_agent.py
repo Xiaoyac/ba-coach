@@ -29,6 +29,16 @@ ROUTER_RUNTIME_CONTRACT = """# 路由接口边界
 knowledge_task只根据当前用户问题选择知识所需事实范围，不根据字段缺失创造问题或任务。
 正式模块迁移需要后台提交成功；失败保留实际已提交模块。
 """
+ROUTER_ONLY_RUNTIME_CONTRACT = """# 路由接口边界：仅 Router 模式
+在生成本轮回复之前判断；输入只有当前用户发言、此前对话与已提交状态。
+依据上方网页 Router 提示词选择本轮回复所属模块，输出 JSON {"target_module":"1","knowledge_task":"general"}。
+沿用网页 Router 提示词的模块业务含义及对话完成标准；其中等待后台提交或数据库已确认才允许跳转等执行前置在此模式停用。
+根据真实对话中计划的展示、用户确认及实际执行反馈独立判定，不把缺少数据库确认状态作为额外停留条件。
+target_module 必须是1、2、3、4之一；服务器接受任何合法模块编号，不额外施加相邻跳转、目标卡、完成步骤或字段齐全门槛。
+数据库状态作为真实事实参考，模块编号变化不表示目标、契约或复盘已确认，不得据此虚构保存状态。
+不生成用户可见文案，不根据字段空缺创造追问任务；knowledge_task只根据当前用户问题选择知识所需事实范围。
+仅最终完整输出作为模块决定；无效输出或请求失败保留当前模块。
+"""
 ROUTER_AGENT_PROMPT = (Path(__file__).with_name("prompt_defaults") / "router.md").read_text(encoding="utf-8")
 
 # The prompt's own vocabulary — "current_module=1", "target_module" — so the
@@ -60,7 +70,7 @@ _PA_CARD_RE = re.compile(r"当前(?:核心\s*)?PA\s*目标")
 
 @dataclass(frozen=True)
 class RouterDecision:
-    """Clamped module decision plus the provider's separate thought trace."""
+    """Parsed module decision plus the provider's separate thought trace."""
 
     target_module: str
     reasoning_content: str
@@ -82,8 +92,12 @@ def format_routing_reasoning(decision, current, applied_target=None, *, diagnost
     result = (f"模块判断结果：维持 {applied}，本轮不跳转。" if applied == current
               else f"模块判断结果：{current} → {applied}。")
     notices = []
+    router_only = bool(diagnostics and diagnostics.get("policy") == "router_only")
+    if router_only:
+        notices.append("本对话使用仅 Router 模式；模块按 Router 的合法输出切换，未自动确认目标、记录约定或复盘。")
     if decision.error_code:
-        notices.append(f"路由判断未成功（{decision.error_code}），模型没有提供可用决定；最终阶段由服务器契约核验，不将失败标记为正常判断。")
+        notices.append(f"路由判断未成功（{decision.error_code}），模型没有提供可用决定；"
+                       + ("保留当前模块。" if router_only else "最终阶段由服务器契约核验，不将失败标记为正常判断。"))
     if decision.json_recovery:
         notices.append("路由首次输出达到长度上限；已进行一次限时的结构化判断恢复，状态："
                        + decision.json_recovery["status"] + "。该恢复不额外生成深度思考。")
@@ -196,6 +210,7 @@ async def decide_target_module(
     conversation_context: str = "",
     system_prompt: str | None = None,
     completed_steps: list[str] | None = None,
+    routing_mode: str = "router_code",
 ) -> str:
     """Propose which module should handle the current incoming user message.
 
@@ -213,6 +228,7 @@ async def decide_target_module(
         conversation_context=conversation_context,
         system_prompt=system_prompt,
         completed_steps=completed_steps,
+        routing_mode=routing_mode,
     )
     return decision.target_module
 
@@ -230,17 +246,20 @@ async def decide_target_module_with_reasoning(
     completed_steps: list[str] | None = None,
     recovery_timeout_seconds: float = 6.0,
     business_state: dict | None = None,
+    routing_mode: str = "router_code",
 ) -> RouterDecision:
     """Return this turn's proposed module together with its thought trace.
 
     ``ai_output`` is retained only for old callers and is deliberately ignored.
 
     The final JSON remains the only text parsed as a decision. Native
-    ``reasoning_content`` is carried separately for the UI and can never
-    bypass the deterministic transition clamp.
+    ``reasoning_content`` is carried separately for the UI and is never parsed
+    as a decision. The structural clamp applies only in router_code mode;
+    the coordinator authorizes router_only from durable administrator state.
     """
     current_short = _FULL_TO_SHORT.get(current_module, "1")
-    effective_system = (system_prompt or ROUTER_AGENT_PROMPT) + "\n\n" + ROUTER_RUNTIME_CONTRACT
+    runtime_contract = ROUTER_ONLY_RUNTIME_CONTRACT if routing_mode == "router_only" else ROUTER_RUNTIME_CONTRACT
+    effective_system = (system_prompt or ROUTER_AGENT_PROMPT) + "\n\n" + runtime_contract
     from .knowledge_context import KNOWLEDGE_TASKS
     effective_system += "\nknowledge_task 可用值：" + ", ".join(KNOWLEDGE_TASKS)
     history_block = conversation_context.strip() or "（本 Session 无更早对话）"
@@ -352,7 +371,7 @@ async def decide_target_module_with_reasoning(
         (completed_steps or []) + _parse_completed_steps(raw, current_module),
     )
     completed_steps = [s for s in completed_steps if s not in revoked_steps]
-    resolved = _clamp(
+    resolved = proposed if routing_mode == "router_only" else _clamp(
         current_short,
         current_short if revoked_steps else proposed,
         has_pa_card=has_pa_card,

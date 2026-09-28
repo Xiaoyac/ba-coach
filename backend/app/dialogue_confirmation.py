@@ -204,16 +204,19 @@ def summary_present(module, text, record):
         if compact(record["activity_content"]) not in body:
             return False
         if record.get("location") and compact(record["location"]) not in body:
-            return False
+            from .goal_contract import _plan_wording
+            location = _plan_wording("location", str(record["location"]))
+            if not location or location not in body.replace("或者", "或"):
+                return False
         if record.get("duration_minutes") is not None and str(record["duration_minutes"]) not in body:
             return False
         frequency = record.get("frequency_rule") or {}
         if frequency.get("text") and compact(frequency["text"]) not in body:
             return False
-        from .plan_contract import _barrier_normalized
-        if any(compact(x) not in body
-               and compact(_barrier_normalized(x)) not in body
-               for x in record["potential_barriers"]):
+        from .plan_contract import _barrier_clauses
+        if any(compact(clause) not in body
+               for barrier in record["potential_barriers"]
+               for clause in _barrier_clauses(barrier)):
             return False
         if any(compact(x["plan"]) not in body for x in record["barrier_coping_plan"]):
             return False
@@ -293,8 +296,22 @@ def _schedule_visible(record, body):
     """
     value = record.get("scheduled_start_at")
     if not value:
-        schedule = re.sub(r"[\s*#`，,。；;]", "", str(record.get("schedule_text") or "")).replace("：", ":")
-        return bool(schedule and schedule in body)
+        compact = lambda text: re.sub(r"[\s*#`，,。；;]", "", text).replace("：", ":")
+        schedule = str(record.get("schedule_text") or "")
+        if compact(schedule) and compact(schedule) in body:
+            return True
+        # Cards may show the same frequency and duration on separate rows.
+        # Every other schedule clause must still be literally visible; this
+        # cannot discard an undisplayed time, date or additional condition.
+        clauses = [compact(part) for part in re.split(r"[，,、；;\n]+", schedule) if compact(part)]
+        duration = record.get("duration_minutes")
+        def visible(clause):
+            if clause in body:
+                return True
+            if type(duration) is int and re.fullmatch(r"(?:每次|单次)" + str(duration) + r"分钟", clause):
+                return bool(re.search(r"(?<!\d)" + str(duration) + r"分钟(?!\d)", body))
+            return False
+        return bool(clauses) and all(visible(clause) for clause in clauses)
     raw = str(value).replace("Z", "")
     match = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})[T ](\d{1,2}):(\d{2})", raw)
     if not match:

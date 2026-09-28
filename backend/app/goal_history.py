@@ -6,7 +6,7 @@ from .database_v2_schema import metadata as schema
 PLAN_FIELDS = ('id', 'version_no', 'record_status', 'confirmation_status', 'activity_content',
     'schedule_text', 'scheduled_start_at', 'timezone', 'location', 'duration_minutes',
     'frequency_rule', 'companion', 'core_values', 'core_values_impact', 'potential_barriers',
-    'barrier_coping_plan', 'created_at', 'updated_at')
+    'barrier_coping_plan', 'difficulty_rating', 'created_at', 'updated_at')
 
 
 async def read_goal_history(db, *, user_id, goal_id, page=1, page_size=20):

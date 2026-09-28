@@ -1,6 +1,7 @@
 """/api/conversations — the sidebar's history.
 
     POST   /api/conversations              create a conversation with its opening turn
+    POST   /api/conversations/current      resume/create the member's one visible chat
     GET    /api/conversations              list, pinned first then most recent
     GET    /api/conversations/{session_id} one conversation's full transcript
     PATCH  /api/conversations/{session_id} rename and/or pin
@@ -18,27 +19,30 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..conversation_store import create_conversation_with_opening
 from ..db import get_db, get_sessionmaker
-from ..identity import require_subject_id
+from ..identity import CallerIdentity, require_caller, require_subject_id
 from ..knowledge_references import KnowledgeReferences
 from ..graph.nodes import wait_for_pending_routing
 from ..models import (
     AIExecutionEvent,
+    AccountSettings,
     ClinicalRecordCycleLink,
     Conversation,
     ConversationMessage,
     ConversationModuleProgress,
     ConversationRuntimeState,
     PACycle,
+    UserAccount,
 )
 from ..opening import OPENING_MESSAGE
 from ..reasoning import normalize_reasoning_channels
 from ..session import SessionStore, get_session_store
 from ..schemas import (
+    ConversationCreate,
     ConversationDetail,
     ConversationMessageDetail,
     MessageTiming,
@@ -82,7 +86,8 @@ def _summary(c: Conversation) -> ConversationSummary:
     )
 
 
-def _detail(c: Conversation, *, next_module: str | None = None) -> ConversationDetail:
+def _detail(c: Conversation, *, next_module: str | None = None,
+            routing_mode: str = "router_code") -> ConversationDetail:
     def project_message(message: ConversationMessage) -> ConversationMessageDetail:
         normalized = normalize_reasoning_channels(
             message.content, message.reasoning_content
@@ -119,6 +124,7 @@ def _detail(c: Conversation, *, next_module: str | None = None) -> ConversationD
         messages=[project_message(message) for message in c.messages],
         revision=c.revision,
         next_module=next_module,
+        routing_mode=routing_mode,
     )
 
 
@@ -127,13 +133,17 @@ async def _detail_with_runtime(
 ) -> ConversationDetail:
     """Build a transcript together with its durable graph module pointer."""
     runtime = await db.get(ConversationRuntimeState, conversation.id)
+    from ..routing_modes import effective_routing_mode
+    mode = await effective_routing_mode(db, conversation=conversation,
+        state={"memory": runtime.memory if runtime else {}}, user_id=conversation.subject_id)
     return _detail(
-        conversation, next_module=runtime.module if runtime else None
+        conversation, next_module=runtime.module if runtime else None, routing_mode=mode
     )
 
 
 @router.post("", response_model=ConversationDetail, status_code=status.HTTP_201_CREATED)
 async def create_conversation(
+    payload: ConversationCreate | None = None,
     subject_id: str = Depends(require_subject_id),
     db: AsyncSession = Depends(get_db),
     store: SessionStore = Depends(get_session_store),
@@ -144,6 +154,18 @@ async def create_conversation(
     Because the opening is in both stores, the first model turn sees what the
     user is answering and every later GET/refresh returns the same transcript.
     """
+    # The role is resolved from durable authentication-owned settings, never
+    # from a client module flag. Member /current retains its resume policy.
+    role = (await db.execute(select(AccountSettings.role)
+        .join(UserAccount, UserAccount.id == AccountSettings.account_id)
+        .where(UserAccount.profile_uuid == subject_id))).scalar_one_or_none()
+    mode = payload.routing_mode if payload else "router_code"
+    if mode == "router_only":
+        if role != "admin":
+            raise HTTPException(status_code=403, detail="只有管理员可以创建仅 Router 模式对话")
+        from ..v2_profile import enabled as v2_enabled
+        if not v2_enabled():
+            raise HTTPException(status_code=409, detail="当前数据库版本不支持仅 Router 模式")
     session = await store.get_or_create(None)
     await store.append(session.session_id, OPENING_MESSAGE)
     try:
@@ -151,18 +173,73 @@ async def create_conversation(
             db,
             subject_id=subject_id,
             session_id=session.session_id,
+            start_from_m1=role == "admin",
+            routing_mode=mode,
         )
     except Exception:
         await db.rollback()
         await store.reset(session.session_id)
         raise
     from ..v2_profile import enabled as v2_enabled
-    if v2_enabled():
+    if v2_enabled() or role == "admin":
         runtime = await db.get(ConversationRuntimeState, conversation.id)
         await store.adopt(session.session_id,
             [Message(role=m.role, content=m.content) for m in conversation.messages],
             runtime.module, runtime.memory)
     return await _detail_with_runtime(db, conversation)
+
+
+@router.post("/current", response_model=ConversationDetail)
+async def current_conversation(
+    caller: CallerIdentity = Depends(require_caller),
+    db: AsyncSession = Depends(get_db),
+    store: SessionStore = Depends(get_session_store),
+) -> ConversationDetail:
+    """Resume the member's latest real chat, creating an opening only once.
+
+    The account lock also covers the no-conversation case, so two tabs or API
+    workers cannot both create the member's first conversation. Admins retain
+    the separate, intentionally non-idempotent POST /conversations endpoint.
+    """
+    account_id, subject_id = caller.account.id, caller.subject_id
+    # Discard the read-only authentication snapshot before locking. A no-op
+    # UPDATE locks this account on MySQL and obtains SQLite's writer lock,
+    # where SELECT FOR UPDATE alone would otherwise provide no protection.
+    await db.rollback()
+    locked = await db.execute(
+        update(UserAccount)
+        .where(UserAccount.id == account_id)
+        .values(username=UserAccount.username)
+        .execution_options(synchronize_session=False)
+    )
+    if locked.rowcount == 0:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    # Keep candidate selection a locking/current read while holding the
+    # account lock, rather than mixing MySQL snapshot and locking reads.
+    candidates = (await db.execute(
+        select(Conversation.session_id, ConversationRuntimeState.memory)
+        .outerjoin(ConversationRuntimeState,
+                   ConversationRuntimeState.conversation_id == Conversation.id)
+        .where(Conversation.subject_id == subject_id)
+        .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
+        .with_for_update(of=Conversation)
+    )).all()
+    for session_id, memory in candidates:
+        marker = (memory or {}).get("sandbox_mode")
+        if marker is True or str(marker).lower() == "true":
+            continue
+        # Start a fresh read transaction for the transcript and runtime, too.
+        await db.commit()
+        conversation = await _owned_or_404(
+            db, session_id=session_id, subject_id=subject_id
+        )
+        return await _detail_with_runtime(db, conversation)
+
+    # This helper commits the opening and initial module while holding the
+    # account lock. It preserves reusable M1 progress when older chats are gone.
+    return await create_conversation(
+        subject_id=subject_id, db=db, store=store
+    )
 
 
 async def _owned_revision(db: AsyncSession, *, session_id: str, subject_id: str):

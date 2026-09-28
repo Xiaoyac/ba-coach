@@ -18,6 +18,34 @@ async def runtime_for(db, session_id):
     return conversation, state
 
 
+def fresh_m1(state):
+    """An explicit new M1 run owns its evidence until its first confirmation."""
+    return bool(state and state.get("current_module") == "module_1"
+                and (state.get("memory") or {}).get("fresh_m1") is True)
+
+
+async def m1_draft(db, user_id, *, state, session_id=None):
+    """Keep an administrator's new M1 separate from earlier draft evidence."""
+    records = schema.tables["module_one_record"]
+    rows = (await db.execute(select(records).where(records.c.user_id == user_id,
+        records.c.record_status == "draft").order_by(
+            records.c.created_at.desc(), records.c.id.desc()))).mappings().all()
+    from .m1_contract import contract_for
+    if session_id is None and state:
+        session_id = await db.scalar(select(Conversation.session_id).where(
+            Conversation.id == state["conversation_id"]))
+    if fresh_m1(state):
+        return next((row for row in rows if contract_for(row).get("session_id") == session_id), None)
+    for row in rows:
+        source = contract_for(row).get("session_id")
+        if source and source != session_id:
+            _, owner_state = await runtime_for(db, source)
+            if fresh_m1(owner_state):
+                continue  # An old tab cannot borrow or overwrite a new M1 draft.
+        return row
+    return None
+
+
 async def load_workflow(maker, session_id):
     async with maker() as db:
         conversation, state = await runtime_for(db, session_id)
@@ -26,7 +54,11 @@ async def load_workflow(maker, session_id):
             return steps, None
         m1 = schema.tables["user_module_one_state"]
         one = (await db.execute(select(m1).where(m1.c.user_id == conversation.subject_id))).mappings().one_or_none()
-        if one:
+        if fresh_m1(state):
+            from .m1_contract import contract_for
+            pending = await m1_draft(db, conversation.subject_id, state=state, session_id=session_id)
+            steps["module_1"] = contract_for(pending).get("completed_steps", [])
+        elif one:
             steps["module_1"] = one["completed_steps"]
         progress = schema.tables["pa_cycle_progress"]
         row = (await db.execute(select(progress).where(progress.c.cycle_id == state["active_cycle_id"]))).mappings().one_or_none()
@@ -120,8 +152,7 @@ async def record_steps(db, *, session_id, user_id, module, requested_target, ste
     if module == "module_1":
         from .m1_contract import contract_for, missing_m1_fields, reconcile_router_completion
         records = schema.tables["module_one_record"]
-        pending = (await db.execute(select(records).where(records.c.user_id == user_id,
-            records.c.record_status == "draft").order_by(records.c.created_at.desc()).limit(1))).mappings().one_or_none()
+        pending = await m1_draft(db, user_id, state=state, session_id=session_id)
         contract = contract_for(pending)
         fresh = (contract.get("session_id") == session_id and assistant_message_id is not None
                  and contract.get("assistant_message_id") == assistant_message_id)
@@ -186,8 +217,11 @@ async def record_steps(db, *, session_id, user_id, module, requested_target, ste
             m4_missing_fields=(contract.get("missing_fields") if module == "module_4" and isinstance(contract, dict) else None))
         diagnostics["reason_codes"] = [item["code"] for item in readiness["reasons"]]
         diagnostics["readiness"] = readiness
-    await db.execute(update(table).where(key).values(**{column: merged, "row_version": row["row_version"] + 1,
-                                                     "updated_at": now()}))
+    # A restarted M1 keeps progress in its sourced draft. Do not erase an
+    # account's already-confirmed M1 history while the new discussion is open.
+    if not fresh_m1(state):
+        await db.execute(update(table).where(key).values(**{column: merged, "row_version": row["row_version"] + 1,
+                                                         "updated_at": now()}))
     # Readiness to SHOW/confirm a version is not the confirmation itself.
     # Requiring pa_card_completed / recording_plan_agreed here creates a
     # cycle: a user cannot confirm until the router already calls it confirmed.
@@ -556,6 +590,9 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
                     scope = scope & (table.c.module_two_record_id == cycle["module_two_record_id"])
         existing = (await db.execute(select(table).where(scope, table.c.record_status == "draft")
             .order_by(table.c.created_at.desc()).limit(1))).mappings().one_or_none()
+        if module == "module_1" and source_state is not None:
+            existing = await m1_draft(db, user_id, state=source_state,
+                                      session_id=data["m1_contract"]["session_id"])
         if module == "module_3":
             from .m3_contract import contract_for
             # A continued cycle may reuse the confirmed M2 plan. Its old M3
@@ -696,7 +733,7 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
                     rt.c.current_module == "module_4", rt.c.flow_status == "waiting_execution").values(
                         flow_status="active"))
         if existing:
-            if module == "module_1" and "m1_contract" in data:
+            if module == "module_1" and "m1_contract" in data and not fresh_m1(source_state):
                 m1, rt = schema.tables["user_module_one_state"], schema.tables["conversation_runtime_states"]
                 await db.execute(update(m1).where(m1.c.user_id == user_id,
                     m1.c.status != "completed").values(completed_steps=data["m1_contract"]["completed_steps"],
@@ -772,8 +809,7 @@ async def clinical_context(maker, user_id, session_id):
         completion = (await db.execute(select(m1).where(m1.c.user_id == user_id))).mappings().one_or_none()
         if state and state["current_module"] == "module_1":
             from .m1_contract import contract_for, EDUCATION_TOPICS, OPTIONAL_EDUCATION_TOPICS
-            pending = (await db.execute(select(one).where(one.c.user_id == user_id,
-                one.c.record_status == "draft").order_by(one.c.created_at.desc()).limit(1))).mappings().one_or_none()
+            pending = await m1_draft(db, user_id, state=state, session_id=session_id)
             contract = contract_for(pending)
             if contract.get("session_id") == session_id:
                 evidence = contract.get("evidence") or {}
@@ -807,6 +843,10 @@ async def clinical_context(maker, user_id, session_id):
                     "sources": {k: evidence[k] for k in (
                         "trigger", "feeling", "behavior", "consequence", "summary", "methods") if k in evidence},
                 }, ensure_ascii=False))
+        if fresh_m1(state):
+            # Previous confirmed records remain saved, but are not evidence
+            # that this newly opened discussion has already been completed.
+            completion = None
         if completion and completion["confirmed_formulation_id"]:
             record = (await db.execute(select(one).where(one.c.id == completion["confirmed_formulation_id"], one.c.user_id == user_id))).mappings().one_or_none()
             if record:

@@ -46,11 +46,7 @@ async def read_reply_workflow(maker, user_id, session_id):
             # workflow_prompt deliberately excludes these missing fields;
             # they do not become a main-model teaching or questioning list.
             from .m1_contract import contract_for, dialogue_status
-            one = metadata.tables['module_one_record']
-            m1_pending = (await db.execute(select(one).where(
-                one.c.user_id == user_id, one.c.record_status == 'draft'
-            ).order_by(one.c.created_at.desc()).limit(1))).mappings().one_or_none()
-            contract = contract_for(m1_pending)
+            contract = contract_for(pending)
             if contract.get('session_id') == session_id:
                 m1_status = dialogue_status(contract)
         if runtime['current_module'] in {'module_2', 'module_3', 'module_4'}:
@@ -99,14 +95,20 @@ async def read_reply_workflow(maker, user_id, session_id):
                 "draft_for_dialogue_summary": {k: pending[k] for k in summary_fields if k in pending} if pending else None}
 
 
-def workflow_prompt(authority):
+def workflow_prompt(authority, *, routing_mode="router_code"):
     """Expose committed state, not readiness diagnostics or a next-question plan."""
     import json
     keys = ("available", "current_module", "flow_status", "goal_selected", "plan_confirmed",
             "recording_status", "recording_decision_scope")
     facts = {key: authority[key] for key in keys if key in authority}
-    return ("# 已提交业务状态\n" + json.dumps(facts, ensure_ascii=False)
-            + "\n字段缺失或尚未保存不代表用户未表达；状态不可用时不能声称已保存或已切换。")
+    prompt = ("# 已提交业务状态\n" + json.dumps(facts, ensure_ascii=False)
+              + "\n字段缺失或尚未保存不代表用户未表达；状态不可用时不能声称已保存或已切换。")
+    if routing_mode == "router_only":
+        prompt += ("\n本对话采用仅 Router 路由：当前模块已由 Router 选择并提交，按本轮模块提示词回应。"
+                   "上述 flow_status、确认状态、草稿和已记录信息仅用于区分真实保存事实，"
+                   "不构成停留、退回、补齐字段或重复索要确认的指令，也不是继续对话的前提。"
+                   "模块切换本身不表示目标、计划或记录已经保存、确认或执行；不得据此声称业务已完成。")
+    return prompt
 
 
 def truthful_workflow_reply(authority):

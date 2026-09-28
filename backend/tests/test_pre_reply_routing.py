@@ -1,4 +1,5 @@
 """Current input -> one router -> verified commit -> selected reply, offline."""
+import asyncio
 import dataclasses
 import pytest
 import pytest_asyncio
@@ -64,6 +65,48 @@ async def test_failed_commit_never_publishes_proposal(context,provider):
     assert result['extracted_intent']=='module_1'
     assert result['telemetry']['execution_timeline'][-1]['status']=='failed'
     assert result['clinical_context']==[]
+
+@pytest.mark.parametrize('effort', ['provider_default', 'low', 'medium', 'high', 'disabled'])
+async def test_thinking_router_can_finish_after_fast_classifier_deadline(context,provider,monkeypatch,effort):
+    """A valid delayed decision survives only when native thinking is enabled."""
+    provider.route_result='2'
+    original=provider.route_with_reasoning
+    async def delayed_decision(**kwargs):
+        await asyncio.sleep(0.03)
+        return await original(**kwargs)
+    monkeypatch.setattr(provider,'route_with_reasoning',delayed_decision)
+    context=dataclasses.replace(context,settings=context.settings.model_copy(update={
+        'module_router_reasoning_effort':effort,
+        'router_request_timeout_seconds':0.005,
+        'background_model_timeout_seconds':0.5}))
+    result=await route_before_reply({'session_id':'s','user_input':'进入下一步',
+        'current_module':'module_1'},context)
+    metrics=result['telemetry']['router_pre_reply']
+    if effort=='disabled':
+        assert result['next_module']=='module_1'
+        assert metrics['reason']=='router_timeout'
+    else:
+        assert result['next_module']=='module_2'
+        assert metrics['status']=='completed'
+        assert '模块路由测试思考' in result['routing_reasoning_content']
+
+async def test_thinking_router_still_cancels_at_background_deadline(context,provider,monkeypatch):
+    cancelled=asyncio.Event()
+    async def unfinished_decision(**kwargs):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+    monkeypatch.setattr(provider,'route_with_reasoning',unfinished_decision)
+    context=dataclasses.replace(context,settings=context.settings.model_copy(update={
+        'module_router_reasoning_effort':'provider_default',
+        'router_request_timeout_seconds':0.005,
+        'background_model_timeout_seconds':0.03}))
+    result=await route_before_reply({'session_id':'s','user_input':'进入下一步',
+        'current_module':'module_1'},context)
+    assert cancelled.is_set()
+    assert result['next_module']=='module_1'
+    assert result['telemetry']['router_pre_reply']['reason']=='router_timeout'
 
 @pytest_asyncio.fixture
 async def routing_database(context):

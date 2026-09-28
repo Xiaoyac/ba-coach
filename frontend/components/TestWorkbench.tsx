@@ -180,7 +180,7 @@ export default function TestWorkbench({ onClose }: { onClose: () => void }) {
         <div className="ml-auto flex flex-wrap items-center gap-2">
         <span className="text-xs text-ink-faint">执行模型</span>
         <WorkbenchSelect aria-label="测试模型" disabled={batch || busy} className="w-32" value={provider} onChange={e => setProvider(e.target.value as TestProvider)}>
-          <option value="deepseek">Qwen-Max</option><option value="doubao">豆包</option><option value="claude">Claude</option>
+          <option value="deepseek">Qwen3.8-Max</option><option value="doubao">豆包</option><option value="claude">Claude</option>
         </WorkbenchSelect>
         <button className={buttonClass} disabled={busy || batch} onClick={() => edit("new")}><PlusMark className="mr-1 inline h-3 w-3"/>新增用例</button>
         {batch ? <button className={buttonClass} onClick={() => { stop.current = true; setNotice("将在当前用例完成后停止后续运行"); }}>停止后续运行</button> :

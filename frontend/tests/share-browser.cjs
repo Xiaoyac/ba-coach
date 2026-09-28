@@ -106,7 +106,7 @@ const snapshot = {
           messages: [{ id: 1, role: 'assistant', content: '欢迎，已有对话。' }], next_module: 'module_2' };
         if (path === '/api/auth/me') return json({ username: 'fixture-owner', nickname: '测试用户', role: 'user', profile_uuid: 'fixture-owner', email_required: false, birth_date_required: false });
         if (path === '/api/conversations') return json([conversation]);
-        if (path === '/api/conversations/share-fixture') return json(conversation);
+        if (path === '/api/conversations/share-fixture' || path === '/api/conversations/current') return json(conversation);
         if (path.endsWith('/revision')) return json({ revision: 1 });
         if (path.endsWith('/events')) return new Response(new ReadableStream({ start() {} }), { headers: { 'Content-Type': 'text/event-stream' } });
         if (path === '/api/conversations/share-fixture/shares') {
@@ -131,8 +131,7 @@ const snapshot = {
     });
     await page.goto(base);
     await page.getByText('欢迎，已有对话。', { exact: true }).waitFor();
-    await page.getByRole('button', { name: '更多操作', exact: true }).click();
-    await page.getByRole('menuitem', { name: '分享', exact: true }).click();
+    await page.getByRole('button', { name: '分享当前对话', exact: true }).click();
     const modal = page.getByRole('dialog', { name: '分享对话', exact: true });
     await modal.waitFor();
     await modal.getByRole('button', { name: '创建当前对话的分享链接', exact: true }).click();
@@ -149,8 +148,7 @@ const snapshot = {
     await modal.getByText('已撤销', { exact: true }).waitFor();
     assert.equal(await input.count(), 0);
     await modal.getByRole('button', { name: '关闭分享', exact: true }).click();
-    await page.getByRole('button', { name: '更多操作', exact: true }).click();
-    await page.getByRole('menuitem', { name: '分享', exact: true }).click();
+    await page.getByRole('button', { name: '分享当前对话', exact: true }).click();
     await modal.getByText('已撤销', { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => window.shareFixture.creates), 2);
     assert.equal(await page.evaluate(() => window.shareFixture.revokes), 1);

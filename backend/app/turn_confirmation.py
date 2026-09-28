@@ -137,35 +137,35 @@ async def _move_from_m3(db, conversation, runtime, user, proof, target):
         "decision_type": "pre_reply_transition", "decision_value": {
             "from_module": "module_3", "to_module": target, "source_cycle_id": cycle["id"],
             "active_cycle_id": new_cycle, "evidence": proof}, "evidence_message_ids": [user.id]})
-    if target == "module_2":
-        # Other chats still bound to the superseded cycle retain their own
-        # history, but cannot keep executing or editing that closed cycle.
-        other_ids = select(Conversation.id).where(Conversation.subject_id == conversation.subject_id,
-                                                  Conversation.id != conversation.id)
-        await db.execute(update(rt).where(rt.c.active_cycle_id == cycle["id"],
-            rt.c.conversation_id.in_(other_ids)).values(flow_status="completed",
-                last_transition_reason="plan_revised_in_other_chat", row_version=rt.c.row_version + 1,
-                updated_at=now()))
-    else:
-        # The execution cycle is shared across chats. Once it is reviewing,
-        # another chat cannot re-enter through the planning/waiting gate;
-        # publish the same committed module there in this transaction.
-        from .program_confirmation import confirmation_memory
-        other_rows = (await db.execute(select(rt.c.conversation_id, rt.c.memory).join(
-            Conversation, Conversation.id == rt.c.conversation_id).where(
-            Conversation.subject_id == conversation.subject_id,
-            Conversation.id != conversation.id,
-            rt.c.active_cycle_id == cycle["id"]).with_for_update())).mappings().all()
-        for other in other_rows:
+    # Shared business facts remain shared. Only ordinary chats inherit this
+    # phase change; an authorized Router-only chat owns its own stage/flow.
+    from .program_confirmation import confirmation_memory
+    from .routing_modes import effective_routing_mode, ROUTER_ONLY
+    other_rows = (await db.execute(select(rt.c.conversation_id, rt.c.memory, Conversation.subject_id).join(
+        Conversation, Conversation.id == rt.c.conversation_id).where(
+        Conversation.subject_id == conversation.subject_id, Conversation.id != conversation.id,
+        rt.c.active_cycle_id == cycle["id"]).with_for_update())).mappings().all()
+    other_ids = []
+    for other in other_rows:
+        owned = SimpleNamespace(id=other["conversation_id"], subject_id=other["subject_id"])
+        if await effective_routing_mode(db, conversation=owned, state=other,
+                user_id=conversation.subject_id, lock=True) == ROUTER_ONLY:
+            continue
+        other_ids.append(other["conversation_id"])
+        if target == "module_2":
+            # The old cycle is closed; normal chats cannot continue editing it.
+            await db.execute(update(rt).where(rt.c.conversation_id == other["conversation_id"]).values(
+                flow_status="completed", last_transition_reason="plan_revised_in_other_chat",
+                row_version=rt.c.row_version + 1, updated_at=now()))
+        else:
             await db.execute(update(rt).where(rt.c.conversation_id == other["conversation_id"]).values(
                 current_module="module_4", flow_status="active",
                 memory=confirmation_memory(other["memory"]),
                 last_transition_reason="cycle_updated_in_other_chat",
                 row_version=rt.c.row_version + 1, updated_at=now()))
-        if other_rows:
-            await db.execute(update(Conversation).where(Conversation.id.in_(
-                [other["conversation_id"] for other in other_rows])).values(
-                    revision=Conversation.revision + 1))
+    if other_ids:
+        await db.execute(update(Conversation).where(Conversation.id.in_(other_ids)).values(
+            revision=Conversation.revision + 1))
     conversation.revision += 1
     return True
 

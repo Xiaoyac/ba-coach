@@ -44,7 +44,8 @@ export type GoalContext = {
 export type ArchivedPlan = GoalPlan & {
   id: string; version_no: number; record_status: string; confirmation_status: string;
   companion?: string | null; core_values?: unknown; core_values_impact?: string | null;
-  potential_barriers?: unknown; barrier_coping_plan?: unknown; difficulty?: string | null;
+  potential_barriers?: unknown; barrier_coping_plan?: unknown; difficulty_rating?: number | null;
+  difficulty?: string | null;
   resources?: unknown; created_at: string; updated_at: string;
 };
 export type ArchivedCycle = {

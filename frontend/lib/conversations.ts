@@ -10,10 +10,17 @@ export interface ConversationSummary {
   pinned: boolean;
 }
 
+export type ConversationRoutingMode = "router_code" | "router_only";
+export const routingModeLabels: Record<ConversationRoutingMode, string> = {
+  router_code: "Router + 代码",
+  router_only: "仅 Router",
+};
+
 export interface ConversationDetail extends ConversationSummary {
   revision?: number;
   messages: ChatMessage[];
   next_module: string | null;
+  routing_mode?: ConversationRoutingMode;
 }
 
 export interface ReferenceChunk {
@@ -94,14 +101,29 @@ export async function listConversations(
 
 /** Create the durable opening turn and receive its server-owned session id. */
 export async function createConversation(
+  routingMode: ConversationRoutingMode,
   signal?: AbortSignal,
 ): Promise<ConversationDetail> {
   const res = await fetch(`${API_BASE}/api/conversations`, {
     method: "POST",
-    headers: apiHeaders(),
+    headers: apiHeaders({ json: true }),
+    body: JSON.stringify({ routing_mode: routingMode }),
     signal,
   });
   return parse(res, "Starting a conversation");
+}
+
+/** Resume the latest real chat, creating its opening once across tabs/devices. */
+export async function getCurrentConversation(
+  signal?: AbortSignal,
+): Promise<ConversationDetail> {
+  const res = await fetch(`${API_BASE}/api/conversations/current`, {
+    method: "POST",
+    headers: apiHeaders(),
+    signal,
+    cache: "no-store",
+  });
+  return parse(res, "Loading your conversation");
 }
 
 export async function fetchConversation(

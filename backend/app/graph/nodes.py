@@ -57,10 +57,11 @@ from ..prompts import (
     build_system_segments,
 )
 from ..providers.base import LLMProvider, ProviderError, as_text
-from ..reasoning import ThinkingTagStreamGuard, normalize_reasoning_channels
+from ..reasoning import ThinkingTagStreamGuard, normalize_reasoning_channels, contains_internal_protocol
 from ..retrieval import DatabaseKnowledgeBase
 from ..retrieval_intent import decide_retrieval
 from ..router_agent import extract_pa_card
+from ..routing_modes import ROUTER_CODE, ROUTER_ONLY
 from ..schemas import Message
 from ..workflow_state import (
     load_conversation_workflow,
@@ -166,6 +167,12 @@ def _finish_stream_channels(
     for safe_delta in content_guard.finish_passthrough():
         pending_deltas.extend(reply_buffer.push(safe_delta))
     blocked = blocked or content_guard.mode == "blocked"
+
+    if content_guard.invalid_protocol or contains_internal_protocol(content_guard.raw):
+        # A tool envelope cannot become prose merely because it also contains
+        # a repairable thinking tag. The caller may retry the failed generation;
+        # no part of this payload is reused as an answer or conversation evidence.
+        return "", "", []
 
     buffered_reply, final_deltas = reply_buffer.finish()
     normalized = normalize_reasoning_channels(
@@ -448,6 +455,9 @@ def make_module_node(module_name: str, config: ModuleConfig):
     async def module_node(state: AgentState, runtime: Runtime[GraphContext]) -> dict:
         from ..answer_validator import validate_answer, SAFE_REPLY, INTEGRITY_CODES, recovery_reply
         from ..reply_workflow import read_reply_workflow, workflow_prompt, truthful_workflow_reply
+        # This is the pre-reply node's server-authorized result, never a
+        # client metadata flag or an unverified memory preference.
+        router_only = state.get("routing_mode") == ROUTER_ONLY
         authoritative = (runtime.context.settings.database_schema_version == "v2" and
                          bool(state.get("subject_id")) and not (state.get("memory") or {}).get("sandbox_mode"))
         async def reply_authority():
@@ -458,8 +468,9 @@ def make_module_node(module_name: str, config: ModuleConfig):
             except Exception:
                 return {"available": False}
         pending_output: list[dict] = []
+        force_reply_validation = False
         def emit_output(event):
-            if runtime.context.settings.answer_validator_enabled or authoritative:
+            if runtime.context.settings.answer_validator_enabled or authoritative or force_reply_validation:
                 pending_output.append(event)
             else:
                 _emit(event)
@@ -594,14 +605,15 @@ def make_module_node(module_name: str, config: ModuleConfig):
             system.append(SystemPromptSegment(guidance_block, cacheable=False))
         authority = await reply_authority()
         if authority is not None:
-            system.append(SystemPromptSegment(workflow_prompt(authority), cacheable=False))
+            system.append(SystemPromptSegment(workflow_prompt(authority,
+                routing_mode=ROUTER_ONLY if router_only else ROUTER_CODE), cacheable=False))
         # If a pure acknowledgement could not commit because the generated
         # summary was not verifiable, display the actual complete draft. This
         # introduces a reviewable version, never a confirmation or transition.
         from ..dialogue_confirmation import affirmative
         card = (authority or {}).get('confirmation_summary')
         show_confirmation_card = False
-        if authoritative and card and module_name == 'module_2':
+        if authoritative and not router_only and card and module_name == 'module_2':
             show_confirmation_card = affirmative(user_input)
             if not show_confirmation_card:
                 from ..confirmation_intent import may_redisplay_unchanged_plan
@@ -756,6 +768,13 @@ def make_module_node(module_name: str, config: ModuleConfig):
 
         if context.stream:
             telemetry["raw_model_reply"] = content_guard.raw
+        invalid_protocol = contains_internal_protocol(telemetry.get("raw_model_reply"))
+        if invalid_protocol and not update.get("error"):
+            # Match the streaming guard for non-streaming calls too. Never
+            # unwrap a tool-call envelope into an apparently successful answer.
+            update.update(final_response="", reasoning_content="")
+            pending_output.clear()
+            force_reply_validation = True
         telemetry["normalized_reply"] = update.get("final_response", "")
         receipt = state.get('confirmation_receipt') or {}
         if update.get('error') and receipt.get('module') == module_name:
@@ -767,7 +786,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 pending_output.clear()
                 emit_output({'type': 'delta', 'text': receipt_text})
 
-        # A reasoning budget exhausted without a visible answer is a generation
+        # Budget exhaustion or an invalid provider envelope is a generation
         # failure, not inappropriate user input or a semantic validator rejection.
         if not update.get("error") and not update.get("final_response", "").strip():
             from ..reply_recovery import recover_empty_reply, GENERATION_INTERRUPTED_REPLY
@@ -775,7 +794,8 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 provider=context.provider, system=system, messages=messages,
                 elapsed_seconds=perf_counter() - generation_started,
                 total_timeout_seconds=context.settings.provider_request_timeout_seconds,
-                finish_reason=telemetry.get("finish_reason"), usage=update.get("usage", {}))
+                finish_reason=telemetry.get("finish_reason"), usage=update.get("usage", {}),
+                invalid_protocol=invalid_protocol)
             telemetry["reply_recovery"] = recovery
             pending_output.clear()  # never disclose the abandoned answer's reasoning
             update["reasoning_content"] = ""
@@ -787,6 +807,8 @@ def make_module_node(module_name: str, config: ModuleConfig):
             if recovered:
                 normalized = normalize_reasoning_channels(unwrap_chat_reply(recovered.text), "")
                 update["final_response"] = normalized.reply
+                if not normalized.reply:
+                    recovery["status"] = "invalid_normalized_completion"
                 update["model"] = recovered.model
                 telemetry["finish_reason"] = recovered.finish_reason
                 telemetry["provider_request_id"] = recovered.request_id
@@ -796,13 +818,14 @@ def make_module_node(module_name: str, config: ModuleConfig):
             else:
                 update["final_response"] = GENERATION_INTERRUPTED_REPLY
                 update["error"] = "回复生成中断，请稍后重试，无需重新解释"
-                telemetry["error_code"] = "reasoning_budget_exhausted" if recovery.get("original_finish_reason") == "length" else "empty_completion"
+                telemetry["error_code"] = ("invalid_protocol_completion" if invalid_protocol else
+                    "reasoning_budget_exhausted" if recovery.get("original_finish_reason") == "length" else "empty_completion")
                 emit_output({"type": "delta", "text": update["final_response"]})
 
         generation_finished = perf_counter()
         record_span(telemetry, "main_generation", generation_started, origin=state.get("turn_started_monotonic"), status="failed" if update.get("error") else "completed")
         validator_started = perf_counter()
-        if context.settings.answer_validator_enabled or authoritative:
+        if context.settings.answer_validator_enabled or authoritative or force_reply_validation:
             authority = await reply_authority()  # recheck after generation, including other-chat updates
             validation = validate_answer(reply=update.get("final_response", ""), module=module_name,
                 evidence_ids=[str(k.id) for k in guided_knowledge], workflow=authority,
@@ -1508,6 +1531,7 @@ async def _run_background_routing(
     from sqlalchemy import select
     from ..models import ConversationMessage
     from ..v2_workflow import (runtime_for, create_goal_from_agent_dialogue, record_steps)
+    from ..routing_modes import effective_routing_mode
     from ..goal_contract import evidence_messages, capture_activities, save_m2_activity_context
     from ..ai_telemetry import add_ai_event
 
@@ -1587,6 +1611,8 @@ async def _run_background_routing(
                 conversation, persisted, messages = await current_source(db)
                 if not messages or not still_current():
                     return
+                mode = await effective_routing_mode(db, conversation=conversation,
+                    state=persisted, user_id=subject_id)
                 diagnostics = {}
                 if current == "module_2" and data:
                     # Trials and secondary activities are useful even when a
@@ -1600,9 +1626,16 @@ async def _run_background_routing(
                         await create_goal_from_agent_dialogue(db, session_id=session_id, user_id=subject_id,
                             data=data, completed_steps=[], assistant_message_id=assistant_message_id,
                             diagnostics=diagnostics)
-                await record_steps(db, session_id=session_id, user_id=subject_id, module=current,
-                    requested_target=current, steps=[], assistant_message_id=assistant_message_id,
-                    diagnostics=diagnostics, allow_transition=False)
+                if mode == ROUTER_ONLY:
+                    # Source-backed drafts and activities may be refreshed,
+                    # but code progress/confirmation must not reinterpret the
+                    # already committed Router module decision.
+                    diagnostics["routing_mode"] = ROUTER_ONLY
+                    diagnostics["progress_commit"] = "skipped_router_only"
+                else:
+                    await record_steps(db, session_id=session_id, user_id=subject_id, module=current,
+                        requested_target=current, steps=[], assistant_message_id=assistant_message_id,
+                        diagnostics=diagnostics, allow_transition=False)
                 _, durable = await runtime_for(db, session_id)
                 published_memory = durable["memory"] or {}
                 telemetry["database_write"] = {"status": "completed", "record_id": record_id,
@@ -1617,7 +1650,8 @@ async def _run_background_routing(
                 conversation.revision += 1
                 await db.commit()
             await context.store.set_memory(session_id, published_memory)
-            await context.store.set_module(session_id, durable["current_module"])
+            if mode != ROUTER_ONLY:
+                await context.store.set_module(session_id, durable["current_module"])
     except Exception:
         logger.exception("post-reply persistence failed session=%s", session_id)
         if still_current():
