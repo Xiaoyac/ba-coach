@@ -35,7 +35,7 @@ export default function SharedConversationView({ token }: { token: string }) {
     }
     void load();
     // Recheck a cached page restored with the Back button or a tab revisited
-    // after revocation. Details always remain part of the immutable snapshot.
+    // after source-conversation deletion. Details remain part of the snapshot.
     const onPageShow = (event: PageTransitionEvent) => { if (event.persisted) void load(); };
     const onVisibility = () => { if (document.visibilityState === "visible") void load(); };
     window.addEventListener("pageshow", onPageShow);

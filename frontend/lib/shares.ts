@@ -2,16 +2,12 @@ import { API_BASE, type ChatMessage } from "@/lib/api";
 import type { KnowledgeReferences } from "@/lib/conversations";
 import { apiHeaders, checkAuthentication } from "@/lib/http";
 
-export interface ConversationShare {
+export interface CreatedConversationShare {
   id: string;
   title: string;
   created_at: string;
   message_count: number;
   snapshot_version: number;
-  revoked_at: string | null;
-}
-
-export interface CreatedConversationShare extends ConversationShare {
   token: string;
   path: string;
 }
@@ -35,7 +31,7 @@ async function parse<T>(response: Response, authenticated: boolean): Promise<T> 
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     const message = response.status === 404 && !authenticated
-      ? "分享链接不存在或已撤销。"
+      ? "分享链接不存在或已失效。"
       : typeof body?.detail === "string" ? body.detail : "分享请求失败，请稍后重试。";
     throw new ShareRequestError(message, response.status);
   }
@@ -44,20 +40,9 @@ async function parse<T>(response: Response, authenticated: boolean): Promise<T> 
 
 const ownerPath = (sessionId: string) => `${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}/shares`;
 
-export async function listConversationShares(sessionId: string, signal?: AbortSignal): Promise<ConversationShare[]> {
-  const response = await fetch(ownerPath(sessionId), { headers: apiHeaders(), signal, cache: "no-store" });
-  return parse(response, true);
-}
-
 export async function createConversationShare(sessionId: string): Promise<CreatedConversationShare> {
   const response = await fetch(ownerPath(sessionId), { method: "POST", headers: apiHeaders(), cache: "no-store" });
   return parse(response, true);
-}
-
-export async function revokeConversationShare(sessionId: string, shareId: string): Promise<void> {
-  const response = await fetch(`${ownerPath(sessionId)}/${encodeURIComponent(shareId)}`, { method: "DELETE", headers: apiHeaders(), cache: "no-store" });
-  checkAuthentication(response);
-  if (!response.ok) await parse(response, true);
 }
 
 export async function fetchSharedConversation(token: string, signal?: AbortSignal): Promise<SharedConversation> {

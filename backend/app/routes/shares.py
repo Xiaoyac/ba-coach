@@ -21,7 +21,6 @@ from ..session import SessionStore, get_session_store
 from ..share_schemas import (
     ConversationShareCreated,
     ConversationShareSnapshot,
-    ConversationShareSummary,
     SharedMessage,
 )
 from .conversations import _detail, _owned_or_404
@@ -34,13 +33,6 @@ def _headers(response: Response) -> None:
     response.headers["Cache-Control"] = "private, no-store"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
-
-
-def _summary(share: ConversationShare) -> ConversationShareSummary:
-    return ConversationShareSummary(
-        id=share.id, title=share.snapshot["title"], created_at=share.created_at,
-        message_count=len(share.snapshot["messages"]), revoked_at=share.revoked_at,
-    )
 
 
 def _busy() -> HTTPException:
@@ -120,43 +112,10 @@ async def create_share(
         )
         db.add(share)
         await db.commit()
-        return ConversationShareCreated(**_summary(share).model_dump(), token=token, path=f"/share/{token}")
-
-
-@router.get("/conversations/{session_id}/shares", response_model=list[ConversationShareSummary])
-async def list_shares(
-    session_id: str,
-    response: Response,
-    subject_id: str = Depends(require_subject_id),
-    db: AsyncSession = Depends(get_db),
-) -> list[ConversationShareSummary]:
-    _headers(response)
-    conversation = await _owned_or_404(db, session_id=session_id, subject_id=subject_id)
-    shares = (await db.execute(select(ConversationShare).where(
-        ConversationShare.conversation_id == conversation.id,
-    ).order_by(ConversationShare.created_at.desc(), ConversationShare.id))).scalars().all()
-    return [_summary(share) for share in shares]
-
-
-@router.delete("/conversations/{session_id}/shares/{share_id}", status_code=204)
-async def revoke_share(
-    session_id: str,
-    share_id: str,
-    response: Response,
-    subject_id: str = Depends(require_subject_id),
-    db: AsyncSession = Depends(get_db),
-) -> None:
-    _headers(response)
-    conversation = await _owned_or_404(db, session_id=session_id, subject_id=subject_id)
-    share = (await db.execute(select(ConversationShare).where(
-        ConversationShare.id == share_id,
-        ConversationShare.conversation_id == conversation.id,
-    ).with_for_update())).scalar_one_or_none()
-    if share is None:
-        raise HTTPException(status_code=404, detail="Share not found")
-    if share.revoked_at is None:
-        share.revoked_at = datetime.now(timezone.utc)
-        await db.commit()
+        return ConversationShareCreated(
+            id=share.id, title=snapshot.title, created_at=created_at,
+            message_count=len(snapshot.messages), token=token, path=f"/share/{token}",
+        )
 
 
 @router.get("/shares/{token}", response_model=ConversationShareSnapshot)
@@ -171,6 +130,7 @@ async def get_share(token: str, db: AsyncSession = Depends(get_db)) -> Response:
         Conversation, Conversation.id == ConversationShare.conversation_id,
     ).where(
         ConversationShare.token_digest == hashlib.sha256(token.encode("ascii")).hexdigest(),
+        # Preserve invalidation of links revoked before revocation was removed.
         ConversationShare.revoked_at.is_(None),
     ))).scalar_one_or_none()
     if share is None:

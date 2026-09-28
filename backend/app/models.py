@@ -726,7 +726,7 @@ class ConversationMessage(Base):
 
 
 class ConversationShare(Base):
-    """An immutable, explicitly published transcript with revocable access.
+    """An immutable, explicitly published transcript.
 
     Only the token digest is retained. Neither the snapshot nor its public
     schema contains the original session, account or database message IDs.
@@ -742,6 +742,7 @@ class ConversationShare(Base):
     token_digest: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=_utcnow)
+    # Legacy tombstone: retain to avoid republishing previously revoked links.
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
     __table_args__ = (

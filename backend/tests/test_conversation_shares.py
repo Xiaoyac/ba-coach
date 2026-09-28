@@ -1,4 +1,4 @@
-"""Sharing is explicit publication of one immutable, revocable transcript.
+"""Sharing is explicit publication of one immutable transcript.
 
 Use isolated databases and stub models. No model is called by a share request.
 """
@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -134,7 +135,7 @@ def test_share_stays_frozen_after_new_turn_title_and_detail_changes(
     assert len(later_snapshot["messages"]) == len(before["messages"]) + 2
 
 
-def test_owner_only_management_revoke_and_delete(client, auth_headers, register, db_sessionmaker):
+def test_owner_only_creation_legacy_invalidation_and_delete(client, auth_headers, register, db_sessionmaker):
     # Production enables these on every SQLite connection; the generic test
     # fixture omits them. Exercise real cascading deletion in this test too.
     async def enable_foreign_keys():
@@ -145,24 +146,24 @@ def test_owner_only_management_revoke_and_delete(client, auth_headers, register,
     session_id = start(client, auth_headers)
     path = f"/api/conversations/{session_id}/shares"
     assert client.post(path).status_code == 401
-    assert client.get(path).status_code == 401
     assert client.post(path, headers=other).status_code == 404
-    assert client.get(path, headers=other).status_code == 404
     shared = publish(client, auth_headers, session_id)
     public_path = f"/api/shares/{shared['token']}"
     assert client.get(public_path, headers=other).status_code == 200
-    listed = client.get(path, headers=auth_headers).json()
-    assert len(listed) == 1 and listed[0]["id"] == shared["id"]
-    assert "token" not in listed[0] and "path" not in listed[0] and "snapshot" not in listed[0]
-    revoke_path = f"{path}/{shared['id']}"
-    assert client.delete(revoke_path).status_code == 401
-    assert client.delete(revoke_path, headers=other).status_code == 404
-    assert client.delete(f"{path}/missing", headers=auth_headers).status_code == 404
+    # Removed history/revocation routes must not remain callable.
+    assert client.get(path, headers=auth_headers).status_code == 405
+    assert client.delete(f"{path}/{shared['id']}", headers=auth_headers).status_code == 404
+    assert "revoked_at" not in shared
     assert client.get(public_path).status_code == 200
-    assert client.delete(revoke_path, headers=auth_headers).status_code == 204
-    assert client.delete(revoke_path, headers=auth_headers).status_code == 204
+
+    # Old invalidated links must not become public again after this cleanup.
+    async def legacy_invalidation():
+        async with db_sessionmaker() as db:
+            share = await db.get(ConversationShare, shared["id"])
+            share.revoked_at = datetime.now(timezone.utc)
+            await db.commit()
+    run(legacy_invalidation())
     assert client.get(public_path).status_code == 404
-    assert client.get(path, headers=auth_headers).json()[0]["revoked_at"] is not None
     second = publish(client, auth_headers, session_id)
     assert client.delete(f"/api/conversations/{session_id}", headers=auth_headers).status_code == 204
     assert client.get(f"/api/shares/{second['token']}").status_code == 404
@@ -215,7 +216,13 @@ def test_incomplete_conversation_cannot_be_published(
     try:
         response = client.post(f"/api/conversations/{session_id}/shares", headers=auth_headers)
         assert response.status_code == 409
-        assert client.get(f"/api/conversations/{session_id}/shares", headers=auth_headers).json() == []
+        async def no_snapshot():
+            async with db_sessionmaker() as db:
+                shares = (await db.execute(select(ConversationShare).join(Conversation).where(
+                    Conversation.session_id == session_id,
+                ))).scalars().all()
+                assert shares == []
+        run(no_snapshot())
     finally:
         if busy == "turn":
             lock.release()

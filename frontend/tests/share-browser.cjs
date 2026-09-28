@@ -34,7 +34,7 @@ const snapshot = {
       const context = await browser.newContext({ viewport });
       const page = await context.newPage();
       const errors = [], requests = [];
-      let revoked = false, unavailable = false;
+      let invalidated = false, unavailable = false;
       page.on('pageerror', error => errors.push(error.message));
       // Prove that even an unrelated saved login is not sent to the share API.
       await page.addInitScript(() => localStorage.setItem('psy-auth-token', 'UNRELATED_PRIVATE_LOGIN'));
@@ -44,7 +44,7 @@ const snapshot = {
         requests.push({ path, headers: request.headers(), method: request.method() });
         if (path !== `/api/shares/${token}`) return route.fulfill({ status: 403, json: { detail: 'Unexpected private API request' } });
         const data = unavailable ? { ...snapshot, messages: snapshot.messages.map(m => ({ ...m, knowledge_references: null })) } : snapshot;
-        return route.fulfill({ status: revoked ? 404 : 200, json: revoked ? { detail: 'Share not found' } : data });
+        return route.fulfill({ status: invalidated ? 404 : 200, json: invalidated ? { detail: 'Share not found' } : data });
       });
       const response = await page.goto(`${base}/share/${token}`);
       assert.equal(response.status(), 200);
@@ -80,9 +80,9 @@ const snapshot = {
       await page.getByRole('button', { name: '对话参考 chunk', exact: true }).click();
       await page.getByText('本条回复未保存这项详情，分享中无法补填。', { exact: true }).waitFor();
       assert.ok(requests.every(r => r.path === `/api/shares/${token}`));
-      revoked = true;
+      invalidated = true;
       await page.reload();
-      await page.getByText('分享链接不存在或已撤销。', { exact: true }).waitFor();
+      await page.getByText('分享链接不存在或已失效。', { exact: true }).waitFor();
       assert.equal(await page.getByText('SNAPSHOT_REPLY_REASONING', { exact: true }).count(), 0);
       assert.deepEqual(errors, []);
       await context.close();
@@ -94,7 +94,7 @@ const snapshot = {
     await page.addInitScript(() => {
       localStorage.setItem('psy-auth-token', 'fixture-owner');
       const original = window.fetch.bind(window);
-      window.shareFixture = { shares: [], blocked: true, creates: 0, revokes: 0 };
+      window.shareFixture = { blocked: true, creates: 0, lists: 0 };
       // Insecure/embedded-browser fallback: select the link when clipboard is unavailable.
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
       document.execCommand = () => false;
@@ -113,16 +113,11 @@ const snapshot = {
           if (options.method === 'POST') {
             fixture.creates++;
             if (fixture.blocked) return json({ detail: '这段对话仍在生成或保存，请完成后再创建分享。' }, 409);
-            const share = { id: 'share-one', title: conversation.title, created_at: '2026-09-28T08:00:00Z', message_count: 1, snapshot_version: 1, revoked_at: null };
-            fixture.shares.unshift(share);
+            const share = { id: 'share-one', title: conversation.title, created_at: '2026-09-28T08:00:00Z', message_count: 1, snapshot_version: 1 };
             return json({ ...share, token: 'b'.repeat(43), path: '/share/' + 'b'.repeat(43) }, 201);
           }
-          return json(fixture.shares);
-        }
-        if (path === '/api/conversations/share-fixture/shares/share-one' && options.method === 'DELETE') {
-          fixture.revokes++;
-          fixture.shares[0].revoked_at = new Date().toISOString();
-          return new Response(null, { status: 204 });
+          fixture.lists++;
+          return json({ detail: "History must not be requested" }, 500);
         }
         if (path === '/api/assessment/history') return json({ items: [], has_more: false, next_offset: null });
         if (path.startsWith('/api/')) return json({});
@@ -144,16 +139,16 @@ const snapshot = {
     await modal.getByRole('button', { name: '复制链接', exact: true }).click();
     await modal.getByText('自动复制未成功，已选中链接，请手动复制。', { exact: true }).waitFor();
     await page.screenshot({ path: '/tmp/ba-share-modal.png', fullPage: true });
-    await modal.getByRole('button', { name: '撤销 待分享对话 的分享', exact: true }).click();
-    await modal.getByText('已撤销', { exact: true }).waitFor();
-    assert.equal(await input.count(), 0);
+    assert.equal(await modal.getByRole('button', { name: /撤销/ }).count(), 0);
     await modal.getByRole('button', { name: '关闭分享', exact: true }).click();
     await page.getByRole('button', { name: '分享当前对话', exact: true }).click();
-    await modal.getByText('已撤销', { exact: true }).waitFor();
+    await modal.waitFor();
+    assert.equal(await modal.getByText('已有分享', { exact: true }).count(), 0);
+    assert.equal(await modal.getByRole('textbox', { name: '分享链接', exact: true }).count(), 0);
+    assert.equal(await page.evaluate(() => window.shareFixture.lists), 0);
     assert.equal(await page.evaluate(() => window.shareFixture.creates), 2);
-    assert.equal(await page.evaluate(() => window.shareFixture.revokes), 1);
     assert.deepEqual(ownerErrors, []);
     await owner.close();
-    console.log('PASS: desktop/mobile shared UI, all four detail panels, stored mediator reasoning, no private/authenticated requests, missing-data isolation, safe text, revoked reload; owner create/reject/retry/copy fallback/revoke/reopen');
+    console.log('PASS: desktop/mobile shared UI, all four detail panels, stored mediator reasoning, no private/authenticated requests, missing-data isolation, safe text, invalidated reload; owner create/reject/retry/copy fallback; no history UI or list requests on reopen');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

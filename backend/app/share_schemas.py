@@ -30,15 +30,11 @@ class ConversationShareSnapshot(BaseModel):
     messages: list[SharedMessage] = Field(default_factory=list)
 
 
-class ConversationShareSummary(BaseModel):
+class ConversationShareCreated(BaseModel):
     id: str
     title: str
     created_at: datetime
     message_count: int
     snapshot_version: Literal[1] = 1
-    revoked_at: datetime | None = None
-
-
-class ConversationShareCreated(ConversationShareSummary):
     token: str
     path: str
