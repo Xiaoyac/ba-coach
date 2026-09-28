@@ -191,7 +191,7 @@ export default function ConversationSidebar({
             我的目标</button>}
           {onOpenAssessment && <button type="button" onClick={onOpenAssessment}
             className="surface-button flex min-h-11 w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-ink-muted">
-            <NotebookMark className="h-4 w-4" />记录今日</button>}
+            <NotebookMark className="h-4 w-4" />每日记录</button>}
           {(onOpenTestWorkbench || onStartSandbox) && <div className="pt-1">
             <button type="button" onClick={() => setAdminToolsOpen((value) => !value)} aria-expanded={adminToolsOpen}
               className="surface-button flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-[0.75rem] text-ink-muted">

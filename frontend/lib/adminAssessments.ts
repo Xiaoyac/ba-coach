@@ -31,3 +31,12 @@ export async function exportAdminRecords(filters: RecordFilters, kind: 'daily' |
   a.href=url; a.download=`daily-records-${kind}.csv`; document.body.appendChild(a); a.click(); a.remove();
   window.setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
+
+
+export type AssessmentRevision = { revision_no: number; saved_at: string; record: AssessmentRecord };
+export async function fetchAdminRevisions(id: number, signal: AbortSignal): Promise<AssessmentRevision[]> {
+  const response = await checked(await fetch(`${API_BASE}/api/admin/assessments/${id}/revisions`, {
+    headers: apiHeaders(), signal, cache: 'no-store',
+  }));
+  return response.json();
+}

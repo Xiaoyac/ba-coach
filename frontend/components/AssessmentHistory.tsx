@@ -43,6 +43,7 @@ function formatLocalDate(value: string): string {
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("zh-CN", {
     timeZone: "UTC",
+    year: "numeric",
     month: "long",
     day: "numeric",
     weekday: "short",
@@ -57,6 +58,7 @@ export default function AssessmentHistory({
   hasMore,
   onLoadMore,
   onRetry,
+  onEdit,
 }: {
   records: AssessmentRecord[];
   loading: boolean;
@@ -65,6 +67,7 @@ export default function AssessmentHistory({
   hasMore: boolean;
   onLoadMore: () => void;
   onRetry: () => void;
+  onEdit?: (record: AssessmentRecord) => void;
 }) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const choseInitial = useRef(false);
@@ -86,7 +89,7 @@ export default function AssessmentHistory({
         </span>
         <h3 className="mt-4 text-[0.95rem] font-medium text-ink">还没有历史记录</h3>
         <p className="mt-1.5 max-w-xs text-[0.8rem] leading-relaxed text-ink-faint">
-          完成今天的行为记录后，它会安静地保存在这里，方便以后回看。
+          保存行为记录后，它会安静地保存在这里，方便以后回看。
         </p>
       </div>
     );
@@ -150,6 +153,7 @@ export default function AssessmentHistory({
 
             {expanded && (
               <div className="border-t border-line px-4 pb-5 pt-4 sm:px-5">
+                {onEdit && <button type="button" onClick={() => onEdit(record)} className="mb-4 min-h-11 rounded-full border border-accent-edge px-4 text-sm text-accent-ink">修改这份记录</button>}
                 <div className={`grid ${modern ? "grid-cols-3" : "grid-cols-5"} gap-1.5`}>
                   {labels.map(({ key, label }) => (
                     <div

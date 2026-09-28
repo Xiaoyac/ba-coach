@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import AssessmentHistory from './AssessmentHistory';
 import WorkbenchSelect from './WorkbenchSelect';
 import { CloseMark, NotebookMark } from './icons';
-import { exportAdminRecords, fetchAdminRecords, type AdminRecord, type AdminRecordPage, type RecordFilters } from '@/lib/adminAssessments';
+import { fetchAdminRevisions, type AssessmentRevision, exportAdminRecords, fetchAdminRecords, type AdminRecord, type AdminRecordPage, type RecordFilters } from '@/lib/adminAssessments';
 
 const empty: RecordFilters = {query:'',start:'',end:'',scale_version:''};
 const inputStyle='min-h-11 min-w-0 w-full rounded-xl border border-line-strong bg-raised/60 px-3 text-sm text-ink outline-none focus:border-accent-edge focus:ring-2 focus:ring-accent-wash';
@@ -19,6 +19,18 @@ export default function AdminDailyRecords({onClose}:{onClose:()=>void}) {
   const [data,setData]=useState<AdminRecordPage|null>(null),[selected,setSelected]=useState<AdminRecord|null>(null);
   const [loading,setLoading]=useState(true),[error,setError]=useState(''),[exporting,setExporting]=useState(false),[notice,setNotice]=useState('');
   const exportControl=useRef<AbortController|null>(null);
+  const [revisions,setRevisions]=useState<AssessmentRevision[]>([]);
+  const [historyOpen,setHistoryOpen]=useState(false),[historyBusy,setHistoryBusy]=useState(false),[historyError,setHistoryError]=useState('');
+  const [selectedRevision,setSelectedRevision]=useState<AssessmentRevision|null>(null);
+  useEffect(()=>{setHistoryOpen(false);setRevisions([]);setSelectedRevision(null);setHistoryError('');},[selected?.record.id]);
+  useEffect(()=>{
+    if(!historyOpen||!selected)return;
+    const control=new AbortController();setHistoryBusy(true);setHistoryError('');
+    fetchAdminRevisions(selected.record.id,control.signal).then(rows=>{if(!control.signal.aborted)setRevisions(rows);})
+      .catch(err=>{if(!control.signal.aborted)setHistoryError(err instanceof Error?err.message:'读取失败');})
+      .finally(()=>{if(!control.signal.aborted)setHistoryBusy(false);});
+    return ()=>control.abort();
+  },[historyOpen,selected?.record.id]);
   const dirty=JSON.stringify(draft)!==JSON.stringify(filters);
   useEffect(()=>{dialog.current?.showModal();return ()=>exportControl.current?.abort();},[]);
   useEffect(()=>{
@@ -77,7 +89,17 @@ export default function AdminDailyRecords({onClose}:{onClose:()=>void}) {
           </section>
           <aside ref={detail} tabIndex={-1} aria-label="记录详情" className="min-h-[calc(100dvh-140px)] min-w-0 rounded-2xl bg-raised/35 p-4 outline-none lg:sticky lg:top-0 lg:max-h-[calc(100dvh-160px)] lg:min-h-0 lg:overflow-y-auto">
             {selected&&<button className="mb-3 min-h-11 rounded-xl px-3 text-sm text-accent-ink hover:bg-raised lg:hidden" onClick={()=>list.current?.scrollIntoView({block:'start',behavior:'instant'})}>返回记录列表</button>}
-            {selected?<><div className="mb-4"><h3 className="break-words text-base font-semibold">{name(selected)}</h3><p className="mt-1 break-all text-xs text-ink-muted">账号：{selected.username??'已注销'}<br/>用户编号：{selected.subject_id}</p></div><AssessmentHistory key={selected.record.id} records={[selected.record]} loading={false} loadingMore={false} error={null} hasMore={false} onLoadMore={()=>{}} onRetry={()=>{}}/></>:<div className="flex min-h-64 flex-col items-center justify-center px-4 text-center"><NotebookMark className="mb-3 h-7 w-7 text-accent-ink"/><h3 className="font-medium">把一天的记录放在一起看</h3><p className="mt-2 max-w-60 text-sm leading-6 text-ink-muted">选择左侧用户记录，查看活动时间、内容、心情和选填感受。</p></div>}
+            {selected?<><div className="mb-4"><h3 className="break-words text-base font-semibold">{name(selected)}</h3><p className="mt-1 break-all text-xs text-ink-muted">账号：{selected.username??'已注销'}<br/>用户编号：{selected.subject_id}</p></div><button type="button" onClick={()=>setHistoryOpen(v=>!v)} className="mb-3 min-h-11 rounded-xl border border-line px-3 text-sm text-accent-ink">{historyOpen?'收起修改历史':'查看修改历史'}</button>
+            {historyOpen&&<div className="mb-4 space-y-2 text-sm">
+              {historyBusy&&<p>正在读取修改历史…</p>}{historyError&&<p role="alert" className="text-alert-ink">{historyError}</p>}
+              {!historyBusy&&!historyError&&revisions.length===0&&<p className="text-ink-muted">这份旧记录尚无修改历史；首次修改时会保留原始版本。</p>}
+              <button type="button" onClick={()=>setSelectedRevision(null)} className="min-h-11 rounded-lg px-3 text-accent-ink">查看当前记录</button>
+              {revisions.map(r=><button type="button" key={r.revision_no} onClick={()=>setSelectedRevision(r)} className="block min-h-11 w-full rounded-xl border border-line px-3 py-2 text-left">
+                第 {r.revision_no} 版 · 记录日期 {r.record.local_date}<span className="block text-xs text-ink-muted">保存于 {new Date(r.saved_at).toLocaleString('zh-CN')}</span>
+              </button>)}
+            </div>}
+            {selectedRevision&&<p className="mb-2 text-sm text-accent-ink">正在查看第 {selectedRevision.revision_no} 版（只读）</p>}
+            <AssessmentHistory key={`${selected.record.id}-${selectedRevision?.revision_no??'current'}`} records={[selectedRevision?.record??selected.record]} loading={false} loadingMore={false} error={null} hasMore={false} onLoadMore={()=>{}} onRetry={()=>{}}/></>:<div className="flex min-h-64 flex-col items-center justify-center px-4 text-center"><NotebookMark className="mb-3 h-7 w-7 text-accent-ink"/><h3 className="font-medium">把一天的记录放在一起看</h3><p className="mt-2 max-w-60 text-sm leading-6 text-ink-muted">选择左侧用户记录，查看活动时间、内容、心情和选填感受。</p></div>}
           </aside>
         </div>
         <p className="mt-5 text-xs leading-6 text-ink-muted">仅显示已提交记录，未填写不等于 0 分。旧版 0–10 与新版 0–5 不混算。CSV 保留空值与“不适用”标记，每次最多导出 1000 份记录；活动明细一项活动一行，请勿重复累计其中的每日评分。文件含用户资料，请仅用于授权的数据收集。</p>

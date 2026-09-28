@@ -78,6 +78,8 @@ class AssessmentEntry(Base):
         String(16), nullable=False, default=STATUS_COMPLETED
     )
 
+    revision_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+
     # Version 1 retains historical 0–10 scores; version 2 writes 0–5.
     scale_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     completion_rate: Mapped[int | None] = mapped_column(Integer)
@@ -133,6 +135,18 @@ class AssessmentEntry(Base):
             f"<AssessmentEntry {self.subject_id[:8]}… {self.recorded_on} "
             f"{self.status}>"
         )
+
+
+class AssessmentRevision(Base):
+    """Immutable full snapshots, separate from the current daily record."""
+
+    __tablename__ = "assessment_revisions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    entry_id: Mapped[int] = mapped_column(ForeignKey("assessment_entries.id", ondelete="CASCADE"), nullable=False)
+    revision_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
+    saved_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=_utcnow, server_default=func.now())
+    __table_args__ = (UniqueConstraint("entry_id", "revision_no", name="uq_assessment_revision"),)
 
 
 class ActivityLog(Base):
