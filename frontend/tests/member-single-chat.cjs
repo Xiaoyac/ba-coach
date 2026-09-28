@@ -12,10 +12,7 @@ const { chromium } = require("playwright");
 const base = process.env.MEMBER_SINGLE_CHAT_URL || "http://127.0.0.1:3110";
 const artifacts = path.resolve(__dirname, "../../runtime-logs/member-single-chat");
 // Match the real first turn in backend/app/opening.py for faithful UI previews.
-const opening = "你好，我是一个基于行为激活（BA）的 AI 教练。接下来我会先和你一起了解近期一次具体的困扰，"
-  + "观察行动如何影响情绪和状态，再逐步把这种理解落实到可尝试的改变中，并根据反馈一起调整。"
-  + "我不能替代医生或心理咨询师，也不会做医学诊断。你的真实体验最重要，是否尝试、如何调整由你决定。\n"
-  + "开始前，你希望我怎么称呼你？";
+const opening = "你好！很高兴认识你。你可能是第一次来，我先自我介绍一下：\n\n我是基于行为激活理论工作的AI教练，简单来说就是帮你通过行动来改善情绪。\n\n我不能替代医生或心理咨询师，但我可以帮助你理解自己的行为和情绪的关系，和你一起找到适合的身体活动，制定可行的运动计划，陪伴支持你准备、行动、复盘和调整。我是你的伙伴，而你是自己生活的专家，我们一起讨论，你来决定要不要尝试、怎么调整。\n\n这里是一个安全、不被评判的空间，你可以真实地表达自己。\n\n在开始之前，你希望我怎么称呼你呢？";
 
 const profile = {
   nickname: "测试成员", tag: "12345", display_id: "测试成员12345", age: 30,
@@ -123,7 +120,7 @@ async function checkMember(browser, width) {
   const { page, requests, errors } = await fixture(browser, { width, module: width === 390 ? "module_3" : "module_1" });
   try {
     await page.goto(base);
-    await page.getByText("开始前，你希望我怎么称呼你？", { exact: false }).waitFor();
+    await page.getByText("在开始之前，你希望我怎么称呼你呢？", { exact: false }).waitFor();
     await assertMemberControls(page);
     assert.ok(requests.some(r => r.path === "/api/conversations/current"));
     await page.screenshot({ path: path.join(artifacts, `member-${width}.png`), fullPage: true });
@@ -194,12 +191,12 @@ async function checkEmptyAdmin(browser, width) {
       "same-event double submit cannot create two requests even when the first fails");
     await chooseMode(page, "router_only", true);
     await dialog.waitFor({ state: "detached" });
-    await page.getByText("开始前，你希望我怎么称呼你？", { exact: false }).waitFor();
+    await page.getByText("在开始之前，你希望我怎么称呼你呢？", { exact: false }).waitFor();
     assert.equal(await page.getByLabel("当前对话模式", { exact: true }).innerText(), "仅 Router");
     assert.equal(createdSessionIds.length, 1);
     await page.screenshot({ path: path.join(artifacts, `admin-mode-chat-${width}.png`), fullPage: true });
     await page.reload();
-    await page.getByText("开始前，你希望我怎么称呼你？", { exact: false }).waitFor();
+    await page.getByText("在开始之前，你希望我怎么称呼你呢？", { exact: false }).waitFor();
     assert.equal(await page.getByLabel("当前对话模式", { exact: true }).innerText(), "仅 Router");
     assert.equal(await page.getByRole("dialog", { name: "选择新对话模式", exact: true }).count(), 0);
     assert.equal(createdSessionIds.length, 1, "refresh must restore mode without creating or asking again");
@@ -218,7 +215,7 @@ async function checkEmptyAdmin(browser, width) {
 
     const narrow = await fixture(browser, { width: 320 });
     await narrow.page.goto(base);
-    await narrow.page.getByText("开始前，你希望我怎么称呼你？", { exact: false }).waitFor();
+    await narrow.page.getByText("在开始之前，你希望我怎么称呼你呢？", { exact: false }).waitFor();
     await assertMemberControls(narrow.page);
     await narrow.page.screenshot({ path: path.join(artifacts, "member-320.png"), fullPage: true });
     assert.deepEqual(narrow.errors, []);
@@ -268,7 +265,7 @@ async function checkEmptyAdmin(browser, width) {
       assert.equal(response.routing_mode, mode);
       assert.deepEqual(response.messages.map(message => message.content), [opening]);
       await admin.page.getByText("当前 MODULE I", { exact: true }).waitFor();
-      await admin.page.getByText("开始前，你希望我怎么称呼你？", { exact: false }).waitFor();
+      await admin.page.getByText("在开始之前，你希望我怎么称呼你呢？", { exact: false }).waitFor();
       assert.equal(await admin.page.getByLabel("当前对话模式", { exact: true }).innerText(), attempt === 1 ? "仅 Router" : "Router + 代码");
       assert.equal(await admin.page.getByText("这是已经开始的管理员对话。", { exact: true }).count(), 0);
       assert.equal(await admin.page.getByRole("dialog").count(), 0, "New Conversation must never mount a goal chooser");

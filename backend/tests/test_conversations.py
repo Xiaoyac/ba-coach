@@ -121,6 +121,27 @@ def test_legacy_conversation_opening_backfill_is_idempotent(
     assert detail["messages"][0]["content"] == OPENING_MESSAGE_TEXT
 
 
+def test_opening_copy_change_does_not_duplicate_historical_opening(
+    client, headers, db_sessionmaker,
+) -> None:
+    import asyncio
+    from app.models import ConversationMessage
+
+    created = client.post("/api/conversations", headers=headers).json()
+    old_text = "之前版本已发送的开场白。"
+
+    async def preserve_history():
+        async with db_sessionmaker() as db:
+            message = await db.get(ConversationMessage, created["messages"][0]["id"])
+            message.content = old_text
+            await db.commit()
+            assert await backfill_opening_messages(db) == 0
+
+    asyncio.get_event_loop().run_until_complete(preserve_history())
+    detail = client.get(f"/api/conversations/{created['session_id']}", headers=headers).json()
+    assert [message["content"] for message in detail["messages"]] == [old_text]
+
+
 def test_list_requires_authentication(client: TestClient) -> None:
     assert client.get("/api/conversations").status_code == 401
 
