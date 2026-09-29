@@ -55,9 +55,12 @@ def test_create_conversation_persists_opening_and_seeds_agent_history(
     assert detail["title"] == "新对话"
     assert detail["next_module"] is None
     assert isinstance(detail["messages"][0]["id"], int)
+    assert detail["messages"][0]["created_at"].endswith("Z")
     assert detail["messages"] == [
         {
             "id": detail["messages"][0]["id"],
+            "created_at": detail["messages"][0]["created_at"],
+            "reply_to_message_id": None,
             "role": "assistant",
             "content": OPENING_MESSAGE_TEXT,
             "reasoning_content": None,
@@ -83,16 +86,7 @@ def test_create_conversation_persists_opening_and_seeds_agent_history(
         f"/api/conversations/{detail['session_id']}", headers=headers
     ).json()
     assert refreshed["next_module"] in {"module_1", "module_2", "module_3", "module_4"}
-    assert refreshed["messages"][0] == {
-        "id": detail["messages"][0]["id"],
-        "role": "assistant",
-        "content": OPENING_MESSAGE_TEXT,
-        "reasoning_content": None,
-        "model_name": None,
-        "routing_reasoning_content": None,
-        "router_model_name": None,
-        "timing": None,
-    }
+    assert refreshed["messages"][0] == detail["messages"][0]
     assert len(refreshed["messages"]) == 3
 
 

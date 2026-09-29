@@ -246,6 +246,7 @@ async def decide_target_module_with_reasoning(
     completed_steps: list[str] | None = None,
     recovery_timeout_seconds: float = 6.0,
     business_state: dict | None = None,
+    clock_context: str = "",
     routing_mode: str = "router_code",
 ) -> RouterDecision:
     """Return this turn's proposed module together with its thought trace.
@@ -262,6 +263,8 @@ async def decide_target_module_with_reasoning(
     effective_system = (system_prompt or ROUTER_AGENT_PROMPT) + "\n\n" + runtime_contract
     from .knowledge_context import KNOWLEDGE_TASKS
     effective_system += "\nknowledge_task 可用值：" + ", ".join(KNOWLEDGE_TASKS)
+    if clock_context:
+        effective_system += "\n\n" + clock_context
     history_block = conversation_context.strip() or "（本 Session 无更早对话）"
     user_message = (
         f"current_module：{current_short}\n"

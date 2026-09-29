@@ -10,6 +10,7 @@ LangGraph injects it via `Runtime[GraphContext]`.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, TypedDict
 
 from ..config import Settings
@@ -31,6 +32,8 @@ class AgentState(TypedDict, total=False):
     # ---- Input, set by the caller ------------------------------------
     session_id: str
     user_input: str
+    user_created_at: datetime
+    assistant_created_at: datetime
     user_message_id: int | None
     turn_started_monotonic: float
     metadata: dict[str, str]

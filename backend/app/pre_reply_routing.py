@@ -12,6 +12,7 @@ from time import perf_counter
 from langgraph.config import get_stream_writer
 from .router_agent import RouterDecision, decide_target_module_with_reasoning, format_routing_reasoning
 from .schemas import Message
+from .conversation_time import temporal_context, timed_transcript
 from .trace_timing import record_span, prompt_source
 from .routing_modes import ROUTER_CODE, ROUTER_ONLY, effective_routing_mode
 
@@ -68,7 +69,7 @@ async def load_routing_snapshot(state, context):
                 raise ValueError("current_user_message_not_owned")
             query = query.where(ConversationMessage.position < boundary.position)
         prior = (await db.execute(query.order_by(ConversationMessage.position, ConversationMessage.id))).scalars().all()
-        snapshot["routing_history"] = [Message(role=message.role, content=message.content) for message in prior
+        snapshot["routing_history"] = [Message(role=message.role, content=message.content, created_at=message.created_at) for message in prior
                                        if message.role in {"user", "assistant"}]
     return {**snapshot, "routing_state": compact}
 
@@ -116,8 +117,9 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
     if forced:
         telemetry["ignored_forced_module"] = forced
     started = perf_counter()
-    history = "\n".join(f"{message.role}：{message.content}" for message in
-                        prepared.get("routing_history", prepared.get("chat_history", [])))
+    routing_history = prepared.get("routing_history", prepared.get("chat_history", []))
+    history = timed_transcript(routing_history)
+    clock_context = temporal_context(routing_history, user_created_at=state.get("user_created_at"))
     # Match the provider's thinking-call budget. The classifier deadline must
     # not cancel native reasoning before the final routing JSON can arrive.
     router_timeout = (
@@ -131,6 +133,7 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
             has_pa_card=bool(prepared["routing_state"].get("has_pa_card")),
             conversation_context=history, business_state=prepared["routing_state"],
             system_prompt=context.router_prompt, max_tokens=context.settings.router_reasoning_max_tokens,
+            clock_context=clock_context,
             routing_mode=prepared["routing_mode"],
             completed_steps=(prepared.get("module_steps") or {}).get(current, [])),
             timeout=router_timeout)

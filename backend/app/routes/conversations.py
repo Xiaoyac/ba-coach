@@ -118,6 +118,7 @@ def _detail(c: Conversation, *, next_module: str | None = None,
             id=message.id,
             reply_to_message_id=candidates[0] if len(candidates) == 1 else None,
             role=message.role,
+            created_at=message.created_at,
             content=normalized.reply,
             reasoning_content=normalized.reasoning or None,
             model_name=message.model_name,
@@ -194,7 +195,7 @@ async def create_conversation(
     if v2_enabled() or role == "admin":
         runtime = await db.get(ConversationRuntimeState, conversation.id)
         await store.adopt(session.session_id,
-            [Message(role=m.role, content=m.content) for m in conversation.messages],
+            [Message(role=m.role, content=m.content, created_at=m.created_at) for m in conversation.messages],
             runtime.module, runtime.memory)
     return await _detail_with_runtime(db, conversation)
 

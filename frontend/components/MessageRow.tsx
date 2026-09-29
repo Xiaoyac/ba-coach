@@ -26,6 +26,11 @@ export default function MessageRow({
   showDiagnostics?: boolean;
 }) {
   const isUser = message.role === "user";
+  const timestamp = message.created_at ? new Date(message.created_at) : null;
+  const timeLabel = timestamp && Number.isFinite(timestamp.getTime())
+    ? timestamp.toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric",
+        month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
+    : null;
   const reasoning = message.reasoning_content?.trim() ?? "";
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
   const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -97,6 +102,11 @@ export default function MessageRow({
             <ReasoningDetails message={message} replyPending={pending && !routingPending} routingPending={routingPending} knowledgeSource={knowledgeSource} />
           )}
         </div>}
+        {message.content && timeLabel && <time dateTime={message.created_at!}
+          title="北京时间（UTC+08:00）"
+          className={`mt-1 block px-1 text-[11px] text-ink-faint ${isUser ? "text-right" : ""}`}>
+          {timeLabel} · 北京时间
+        </time>}
         {!isUser && pending && !routingPending && <TypingDots startedAt={generationStartedAt} hasReasoning={Boolean(reasoning)} hasContent={Boolean(message.content)} />}
         {!isUser && !message.content && showDiagnostics && <ReasoningDetails message={message} replyPending={pending && !routingPending} routingPending={routingPending} knowledgeSource={knowledgeSource} />}
         </div>

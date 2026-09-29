@@ -49,7 +49,7 @@ async def load_reply_history(db: AsyncSession, *, subject_id: str, session_id: s
         raise ValueError("current_user_message_not_owned")
     rows = (await db.execute(select(
         ConversationMessage.role, ConversationMessage.content,
-        ConversationMessage.reasoning_content,
+        ConversationMessage.reasoning_content, ConversationMessage.created_at,
     ).where(
         ConversationMessage.conversation_id == boundary.conversation_id,
         ConversationMessage.position < boundary.position,
@@ -57,7 +57,7 @@ async def load_reply_history(db: AsyncSession, *, subject_id: str, session_id: s
     ).order_by(ConversationMessage.position.desc(), ConversationMessage.id.desc())
       .limit(max(1, limit)))).all()
     return [Message(role=row.role, content=normalize_reasoning_channels(
-        row.content, row.reasoning_content).reply) for row in reversed(rows)]
+        row.content, row.reasoning_content).reply, created_at=row.created_at) for row in reversed(rows)]
 
 
 async def create_conversation_with_opening(
@@ -217,6 +217,7 @@ async def start_turn(
     subject_id: str,
     session_id: str,
     user_text: str,
+    created_at: datetime | None = None,
 ) -> int:
     """Persist the user's message immediately and return its row id.
 
@@ -280,6 +281,7 @@ async def start_turn(
         position=position,
         role="user",
         content=user_text,
+        created_at=created_at or datetime.now(timezone.utc),
     )
     db.add(message)
 
@@ -301,6 +303,7 @@ async def finish_turn(
     routing_reasoning_content: str = "",
     router_model_name: str | None = None,
     telemetry: dict | None = None,
+    created_at: datetime | None = None,
 ) -> int | None:
     """Append the assistant reply after generation, if one exists."""
     normalized = normalize_reasoning_channels(reply_text, reasoning_content)
@@ -331,6 +334,7 @@ async def finish_turn(
         position=user_message.position + 1,
         role="assistant",
         content=reply_text,
+        created_at=created_at or datetime.now(timezone.utc),
         reasoning_content=reasoning_content or None,
         model_name=model_name,
         routing_reasoning_content=routing_reasoning_content or None,
@@ -377,7 +381,7 @@ async def finish_turn(
             "reply_recovery": metrics.get("reply_recovery"),
             **{key: metrics.get(key) for key in ("main_input", "reply_trace", "prompt_sources", "history_source", "history_messages",
                 "execution_timeline", "time_to_first_visible_content_ms", "first_visible_measurement",
-                "router_pre_reply")},
+                "router_pre_reply", "context_pipeline")},
             # Permission-controlled execution trace; never include this in
             # ordinary user-visible chat content.
             "answer_validator": metrics.get("answer_validator"),

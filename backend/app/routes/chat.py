@@ -16,6 +16,8 @@ import json
 import logging
 from uuid import uuid4
 from time import perf_counter
+from datetime import datetime
+from ..conversation_time import utc_now
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -76,6 +78,7 @@ async def _persist_user_message(
     subject_id: str | None,
     session_id: str,
     user_text: str,
+    created_at: datetime | None = None,
 ) -> int | None:
     """Best-effort immediate write of the user's message.
 
@@ -93,6 +96,7 @@ async def _persist_user_message(
             subject_id=subject_id,
             session_id=session_id,
             user_text=user_text,
+            created_at=created_at,
         )
     except Exception:  # noqa: BLE001
         await db.rollback()
@@ -113,6 +117,7 @@ async def _persist_assistant_message(
     routing_reasoning_content: str = "",
     router_model_name: str | None = None,
     telemetry: dict | None = None,
+    created_at: datetime | None = None,
 ) -> int | None:
     """Best-effort write of the reply after model generation finishes."""
     if not subject_id or user_message_id is None:
@@ -144,6 +149,7 @@ async def _persist_assistant_message(
             session_id=session_id,
             user_message_id=user_message_id,
             reply_text=reply_text,
+            created_at=created_at,
             reasoning_content=reasoning_content,
             model_name=model_name,
             provider_name=provider_name,
@@ -242,6 +248,7 @@ async def _resume_or_create(
                     [
                         Message(
                             role=m.role,
+                            created_at=m.created_at,
                             content=normalize_reasoning_channels(
                                 m.content, m.reasoning_content
                             ).reply,
@@ -268,6 +275,7 @@ async def _initial_state(
     `extract_memory_node` reads one merged view rather than having to reconcile
     request and session metadata itself.
     """
+    received_at = utc_now()
     session = await _resume_or_create(request, store, db, subject_id=subject_id)
     if request.metadata:
         session.metadata.update(request.metadata)
@@ -275,6 +283,7 @@ async def _initial_state(
     state: AgentState = {
         "session_id": session.session_id,
         "user_input": request.message,
+        "user_created_at": received_at,
         "metadata": dict(session.metadata),
         "forced_module": _validate_module(request),
         "subject_id": subject_id,
@@ -344,6 +353,7 @@ async def chat(
         subject_id=subject_id,
         session_id=session_id,
         user_text=request.message,
+        created_at=state["user_created_at"],
     )
     state["user_message_id"] = user_message_id
     state["turn_started_monotonic"] = request_started
@@ -367,6 +377,7 @@ async def chat(
             session_id=session_id,
             user_message_id=user_message_id,
             reply_text=reply,
+            created_at=final_state.get("assistant_created_at"),
             reasoning_content=reasoning_content,
             model_name=model_name,
             provider_name=final_state.get("provider", provider.name),
@@ -396,6 +407,8 @@ async def chat(
         )
 
     return ChatResponse(
+        user_created_at=state["user_created_at"],
+        assistant_created_at=final_state.get("assistant_created_at"),
         session_id=session_id,
         reply=reply,
         reasoning_content=reasoning_content,
@@ -477,6 +490,7 @@ async def _prepare_chat_stream(
         subject_id=subject_id,
         session_id=session_id,
         user_text=request.message,
+        created_at=state["user_created_at"],
     )
     state["user_message_id"] = user_message_id
     state["turn_started_monotonic"] = request_started
@@ -501,6 +515,7 @@ async def _prepare_chat_stream(
                 "provider": provider.name,
                 "model": provider.model,
                 "user_message_id": user_message_id,
+                "user_created_at": state["user_created_at"].isoformat(),
             },
         )
 
@@ -564,7 +579,7 @@ async def _prepare_chat_stream(
             except GenerationStopped:
                 # The user row is already durable. Do not save unvalidated
                 # partial output, advance memory, or start the background router.
-                await store.append(session_id, Message(role="user", content=request.message))
+                await store.append(session_id, Message(role="user", content=request.message, created_at=state["user_created_at"]))
                 yield _sse("cancelled", {"cancelled": True, "session_id": session_id})
                 return
             except Exception as exc:  # noqa: BLE001
@@ -683,6 +698,7 @@ async def _prepare_chat_stream(
                     session_id=session_id,
                     user_message_id=user_message_id,
                     reply_text=final_reply or streamed_reply,
+                    created_at=(final_state or {}).get("assistant_created_at"),
                     reasoning_content=final_reasoning or streamed_reasoning,
                     model_name=final_model,
                     provider_name=(

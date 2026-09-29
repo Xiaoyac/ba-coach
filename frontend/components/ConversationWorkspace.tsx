@@ -295,6 +295,7 @@ export default function ConversationWorkspace({
           (message, index) =>
             message.role === detail.messages[index].role &&
             message.content === detail.messages[index].content &&
+            message.created_at === detail.messages[index].created_at &&
             (message.reasoning_content ?? "") ===
               (detail.messages[index].reasoning_content ?? "") &&
             (message.model_name ?? "") ===
@@ -635,7 +636,7 @@ export default function ConversationWorkspace({
     const turn: ConversationTurn = {
       id: crypto.randomUUID(), sessionId: sourceId, userMessageId: null,
       startedAt: Date.now(), controller, cancelled: false, stopRequested: false,
-      messages: [...messages, { role: "user", content: text }, {
+      messages: [...messages, { role: "user", content: text, created_at: new Date().toISOString() }, {
         role: "assistant", content: "", reasoning_content: "", model_name: null,
         routing_reasoning_content: "", router_model_name: null,
       }],
@@ -688,6 +689,13 @@ export default function ConversationWorkspace({
             if (!ownsTask() || (meta.session_id && meta.session_id !== sourceId)) return;
             if (Number.isSafeInteger(meta.user_message_id) && meta.user_message_id! > 0) {
               turn.userMessageId = meta.user_message_id!;
+            }
+            if (meta.user_created_at) {
+              turn.messages = turn.messages.map((message, index) => index === baseline
+                ? { ...message, created_at: meta.user_created_at } : message);
+            }
+            if (meta.assistant_created_at) {
+              updateAssistant(message => ({ ...message, created_at: meta.assistant_created_at }));
             }
             turn.routing = { ...turn.routing, ...meta };
             if (meta.model) updateAssistant(message => ({ ...message, model_name: meta.model }));

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -20,6 +20,17 @@ Score10 = Annotated[int, Field(ge=0, le=10)]
 class Message(BaseModel):
     role: Role
     content: str
+    created_at: datetime | None = None
+
+    @field_validator("created_at")
+    @classmethod
+    def utc_timestamp(cls, value: datetime | None) -> datetime | None:
+        # Database timestamps are UTC even when the driver drops tzinfo.
+        if value is not None:
+            return (value.replace(tzinfo=timezone.utc) if value.tzinfo is None
+                    else value.astimezone(timezone.utc))
+        return None
+
     reasoning_content: str | None = None
     model_name: str | None = None
     routing_reasoning_content: str | None = None
@@ -45,6 +56,8 @@ class CancelGenerationRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    user_created_at: datetime | None = None
+    assistant_created_at: datetime | None = None
     session_id: str
     reply: str
     reasoning_content: str = ""

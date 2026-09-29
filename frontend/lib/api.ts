@@ -24,6 +24,7 @@ export interface ChatMessage {
   id?: number | null;
   reply_to_message_id?: number | null;
   role: Role;
+  created_at?: string | null;
   content: string;
   /** Provider-supplied thinking, disclosed separately from the final answer. */
   reasoning_content?: string | null;
@@ -86,6 +87,8 @@ export async function sendChat(body: ChatRequest): Promise<ChatResponse> {
 export interface RoutingMeta {
   session_id: string;
   user_message_id: number;
+  user_created_at?: string;
+  assistant_created_at?: string;
   provider: string;
   model: string;
   /** Module that generated the latest visible assistant reply. */
@@ -163,6 +166,7 @@ export async function streamChat(
 
       const payload = JSON.parse(dataLines.join("\n"));
       switch (event) {
+        case "done":
         case "meta":
           handlers.onMeta?.(payload as Partial<RoutingMeta>);
           break;
