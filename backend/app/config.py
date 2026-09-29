@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     knowledge_result_cache_max_bytes: int = Field(default=8388608, ge=1024, le=134217728)
     knowledge_intent_gate_enabled: bool = True
     knowledge_mediator_enabled: bool = True
+    # Record post-generation findings without buffering or replacing replies.
     answer_validator_enabled: bool = True
     # The mediator is a bounded selector, not a second conversational model.
     # Eight seconds is an upper bound for the user-visible critical path;
@@ -147,13 +148,13 @@ class Settings(BaseSettings):
     # thinking config.
     claude_router_model: str = "claude-haiku-4-5"
 
-    # ---- Qwen3.8-Max via the existing OpenAI-compatible provider --------
+    # ---- Qwen3.8-Flash via the existing OpenAI-compatible provider --------
     # The compatibility provider and environment variable names remain
     # ``deepseek_*`` so the production API address/key contract is unchanged.
-    # The configured wire model is qwen3.8-max.
+    # The configured wire model is qwen3.8-flash.
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "qwen3.8-max"
+    deepseek_model: str = "qwen3.8-flash"
     deepseek_max_tokens: int = 4000
     qwen_thinking_budget: int = Field(default=1024, ge=128, le=8000)
     deepseek_reasoning_effort: Literal["low", "medium", "high", "provider_default"] = "provider_default"
@@ -161,7 +162,7 @@ class Settings(BaseSettings):
     # coaching setting explicit across model changes; the router separately
     # uses 0 for its structured decisions.
     deepseek_temperature: float = 0.3
-    deepseek_router_model: str = "qwen3.8-max"
+    deepseek_router_model: str = "qwen3.8-flash"
 
     # ---- Doubao / Volcengine Ark --------------------------------------
     # Ark exposes an OpenAI-compatible chat-completions endpoint.  The model

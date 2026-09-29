@@ -4,6 +4,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import {
   fetchAssessmentHistory,
   submitAssessment,
+  updateAssessment,
+  fetchAssessmentByDate,
   type ActivityLog,
   type AssessmentRecord,
   type DailySummary,
@@ -34,7 +36,7 @@ const ACTIVITY_SCALES: { key: ActivityField; label: string; hint: string }[] = [
   { key: "importance", label: "重要", hint: "对你的意义" },
 ];
 
-type SummaryField = "completion_rate" | "activity_level" | "overall_mood";
+type SummaryField = "completion_rate" | "activity_level" | "overall_mood" | "social_connection" | "approach_vs_avoidance";
 
 const SUMMARY_SCALES: {
   key: SummaryField;
@@ -43,9 +45,18 @@ const SUMMARY_SCALES: {
   high: string;
 }[] = [
   { key: "completion_rate", label: "想做的事情完成程度", low: "几乎没完成", high: "都完成了" },
-  { key: "activity_level", label: "今天总体身体活动程度", low: "几乎没有活动", high: "活动很多" },
-  { key: "overall_mood", label: "回顾今天，你今天整体心情如何？", low: "很低落", high: "很愉快" },
+  { key: "activity_level", label: "这一天总体身体活动程度", low: "几乎没有活动", high: "活动很多" },
+  { key: "overall_mood", label: "这一天整体心情如何？", low: "很低落", high: "很愉快" },
 ];
+
+const LEGACY_SCALES = [...SUMMARY_SCALES,
+  { key: "social_connection" as const, label: "社会联结", low: "较少", high: "较多" },
+  { key: "approach_vs_avoidance" as const, label: "面对与回避", low: "较多回避", high: "较多面对" },
+];
+function localToday() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
 
 const emptyActivity = (): ActivityLog => ({
   time_slot: "",
@@ -86,9 +97,44 @@ export default function DailyAssessmentModal({
   const [activities, setActivities] = useState<ActivityLog[]>([emptyActivity()]);
   const [summary, setSummary] = useState<DailySummary>(defaultSummary);
   const [busy, setBusy] = useState(false);
+  const [recordDate, setRecordDate] = useState(localToday);
+  const [editing, setEditing] = useState<AssessmentRecord | null>(null);
+  const [dateExisting, setDateExisting] = useState<AssessmentRecord | null>(null);
+  const [dateLoading, setDateLoading] = useState(false);
+  const [dateError, setDateError] = useState<string | null>(null);
+  const legacy = editing !== null && editing.scale_version !== 2;
+  useEffect(() => {
+    setDateExisting(null);
+    setDateError(null);
+    if (!recordDate || recordDate > localToday()) { setDateLoading(false); return; }
+    const controller = new AbortController();
+    setDateLoading(true);
+    fetchAssessmentByDate(recordDate, controller.signal).then(record => {
+      if (!controller.signal.aborted) setDateExisting(record);
+    }).catch(err => {
+      if (!controller.signal.aborted) setDateError(err instanceof Error ? err.message : "读取记录失败，请重试。");
+    }).finally(() => { if (!controller.signal.aborted) setDateLoading(false); });
+    return () => controller.abort();
+  }, [recordDate, editing?.id]);
+  const dateConflict = dateExisting !== null && dateExisting.id !== editing?.id;
+
+  function editRecord(record: AssessmentRecord) {
+    setEditing(record);
+    setRecordDate(record.local_date);
+    setActivities(record.activities.length ? record.activities.map(a => ({ ...a })) : [emptyActivity()]);
+    setSummary({ completion_rate: record.completion_rate, activity_level: record.activity_level,
+      overall_mood: record.overall_mood, completion_not_applicable: record.completion_not_applicable ?? false,
+      social_connection: record.social_connection, approach_vs_avoidance: record.approach_vs_avoidance,
+      reflection_note: record.reflection_note });
+    setError(null);
+    setView("record");
+  }
+  function newRecord() {
+    setEditing(null); setRecordDate(localToday()); setActivities([emptyActivity()]);
+    setSummary(defaultSummary()); setError(null); setView("record");
+  }
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<AssessmentRecord[]>([]);
-  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -106,10 +152,10 @@ export default function DailyAssessmentModal({
   }, [view]);
 
   const filled = activities.filter((a) => a.activity.trim() || a.time_slot || a.emotion !== null || a.note?.trim() || ACTIVITY_SCALES.some(s => a[s.key] !== null));
-  const missingTimeSlot = filled.some((a) => !validTimeRange(a.time_slot));
+  const missingTimeSlot = filled.some((a) => legacy ? !a.time_slot.trim() : !validTimeRange(a.time_slot));
   const missingRequired = filled.some(a => !a.activity.trim() || a.emotion === null);
-  const missingSummary = summary.activity_level === null || summary.overall_mood === null || summary.completion_rate === null;
-  const canSubmit = !missingTimeSlot && !missingRequired && !missingSummary;
+  const missingSummary = !legacy && (summary.activity_level === null || summary.overall_mood === null || (summary.completion_rate === null && !summary.completion_not_applicable));
+  const canSubmit = !missingTimeSlot && !missingRequired && !missingSummary && !!recordDate && recordDate <= localToday() && !dateLoading && !dateError && !dateConflict;
 
   function patchActivity(index: number, patch: Partial<ActivityLog>) {
     setActivities((prev) =>
@@ -137,7 +183,6 @@ export default function DailyAssessmentModal({
       setHistory((prev) => (append ? [...prev, ...page.items] : page.items));
       setHistoryHasMore(page.has_more);
       setHistoryNextOffset(page.next_offset);
-      setHistoryLoaded(true);
     } catch (err) {
       setHistoryError(
         err instanceof Error ? "暂时没能读取历史记录，请稍后再试。" : String(err),
@@ -149,7 +194,7 @@ export default function DailyAssessmentModal({
 
   function showHistory() {
     setView("history");
-    if (!historyLoaded && !historyLoading) void loadHistory(0, false);
+    if (!historyLoading) void loadHistory(0, false);
   }
 
   async function handleSubmit() {
@@ -158,7 +203,8 @@ export default function DailyAssessmentModal({
     setBusy(true);
     setError(null);
     try {
-      await submitAssessment({
+      const payload = {
+        local_date: recordDate,
         // Blank cards are dropped rather than rejected: someone who tapped
         // "add" and changed their mind should not be sent back to fix it.
         activities: filled.map((a) => ({
@@ -169,13 +215,14 @@ export default function DailyAssessmentModal({
         })),
         summary: {
           ...summary,
-          // New entries always rate completion; historical N/A remains readable.
-          completion_not_applicable: false,
+          completion_not_applicable: summary.completion_not_applicable,
           reflection_note: summary.reflection_note?.trim()
             ? summary.reflection_note.trim()
             : null,
         },
-      });
+      };
+      if (editing) await updateAssessment(editing.id, { ...payload, expected_revision: editing.revision_no ?? 1 });
+      else await submitAssessment(payload);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -219,12 +266,12 @@ export default function DailyAssessmentModal({
                 id={titleId}
                 className="truncate text-[1.05rem] font-medium tracking-wide text-ink"
               >
-                {view === "history" ? "历史每日记录" : "今天的行为记录"}
+                {view === "history" ? "历史每日记录" : editing ? "修改行为记录" : "每日行为记录"}
               </h2>
               <p className="mt-0.5 truncate text-xs leading-relaxed text-ink-faint">
                 {view === "history"
                   ? "看看过去的行动，也看看自己走过的路"
-                  : "记下一点行动，也照顾一下今天的感受。"}
+                  : "可以补录过去的活动，也可以在历史记录中修改内容和日期。"}
               </p>
             </div>
             <button
@@ -259,11 +306,28 @@ export default function DailyAssessmentModal({
                 }
               }}
               onRetry={() => void loadHistory(0, false)}
+              onEdit={editRecord}
             />
           ) : (
             <fieldset disabled={busy} className="grid min-w-0 items-start gap-6 lg:grid-cols-2 lg:gap-6">
+            <div className="space-y-2 lg:col-span-2">
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-3 text-sm font-medium">记录日期
+                  <input type="date" required value={recordDate} max={localToday()} onChange={e => setRecordDate(e.target.value)} className={`${FIELD_CONTROL} min-h-11 border-line px-3`} />
+                </label>
+                {editing && <button type="button" onClick={newRecord} className="min-h-11 px-3 text-sm text-accent-ink">新建记录</button>}
+              </div>
+              {editing && <p className="text-xs text-ink-muted">正在修改 {editing.local_date} 的记录，原内容已带入，保存后会保留修改历史。</p>}
+              {legacy && <p className="text-xs text-ink-muted">这份记录使用旧版 0–10 分总体量表，保留原量表与分数。</p>}
+              {dateLoading && <p className="text-xs text-ink-muted">正在读取所选日期…</p>}
+              {dateError && <p role="alert" className="text-sm text-alert-ink">{dateError} 请重新选择日期。</p>}
+              {dateConflict && dateExisting && <div className="rounded-xl bg-accent-wash p-3 text-sm">
+                <p>这一天已有记录，不会覆盖。可以打开原记录继续修改。</p>
+                <button type="button" onClick={() => editRecord(dateExisting)} className="mt-2 min-h-11 rounded-full border border-accent-edge px-4 text-accent-ink">打开这一天的记录</button>
+              </div>}
+            </div>
             <section aria-labelledby={`${titleId}-activities`} className="min-w-0 space-y-3">
-              <div className="flex items-baseline justify-between gap-3"><h3 id={`${titleId}-activities`} className="text-base font-semibold">今天做了什么</h3><span className="text-xs text-ink-muted">按活动记录（可选）</span></div>
+              <div className="flex items-baseline justify-between gap-3"><h3 id={`${titleId}-activities`} className="text-base font-semibold">这一天做了什么</h3><span className="text-xs text-ink-muted">按活动记录（可选）</span></div>
               {activities.map((a, i) => (
                 <ActivityCard
                   key={i}
@@ -272,6 +336,7 @@ export default function DailyAssessmentModal({
                   onChange={(patch) => patchActivity(i, patch)}
                   onRemove={() => removeActivity(i)}
                   removable
+                  freeTime={legacy}
                 />
               ))}
 
@@ -287,16 +352,20 @@ export default function DailyAssessmentModal({
             <section aria-labelledby={`${titleId}-summary`} className="min-w-0 space-y-3">
               <div className="flex items-baseline justify-between gap-3"><h3 id={`${titleId}-summary`} className="text-base font-semibold">回看这一天</h3><span className="text-xs text-ink-muted">按天记录</span></div>
               <div data-daily-summary-panel className="space-y-5 rounded-2xl bg-raised p-4 sm:p-5">
-              <div className="flex min-h-7 items-center justify-between gap-3"><h4 className="text-sm font-semibold">整体感受</h4><span className="text-xs text-ink-muted">3 项评分 · 0–5 分</span></div>
-              {SUMMARY_SCALES.map((s) => (
+              <div className="flex min-h-7 items-center justify-between gap-3"><h4 className="text-sm font-semibold">整体感受</h4><span className="text-xs text-ink-muted">{legacy ? "旧版总体评分 · 0–10 分" : "3 项评分 · 0–5 分"}</span></div>
+              {(legacy ? LEGACY_SCALES : SUMMARY_SCALES).map((s) => (
                 <div key={s.key}>
                   <SegmentedScore
-                    label={s.label} hint={`0 · ${s.low}　—　5 · ${s.high}`} value={summary[s.key]} required
-                    onChange={v => setSummary(prev => ({ ...prev, [s.key]: v }))}
+                    label={s.label} hint={`0 · ${s.low}　—　${legacy ? 10 : 5} · ${s.high}`} value={summary[s.key] ?? null} required={!legacy} maximum={legacy ? 10 : 5}
+                    onChange={v => setSummary(prev => ({ ...prev, [s.key]: v, ...(s.key === "completion_rate" ? { completion_not_applicable: false } : {}) }))}
                   />
                 </div>
               ))}
 
+              {editing && !legacy && <label className="flex min-h-11 items-center gap-2 text-sm text-ink-muted">
+                <input type="checkbox" checked={summary.completion_not_applicable} onChange={e => setSummary(prev => ({ ...prev, completion_not_applicable: e.target.checked, completion_rate: null }))} />
+                这一天没有预定计划／完成程度不适用
+              </label>}
               <label className="block">
                 <span className="mb-2 block text-[0.85rem] text-ink-muted">
                   想再写一点（可留空）
@@ -310,7 +379,7 @@ export default function DailyAssessmentModal({
                     }))
                   }
                   rows={2}
-                  placeholder="今天有什么想记下来的…"
+                  placeholder="这一天有什么想记下来的…"
                   className={`zen-scroll block min-h-16 w-full resize-y border-line px-3 py-2 leading-6 placeholder:text-ink-muted ${FIELD_CONTROL}`}
                 />
               </label>
@@ -335,7 +404,7 @@ export default function DailyAssessmentModal({
               className="flex items-center gap-2 rounded-full border border-line px-4 py-2 text-[0.82rem] text-ink-muted transition-colors duration-300 hover:border-accent-edge hover:text-accent-ink"
             >
               <ArrowLeftMark className="h-3.5 w-3.5" />
-              返回今日记录
+              返回记录表
             </button>
           ) : (
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 sm:flex-nowrap">
@@ -349,7 +418,7 @@ export default function DailyAssessmentModal({
               查看历史
             </button>
 
-            <p id={`${titleId}-validation`} className="order-first basis-full text-xs leading-relaxed text-ink-muted sm:order-none sm:max-w-[45%] sm:basis-auto">{missingRequired || missingTimeSlot ? "请补全已填写活动的时间、内容和做完后的心情，或删除该活动" : missingSummary ? "请完成今日三项总体评分" : filled.length === 0 ? "可仅保存今日整体总结" : `已填写 ${filled.length} 项活动`}</p>
+            <p id={`${titleId}-validation`} className="order-first basis-full text-xs leading-relaxed text-ink-muted sm:order-none sm:max-w-[45%] sm:basis-auto">{missingRequired || missingTimeSlot ? "请补全已填写活动的时间、内容和做完后的心情，或删除该活动" : missingSummary ? "请完成这一天的三项总体评分" : filled.length === 0 ? "可仅保存这一天的整体总结" : `已填写 ${filled.length} 项活动`}</p>
               <button
                 type="submit"
                 disabled={busy || !canSubmit}
@@ -359,7 +428,7 @@ export default function DailyAssessmentModal({
                 {busy && (
                   <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-line-strong border-t-accent motion-reduce:animate-none" />
                 )}
-                {busy ? "正在保存…" : "保存今日记录"}
+                {busy ? "正在保存…" : editing ? "保存修改" : "保存记录"}
               </button>
           </div>
           )}
@@ -377,18 +446,20 @@ function ActivityCard({
   onChange,
   onRemove,
   removable,
+  freeTime = false,
 }: {
   index: number;
   value: ActivityLog;
   onChange: (patch: Partial<ActivityLog>) => void;
   onRemove: () => void;
   removable: boolean;
+  freeTime?: boolean;
 }) {
   // Flagged once the card actually has content — an untouched fresh card
   // (both fields empty) is dropped silently on submit, not an error to nag
   // about the moment it appears.
   const timeSlotMissing =
-    value.activity.trim().length > 0 && !validTimeRange(value.time_slot);
+    value.activity.trim().length > 0 && (freeTime ? !value.time_slot.trim() : !validTimeRange(value.time_slot));
   const contentId = useId();
 
   return (
@@ -410,12 +481,12 @@ function ActivityCard({
       <div data-activity-required className="space-y-4">
       <div className="space-y-2">
         <p className={FIELD_LABEL}>活动时间 <RequiredMark /></p>
-        <TimeSlotSelect
+        {freeTime ? <input aria-label={`活动 ${index + 1} 的时间段`} value={value.time_slot} onChange={e => onChange({ time_slot: e.target.value })} className={`${FIELD_CONTROL} min-h-11 w-full border-line px-3`} /> : <TimeSlotSelect
           value={value.time_slot}
           onChange={(time_slot) => onChange({ time_slot })}
           invalid={timeSlotMissing}
           label={`活动 ${index + 1} 的时间段`}
-        />
+        />}
         {timeSlotMissing && <p className="text-xs text-alert-ink">请选完整的时间段，结束时间须晚于开始。</p>}
       </div>
 
@@ -725,6 +796,7 @@ function SegmentedScore({
   onChange,
   required = false,
   compact = false,
+  maximum = 5,
 }: {
   label: string;
   hint: string;
@@ -732,6 +804,7 @@ function SegmentedScore({
   onChange: (v: number) => void;
   required?: boolean;
   compact?: boolean;
+  maximum?: number;
 }) {
   const hintId = useId();
   // Secondary scores use short inline labels, not a second stack of large
@@ -749,19 +822,19 @@ function SegmentedScore({
 
       <div
         role="radiogroup"
-        aria-label={`${label}（0 到 5）`}
+        aria-label={`${label}（0 到 ${maximum}）`}
         aria-describedby={hintId}
         aria-required={required}
-        className={`flex flex-1 ${compact ? "gap-0.5" : "gap-1"}`}
+        className={`${maximum > 5 ? "grid grid-cols-6" : "flex"} flex-1 ${compact ? "gap-0.5" : "gap-1"}`}
         onKeyDown={(event) => {
           const delta = ["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : ["ArrowLeft", "ArrowUp"].includes(event.key) ? -1 : 0;
           if (!delta && !["Home", "End"].includes(event.key)) return;
           event.preventDefault();
-          const next = event.key === "Home" ? 0 : event.key === "End" ? 5 : value === null ? 0 : (value + delta + 6) % 6;
+          const next = event.key === "Home" ? 0 : event.key === "End" ? maximum : value === null ? 0 : (value + delta + maximum + 1) % (maximum + 1);
           onChange(next); event.currentTarget.querySelectorAll<HTMLButtonElement>('button')[next]?.focus();
         }}
       >
-        {[0, 1, 2, 3, 4, 5].map((n) => {
+        {Array.from({ length: maximum + 1 }, (_, n) => n).map((n) => {
           const active = n === value;
           return (
             <button

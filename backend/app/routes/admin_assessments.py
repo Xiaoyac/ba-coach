@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 from ..db import get_db
 from ..identity import CallerIdentity, require_admin
 from ..models import AccountHandle, AssessmentEntry, STATUS_COMPLETED, UserAccount
-from .assessment import _to_out
+from .assessment import _to_out, revision_history
 
 router = APIRouter(prefix='/admin/assessments', tags=['admin-assessments'], dependencies=[Depends(require_admin)])
 logger = logging.getLogger(__name__)
@@ -106,3 +106,11 @@ async def export_records(kind: Literal['daily', 'activities'] = 'daily', clauses
     logger.info('admin_daily_export actor=%s kind=%s records=%s', caller.account.id, kind, len(rows))
     return Response('\ufeff' + output.getvalue(), media_type='text/csv; charset=utf-8', headers={
         'Content-Disposition': f'attachment; filename="daily-records-{kind}.csv"', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
+
+
+@router.get('/{entry_id}/revisions')
+async def assessment_revision_history(entry_id: int, response: Response, db: AsyncSession = Depends(get_db)):
+    if await db.get(AssessmentEntry, entry_id) is None:
+        raise HTTPException(404, '记录不存在。')
+    response.headers["Cache-Control"] = "private, no-store"
+    return await revision_history(db, entry_id)

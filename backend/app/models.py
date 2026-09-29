@@ -78,6 +78,8 @@ class AssessmentEntry(Base):
         String(16), nullable=False, default=STATUS_COMPLETED
     )
 
+    revision_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+
     # Version 1 retains historical 0–10 scores; version 2 writes 0–5.
     scale_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     completion_rate: Mapped[int | None] = mapped_column(Integer)
@@ -133,6 +135,18 @@ class AssessmentEntry(Base):
             f"<AssessmentEntry {self.subject_id[:8]}… {self.recorded_on} "
             f"{self.status}>"
         )
+
+
+class AssessmentRevision(Base):
+    """Immutable full snapshots, separate from the current daily record."""
+
+    __tablename__ = "assessment_revisions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    entry_id: Mapped[int] = mapped_column(ForeignKey("assessment_entries.id", ondelete="CASCADE"), nullable=False)
+    revision_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
+    saved_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=_utcnow, server_default=func.now())
+    __table_args__ = (UniqueConstraint("entry_id", "revision_no", name="uq_assessment_revision"),)
 
 
 class ActivityLog(Base):
@@ -723,6 +737,31 @@ class ConversationMessage(Base):
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<ConversationMessage {self.role} {self.content[:20]!r}>"
+
+
+class ConversationShare(Base):
+    """An immutable, explicitly published transcript.
+
+    Only the token digest is retained. Neither the snapshot nor its public
+    schema contains the original session, account or database message IDs.
+    Deleting the source conversation deletes its published copies as well.
+    """
+
+    __tablename__ = "conversation_shares"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
+    )
+    token_digest: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=_utcnow)
+    # Legacy tombstone: retain to avoid republishing previously revoked links.
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+
+    __table_args__ = (
+        Index("ix_conversation_share_created", "conversation_id", "created_at"),
+    )
 
 
 class ConversationRuntimeState(Base):

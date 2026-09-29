@@ -22,6 +22,7 @@ export type Role = "user" | "assistant";
 
 export interface ChatMessage {
   id?: number | null;
+  reply_to_message_id?: number | null;
   role: Role;
   content: string;
   /** Provider-supplied thinking, disclosed separately from the final answer. */
@@ -84,6 +85,7 @@ export async function sendChat(body: ChatRequest): Promise<ChatResponse> {
 
 export interface RoutingMeta {
   session_id: string;
+  user_message_id: number;
   provider: string;
   model: string;
   /** Module that generated the latest visible assistant reply. */

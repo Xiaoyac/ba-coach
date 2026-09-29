@@ -1,4 +1,4 @@
-"""OpenAI-compatible provider, currently configured for Qwen3.8-Max.
+"""OpenAI-compatible provider, currently configured for Qwen3.8-Flash.
 
 The internal ``deepseek`` key and environment variable names are retained for
 existing accounts and deployments. Requests use the configured URL/model and

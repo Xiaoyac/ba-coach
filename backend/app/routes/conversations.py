@@ -88,6 +88,13 @@ def _summary(c: Conversation) -> ConversationSummary:
 
 def _detail(c: Conversation, *, next_module: str | None = None,
             routing_mode: str = "router_code") -> ConversationDetail:
+    # Replies occupy the odd slot reserved by start_turn for that user row.
+    # Do not infer ownership from adjacent list indices or repeated text.
+    users_by_position: dict[int, list[int]] = {}
+    for message in c.messages:
+        if message.role == "user" and type(message.position) is int and type(message.id) is int:
+            users_by_position.setdefault(message.position, []).append(message.id)
+
     def project_message(message: ConversationMessage) -> ConversationMessageDetail:
         normalized = normalize_reasoning_channels(
             message.content, message.reasoning_content
@@ -105,8 +112,11 @@ def _detail(c: Conversation, *, next_module: str | None = None,
                 router_processing_ms=duration(message.router_duration_ms))
             if all(value is None for value in timing.model_dump().values()):
                 timing = None
+        candidates = (users_by_position.get(message.position - 1, [])
+                      if message.role == "assistant" and type(message.position) is int else [])
         return ConversationMessageDetail(
             id=message.id,
+            reply_to_message_id=candidates[0] if len(candidates) == 1 else None,
             role=message.role,
             content=normalized.reply,
             reasoning_content=normalized.reasoning or None,

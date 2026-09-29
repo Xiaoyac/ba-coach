@@ -137,8 +137,8 @@ class DailySummaryIn(BaseModel):
 class AssessmentSubmission(BaseModel):
     """POST /api/assessment — a completed assessment for one local day."""
 
-    # Resolved server-side from the caller's timezone when omitted. Accepted
-    # explicitly only so a client can be unambiguous about which day it means.
+    # Defaults to today in the caller's timezone. Explicit past dates support
+    # backfilling; completed records cannot be dated in the future.
     local_date: date | None = None
     # IANA name, e.g. "Asia/Shanghai". Unknown values fall back to UTC.
     timezone: str | None = Field(default=None, max_length=64)
@@ -147,6 +147,24 @@ class AssessmentSubmission(BaseModel):
     # but every supplied card still has to satisfy ActivityLogIn validation.
     activities: list[ActivityLogIn] = Field(..., max_length=50)
     summary: DailySummaryIn
+
+
+class AssessmentEditSummary(BaseModel):
+    # Legacy daily summaries used 0–10; the route enforces the stored scale.
+    completion_rate: int | None = Field(..., ge=0, le=10)
+    activity_level: int | None = Field(..., ge=0, le=10)
+    overall_mood: int | None = Field(..., ge=0, le=10)
+    social_connection: int | None = Field(default=None, ge=0, le=10)
+    approach_vs_avoidance: int | None = Field(default=None, ge=0, le=10)
+    completion_not_applicable: bool = False
+    reflection_note: str | None = Field(default=None, max_length=4000)
+
+
+class AssessmentUpdate(BaseModel):
+    local_date: date
+    expected_revision: int = Field(ge=1)
+    activities: list[ActivityLogIn] = Field(max_length=50)
+    summary: AssessmentEditSummary
 
 
 class AssessmentSkip(BaseModel):
@@ -175,6 +193,7 @@ class AssessmentOut(BaseModel):
     """A stored assessment, read back."""
 
     id: int
+    revision_no: int = 1
     local_date: date
     timezone: str
     status: Literal["completed", "skipped"]
@@ -681,6 +700,7 @@ class MessageTiming(BaseModel):
 
 class ConversationMessageDetail(Message):
     id: int | None = None
+    reply_to_message_id: int | None = None
     timing: MessageTiming | None = None
 
 

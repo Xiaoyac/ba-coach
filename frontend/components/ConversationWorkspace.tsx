@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cancelGeneration, sameMessageTiming, streamChat, type ChatMessage, type RoutingMeta } from "@/lib/api";
+import { hasDurableReplyForTurn } from "@/lib/replyBinding";
 import {
   createConversation,
   deleteConversation,
@@ -17,8 +18,8 @@ import {
   type ConversationSummary,
   type ConversationRoutingMode,
 } from "@/lib/conversations";
-import { downloadMarkdown } from "@/lib/markdown";
 import Chat from "@/components/Chat";
+import ConversationShareModal from "@/components/ConversationShareModal";
 import ConversationModeModal from "@/components/ConversationModeModal";
 import ConversationSidebar from "@/components/ConversationSidebar";
 import ChangePasswordModal from "@/components/ChangePasswordModal";
@@ -50,10 +51,8 @@ const SYNC_FALLBACK_INTERVAL_MS = 2_000;
 type ConversationTurn = {
   id: string;
   sessionId: string;
-  /** Position/text of the submitted user row. Kept so a live snapshot can
-   * acknowledge a reply even when the POST stream never delivers EOF. */
-  baseline: number;
-  userText: string;
+  /** Assigned by the POST stream, never guessed from a local transcript. */
+  userMessageId: number | null;
   startedAt: number;
   controller: AbortController;
   cancelled: boolean;
@@ -63,21 +62,6 @@ type ConversationTurn = {
   error: string | null;
   notice: string | null;
 };
-
-/**
- * A durable assistant reply is the only safe signal for ending a local turn
- * from the revision/event-sync path. A snapshot containing just the user row
- * is expected while generation is still running and must not clear the UI.
- */
-function hasDurableReplyForTurn(detail: ConversationDetail, turn: ConversationTurn): boolean {
-  const user = detail.messages[turn.baseline];
-  const assistant = detail.messages[turn.baseline + 1];
-  return detail.session_id === turn.sessionId
-    && user?.role === "user"
-    && user.content === turn.userText
-    && assistant?.role === "assistant"
-    && Boolean(assistant.content?.trim());
-}
 
 /**
  * Mirrors the server's ORDER BY (pinned desc, updated_at desc). The list
@@ -193,6 +177,7 @@ export default function ConversationWorkspace({
   const [reportCaptureError, setReportCaptureError] = useState<string | null>(null);
   const [sandboxStarting, setSandboxStarting] = useState(false);
   const [testWorkbenchOpen, setTestWorkbenchOpen] = useState(false);
+  const [shareTarget, setShareTarget] = useState<{ sessionId: string; title: string } | null>(null);
   const creatingConversationRef = useRef<Promise<ConversationDetail> | null>(null);
   // The live-sync stream can observe a deletion just before the DELETE fetch
   // resolves. Mark locally initiated deletions so only one code path chooses
@@ -314,6 +299,8 @@ export default function ConversationWorkspace({
               (detail.messages[index].reasoning_content ?? "") &&
             (message.model_name ?? "") ===
               (detail.messages[index].model_name ?? "") &&
+            message.id === detail.messages[index].id &&
+            message.reply_to_message_id === detail.messages[index].reply_to_message_id &&
             (message.routing_reasoning_content ?? "") ===
               (detail.messages[index].routing_reasoning_content ?? "") &&
             (message.router_model_name ?? "") ===
@@ -646,7 +633,7 @@ export default function ConversationWorkspace({
     const controller = new AbortController();
     const baseline = messages.length;
     const turn: ConversationTurn = {
-      id: crypto.randomUUID(), sessionId: sourceId, baseline, userText: text,
+      id: crypto.randomUUID(), sessionId: sourceId, userMessageId: null,
       startedAt: Date.now(), controller, cancelled: false, stopRequested: false,
       messages: [...messages, { role: "user", content: text }, {
         role: "assistant", content: "", reasoning_content: "", model_name: null,
@@ -663,9 +650,7 @@ export default function ConversationWorkspace({
     const recoveryRequest: { current: AbortController | null } = { current: null };
     const ownsTask = () => turns.current.get(sourceId) === turn;
     const hasDurableReply = (detail: ConversationDetail) =>
-      detail.session_id === sourceId && detail.messages[baseline]?.role === "user" &&
-      detail.messages[baseline]?.content === text && detail.messages[baseline + 1]?.role === "assistant" &&
-      !!detail.messages[baseline + 1]?.content;
+      hasDurableReplyForTurn(detail, turn);
     const updateAssistant = (update: (message: ChatMessage) => ChatMessage) => {
       if (!ownsTask()) return;
       const next = [...turn.messages];
@@ -701,6 +686,9 @@ export default function ConversationWorkspace({
           onCancelled: () => { turn.cancelled = true; },
           onMeta: (meta) => {
             if (!ownsTask() || (meta.session_id && meta.session_id !== sourceId)) return;
+            if (Number.isSafeInteger(meta.user_message_id) && meta.user_message_id! > 0) {
+              turn.userMessageId = meta.user_message_id!;
+            }
             turn.routing = { ...turn.routing, ...meta };
             if (meta.model) updateAssistant(message => ({ ...message, model_name: meta.model }));
             else publishTurn(turn);
@@ -806,21 +794,10 @@ export default function ConversationWorkspace({
     await loadConversation(targetSessionId);
   }
 
-  async function handleShare(targetSessionId: string) {
-    // The sidebar only holds summaries; reuse the messages already in memory
-    // for the open conversation rather than re-fetching them.
+  function handleShare(targetSessionId: string) {
     const summary = conversations.find((c) => c.session_id === targetSessionId);
-    const title = summary?.title || "对话记录";
-    try {
-      const detail =
-        targetSessionId === sessionId
-          ? { messages }
-          : await fetchConversation(targetSessionId);
-      downloadMarkdown(title, detail.messages);
-    } catch (err) {
-      if (isMissing(err)) dropMissingConversation(targetSessionId);
-      else setError(err instanceof Error ? err.message : String(err));
-    }
+    setSidebarOpen(false);
+    setShareTarget({ sessionId: targetSessionId, title: summary?.title || "对话记录" });
   }
 
   /** Rename / pin. Optimistic, then reconciled against the server's row. */
@@ -1008,6 +985,7 @@ export default function ConversationWorkspace({
           stopping={stopping}
           generationNotice={generationNotice}
           onOpenSidebar={() => { if (window.matchMedia("(min-width: 768px)").matches) setSidebarCollapsed(value => !value); else setSidebarOpen(value => !value); }}
+          onShareConversation={sessionId ? () => handleShare(sessionId) : undefined}
           sidebarExpanded={desktopLayout ? !sidebarCollapsed : sidebarOpen}
           onOpenAssessment={() => { setAssessmentView("record"); setAssessmentOpen(true); }}
           onOpenPushSettings={() => setPushSettingsOpen(true)}
@@ -1036,6 +1014,13 @@ export default function ConversationWorkspace({
         onOpenReminders={() => setPushSettingsOpen(true)}
         refreshKey={programRefreshKey} onClose={() => setGoalsOpen(false)} />}
       {pushSettingsOpen && <PushReminderModal onClose={() => setPushSettingsOpen(false)} />}
+      {shareTarget && <ConversationShareModal
+        key={shareTarget.sessionId}
+        sessionId={shareTarget.sessionId}
+        title={shareTarget.title}
+        generationPending={turns.current.has(shareTarget.sessionId) || (shareTarget.sessionId === sessionId && (busy || !!routing.routing_pending))}
+        onClose={() => setShareTarget(null)}
+      />}
 
       {passwordOpen && (
         <ChangePasswordModal onClose={() => setPasswordOpen(false)} />

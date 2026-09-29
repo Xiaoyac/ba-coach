@@ -266,10 +266,10 @@ async def decide_target_module_with_reasoning(
     user_message = (
         f"current_module：{current_short}\n"
         f"记忆库中是否存在本轮PA目标卡片：{'是' if has_pa_card else '否'}\n\n"
-        f"本 Session 对话记录（按时间顺序，必须综合判断）：\n{history_block}\n\n"
-        f"用户本轮输入：\n{user_input}\n\n"
+        f"本 Session 此前对话记录（不含本轮输入，按时间顺序）：\n{history_block}\n\n"
         f"\n已提交的紧凑业务状态（事实参考，不是追问清单）：\n"
         f"{json.dumps(business_state or {}, ensure_ascii=False)}\n"
+        f"\n用户本轮输入：\n{user_input}"
     )
 
     try:

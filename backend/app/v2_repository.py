@@ -354,3 +354,13 @@ async def active_memories(db: AsyncSession, *, user_id: str):
         (memories.c.valid_from.is_(None) | (memories.c.valid_from <= now())),
         (memories.c.valid_until.is_(None) | (memories.c.valid_until > now()))
     ).order_by(memories.c.created_at))).mappings().all()
+
+
+async def reply_memories(db: AsyncSession, *, user_id: str):
+    """Keep inferred summaries for audit, without recalling unverified claims.
+
+    A source-message ID on a generated paragraph proves provenance, not the
+    truth of every claim in it. User statements and confirmed memories remain.
+    """
+    return [row for row in await active_memories(db, user_id=user_id)
+            if row["source_kind"] != "ai_inference" or row["confirmation_status"] == "confirmed"]

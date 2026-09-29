@@ -18,24 +18,32 @@ const statusLabels: Record<string, string> = {
 };
 const label = (value: string | null) => value ? statusLabels[value] ?? value : "未记录";
 
-export default function KnowledgeReferenceDetails({ messageId, pending, view = "knowledge" }: {
+// Explicit snapshot mode never falls back to the private message endpoint,
+// including when old messages have no saved knowledge details.
+export type KnowledgeReferenceSource = { kind: "snapshot"; data: KnowledgeReferences | null };
+
+export default function KnowledgeReferenceDetails({ messageId, pending, view = "knowledge", source }: {
   messageId?: number | null; pending: boolean; view?: "knowledge" | "mediator";
+  source?: KnowledgeReferenceSource;
 }) {
-  const [data, setData] = useState<KnowledgeReferences | null>(null);
+  const [loadedData, setData] = useState<KnowledgeReferences | null>(null);
   const [error, setError] = useState(false);
   const [retry, setRetry] = useState(0);
   useEffect(() => {
     setData(null); setError(false);
-    if (!messageId) return;
+    if (source?.kind === "snapshot" || !messageId) return;
     const controller = new AbortController();
     fetchKnowledgeReferences(messageId, controller.signal).then(value => {
       if (!controller.signal.aborted) setData(value);
     }).catch(() => { if (!controller.signal.aborted) setError(true); });
     return () => controller.abort();
-  }, [messageId, retry]);
+  }, [messageId, retry, source?.kind]);
 
-  if (!messageId) return <p role="status">{pending ? "回复生成中，保存后可查看本轮参考片段。" : "本条回复尚无可查看的片段记录；正在同步的回复请稍后重试。"}</p>;
-  if (error) return <div role="alert">参考片段加载失败，可能已无访问权限或对话已删除。
+  const data = source?.kind === "snapshot" ? source.data : loadedData;
+  if (source?.kind === "snapshot" && !data) return <p role="status">本条回复未保存这项详情，分享中无法补填。</p>;
+
+  if (!source && !messageId) return <p role="status">{pending ? "回复生成中，保存后可查看本轮参考片段。" : "本条回复尚无可查看的片段记录；正在同步的回复请稍后重试。"}</p>;
+  if (!source && error) return <div role="alert">参考片段加载失败，可能已无访问权限或对话已删除。
     <button type="button" className="ml-2 min-h-9 rounded-lg px-2 text-accent-ink underline focus-visible:ring-2 focus-visible:ring-accent-edge"
       onClick={() => setRetry(value => value + 1)}>重试加载</button></div>;
   if (!data) return <p role="status">正在加载本轮参考片段…</p>;
@@ -59,6 +67,10 @@ export default function KnowledgeReferenceDetails({ messageId, pending, view = "
       ? "本条历史回复未保存中介使用建议，不会重新调用模型补填；新回复可查看实际建议。"
       : "本轮没有可用的中介使用建议，请结合上方处理状态查看原因。"}</p>}
     {data.mediator_guidance && <p className="text-ink-faint">这是中介给回复模型的知识使用建议，不是独立思考内容，也不代表回复最终实际引用。</p>}
+    {data.mediator_reasoning_content && <details className="rounded-lg bg-surface/70 px-3 py-2">
+      <summary className="cursor-pointer py-1 font-medium text-ink focus-visible:outline-accent-edge">中介思考（已保存）</summary>
+      <p className="mt-2 whitespace-pre-wrap [overflow-wrap:anywhere]">{data.mediator_reasoning_content}</p>
+    </details>}
     {data.mediator_model && <p>模型：{data.mediator_model}</p>}
   </div>;
 

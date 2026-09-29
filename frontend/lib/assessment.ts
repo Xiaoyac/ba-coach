@@ -23,6 +23,8 @@ export interface ActivityLog {
 }
 
 export interface DailySummary {
+  social_connection?: Score | null;
+  approach_vs_avoidance?: Score | null;
   completion_rate: Score | null;
   completion_not_applicable: boolean;
   activity_level: Score | null;
@@ -36,6 +38,7 @@ export interface StoredActivityLog extends ActivityLog {
 
 export interface AssessmentRecord {
   scale_version?: number;
+  revision_no?: number;
   completion_not_applicable?: boolean;
   id: number;
   local_date: string;
@@ -59,12 +62,14 @@ export interface AssessmentHistoryPage {
 async function parse<T>(res: Response, what: string): Promise<T> {
   checkAuthentication(res);
   if (!res.ok) {
-    throw new Error(`每日记录暂时无法加载或保存，请稍后重试（${res.status}）。`);
+    const body = await res.json().catch(() => null);
+    throw new Error(typeof body?.detail === "string" ? body.detail : `每日记录暂时无法加载或保存，请稍后重试（${res.status}）。`);
   }
   return res.json() as Promise<T>;
 }
 
 export async function submitAssessment(payload: {
+  local_date?: string;
   activities: ActivityLog[];
   summary: DailySummary;
 }): Promise<void> {
@@ -90,4 +95,19 @@ export async function fetchAssessmentHistory(
     signal,
   });
   return parse(res, "Loading assessment history");
+}
+
+
+export async function updateAssessment(id: number, payload: {
+  local_date: string; expected_revision: number; activities: ActivityLog[]; summary: DailySummary;
+}): Promise<AssessmentRecord> {
+  return parse(await fetch(`${API_BASE}/api/assessment/${id}`, {
+    method: "PUT", headers: apiHeaders({ json: true }), body: JSON.stringify(payload),
+  }), "Updating assessment");
+}
+
+export async function fetchAssessmentByDate(date: string, signal?: AbortSignal): Promise<AssessmentRecord | null> {
+  return parse(await fetch(`${API_BASE}/api/assessment/by-date?local_date=${encodeURIComponent(date)}`, {
+    headers: apiHeaders(), signal,
+  }), "Loading selected date");
 }

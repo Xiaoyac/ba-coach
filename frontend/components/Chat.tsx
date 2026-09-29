@@ -2,16 +2,12 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ChatMessage, RoutingMeta } from "@/lib/api";
-import MessageMarkdown from "@/components/MessageMarkdown";
-import ReasoningDetails from "@/components/ReasoningDetails";
+import MessageRow from "@/components/MessageRow";
 import ThemeToggle from "@/components/ThemeToggle";
 import {
   ArrowUpMark,
-  CheckMark,
   ChevronDownMark,
-  CopyMark,
   EnvelopeMark,
-  EnsoMark,
   IdCardMark,
   KeyMark,
   MenuMark,
@@ -19,6 +15,7 @@ import {
   PromptMark,
   ReportMark,
   SandboxMark,
+  ShareMark,
   ShieldMark,
   SignOutMark,
   UserMark,
@@ -51,6 +48,7 @@ export default function Chat({
   generationNotice,
   generationStartedAt,
   onOpenSidebar,
+  onShareConversation,
   headerContent,
   sidebarExpanded = true,
   onOpenAssessment,
@@ -82,6 +80,7 @@ export default function Chat({
   generationNotice?: string | null;
   generationStartedAt?: number;
   onOpenSidebar: () => void;
+  onShareConversation?: () => void;
   headerContent?: React.ReactNode;
   sidebarExpanded?: boolean;
   /** Opens the daily record on demand — nothing here waits on it. */
@@ -194,6 +193,11 @@ export default function Chat({
         </div>
 
         <div className="ml-auto flex shrink-0 items-center gap-2">
+          {onShareConversation && (
+            <button type="button" onClick={onShareConversation} aria-label="分享当前对话" title="分享当前对话" className="inline-flex h-11 min-w-11 items-center justify-center gap-1.5 rounded-full px-2 text-xs text-ink-muted transition-colors hover:bg-raised hover:text-ink sm:px-3">
+              <ShareMark className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">分享</span>
+            </button>
+          )}
           {accountRole !== "admin" && (
             <>
               <button type="button" onClick={onOpenAssessment} className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-xs text-ink-muted transition-colors hover:bg-raised hover:text-ink sm:px-3">
@@ -456,6 +460,28 @@ export default function Chat({
       )}
 
       <div className="mx-auto w-full max-w-[58rem] shrink-0 px-4 pb-3 pt-3 sm:px-7 sm:pb-5">
+        {displayedModule === "module_3" && (
+          <section
+            aria-label="每日记录快捷入口"
+            className="mb-3 flex flex-wrap items-center gap-3 rounded-2xl border border-accent-edge bg-accent-wash p-3 sm:px-4"
+          >
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <NotebookMark aria-hidden="true" className="hidden h-6 w-6 shrink-0 text-accent-ink sm:block" />
+              <div>
+                <p className="text-sm font-semibold text-ink">每日记录</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">记下活动与心情，也可补记或修改</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenAssessment}
+              aria-haspopup="dialog"
+              className="flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-on-accent transition-colors hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            >
+              打开每日记录
+            </button>
+          </section>
+        )}
         <form
           onSubmit={handleSubmit}
           className="composer-shell flex items-end gap-2 rounded-3xl py-2 pl-5 pr-2 transition-all duration-300 focus-within:ring-2 focus-within:ring-accent-edge"
@@ -503,178 +529,11 @@ export default function Chat({
         </form>
 
         {generationNotice && <p role="status" className="mt-2 text-center text-xs leading-relaxed text-ink-muted">{generationNotice}</p>}
-        {displayedModule === "module_3" && !busy && <div className="mt-2 flex flex-wrap items-center justify-center gap-x-2 text-xs text-ink-muted">
-          <span>每日记录：选时间 → 记活动与心情 → 回顾当天</span>
-          <button type="button" onClick={onOpenAssessment} className="min-h-9 rounded-lg px-2 font-medium text-accent-ink hover:bg-accent-wash">打开每日记录</button>
-        </div>}
 
         <p className="mt-1.5 text-center text-[0.68rem] leading-relaxed text-ink-faint">
           内容由 AI 生成，仅供参考，不能替代专业建议。
         </p>
       </div>
     </div>
-  );
-}
-
-function MessageRow({
-  message,
-  pending,
-  generationStartedAt,
-  routingPending,
-  animate,
-  showDiagnostics,
-}: {
-  message: ChatMessage;
-  pending: boolean;
-  generationStartedAt?: number;
-  routingPending: boolean;
-  /** Only the newly submitted turn floats in; loaded history stays still. */
-  animate: boolean;
-  showDiagnostics: boolean;
-}) {
-  const isUser = message.role === "user";
-  const reasoning = message.reasoning_content?.trim() ?? "";
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
-  const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (copyResetRef.current) clearTimeout(copyResetRef.current);
-    };
-  }, []);
-
-  async function handleCopy() {
-    try {
-      let copied = false;
-      if (navigator.clipboard?.writeText) {
-        try {
-          await navigator.clipboard.writeText(message.content);
-          copied = true;
-        } catch {
-          // Some embedded browsers expose the API but deny its permission.
-          // Fall through to the selection-based path below in that case.
-        }
-      }
-
-      if (!copied) {
-        // Clipboard is unavailable in some embedded or older browsers. Keep a
-        // synchronous fallback so the action still works there.
-        const textarea = document.createElement("textarea");
-        textarea.value = message.content;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.select();
-        const copied = document.execCommand("copy");
-        textarea.remove();
-        if (!copied) throw new Error("Copy command was rejected");
-      }
-      setCopyState("copied");
-    } catch {
-      setCopyState("error");
-    }
-
-    if (copyResetRef.current) clearTimeout(copyResetRef.current);
-    copyResetRef.current = setTimeout(() => setCopyState("idle"), 1800);
-  }
-
-  return (
-    <div
-      className={`mx-auto flex w-full max-w-5xl items-start gap-3 ${isUser ? "flex-row-reverse" : ""} ${
-        animate ? (isUser ? "zen-message-user" : "zen-message-agent") : ""
-      }`}
-    >
-      <Avatar isUser={isUser} />
-      <div
-        className={`group/message flex min-w-0 max-w-[min(90%,42rem)] items-end gap-1.5 ${
-          isUser ? "flex-row-reverse" : ""
-        }`}
-      >
-        <div className="min-w-0">
-        {message.content && <div
-          data-message-bubble={message.role}
-          className={`min-w-0 max-w-[42rem] px-4 py-3 text-[0.95rem] leading-[1.85] tracking-[0.01em] break-words whitespace-pre-wrap sm:px-5 ${
-            isUser
-              ? "rounded-2xl rounded-tr-md bg-mine text-mine-ink depth-bubble"
-              : "rounded-2xl rounded-tl-md bg-agent-bubble text-ink depth-bubble"
-          }`}
-        >
-          {message.role === "assistant" ? <MessageMarkdown text={message.content} /> : message.content}
-          {!isUser && showDiagnostics && (
-            <ReasoningDetails message={message} replyPending={pending && !routingPending} routingPending={routingPending} />
-          )}
-        </div>}
-        {!isUser && pending && !routingPending && <TypingDots startedAt={generationStartedAt} hasReasoning={Boolean(reasoning)} hasContent={Boolean(message.content)} />}
-        {!isUser && !message.content && showDiagnostics && <ReasoningDetails message={message} replyPending={pending && !routingPending} routingPending={routingPending} />}
-        </div>
-        {message.content && (
-          <>
-            <button
-              type="button"
-              onClick={handleCopy}
-              aria-label={copyState === "copied" ? "已复制消息" : "复制消息"}
-              title={copyState === "error" ? "复制失败，请重试" : copyState === "copied" ? "已复制" : "复制"}
-              className={`mb-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-transparent transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-edge sm:opacity-0 sm:group-hover/message:opacity-100 sm:focus-visible:opacity-100 ${
-                copyState === "error"
-                  ? "border-alert-edge bg-alert-wash text-alert-ink opacity-100"
-                  : copyState === "copied"
-                    ? "border-accent-edge bg-accent-wash text-accent-ink opacity-100"
-                    : "text-ink-faint opacity-60 hover:border-line hover:bg-accent-wash hover:text-accent-ink"
-              }`}
-            >
-              {copyState === "copied" ? (
-                <CheckMark className="h-4 w-4" />
-              ) : (
-                <CopyMark className="h-4 w-4" />
-              )}
-            </button>
-            <span className="sr-only" role="status" aria-live="polite">
-              {copyState === "copied" ? "消息已复制到剪贴板" : copyState === "error" ? "消息复制失败" : ""}
-            </span>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function Avatar({ isUser }: { isUser: boolean }) {
-  return (
-    <span
-      className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
-        isUser
-          ? "bg-mine text-accent"
-          : "bg-accent-wash text-accent-ink"
-      }`}
-    >
-      {isUser ? (
-        <UserMark className="h-4 w-4" />
-      ) : (
-        <EnsoMark className="h-4 w-4" />
-      )}
-    </span>
-  );
-}
-
-function TypingDots({ hasReasoning = false, hasContent = false, startedAt }: { hasReasoning?: boolean; hasContent?: boolean; startedAt?: number }) {
-  const [seconds, setSeconds] = useState(() => startedAt ? Math.max(0, Math.floor((Date.now() - startedAt) / 1000)) : 0);
-  useEffect(() => {
-    const started = startedAt ?? Date.now();
-    const timer = window.setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
-    return () => window.clearInterval(timer);
-  }, [startedAt]);
-  return (
-    <span data-generation-status className="flex min-w-0 items-start gap-2 px-1 py-2" aria-label="Thinking">
-      <span aria-hidden="true" className="mt-1.5 flex shrink-0 items-center gap-1.5">
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className="zen-breathe h-1.5 w-1.5 rounded-full bg-accent"
-            style={{ animationDelay: `${i * 0.18}s` }}
-          />
-        ))}
-      </span>
-      <span className="text-xs leading-relaxed text-ink-faint">{seconds >= 20 ? `仍在生成，已等待 ${seconds} 秒；请勿重复提交` : hasContent ? "正在生成回复" : hasReasoning ? "正在深度思考" : "正在准备回复"}</span>
-    </span>
   );
 }

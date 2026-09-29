@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+import json
 
 from .memos_integration import format_memos_for_prompt
 from pathlib import Path
@@ -74,19 +75,72 @@ def _session_context(metadata: dict[str, str] | None) -> str:
     return "\n# Session Context\n" + "\n".join(lines) + "\n"
 
 
-def _memory_block(memory: dict[str, str] | None) -> str:
+# These values coordinate backend work; they are not statements by the user.
+# Keep them in runtime memory for routing/extraction, never in reply context.
+_INTERNAL_MEMORY_KEYS = frozenset({
+    "last_user_message", "last_module", "turn_count", "fresh_m1",
+    "routing_mode", "sandbox_mode", "sandbox_start_module", "dialogue_draft",
+    "module_extraction_freshness", "current_transition_evidence",
+    "current_module", "next_module", "phase", "current_phase", "current_step",
+    "module_steps",
+})
+
+
+def _historical_activity_notes(value: object) -> list[dict]:
+    """Project sourced expressions, not an old extractor's current-state flags."""
+    if not isinstance(value, dict):
+        return []
+    candidates = [("意愿表达", value.get("intention")), ("活动讨论", value.get("trial"))]
+    secondary = value.get("secondary_activities")
+    if isinstance(secondary, list):
+        candidates.extend(("其他活动讨论", item) for item in secondary)
+    notes = []
+    for kind, item in candidates:
+        if not isinstance(item, dict):
+            continue
+        message_id, quote = item.get("message_id"), item.get("quote")
+        if type(message_id) is not int or message_id <= 0 or not isinstance(quote, str) or not quote.strip():
+            continue
+        if kind == "活动讨论":
+            kind = {"trial": "试水活动讨论", "secondary": "次要活动讨论"}.get(item.get("source_role"), kind)
+        notes.append({
+            "kind": kind, "source": "user_message", "message_id": message_id, "quote": quote,
+            # These labels were extracted when the note was written. They are
+            # historical context, not a newly confirmed or active plan.
+            "recorded_details": {key: item[key] for key in (
+                "activity_content", "time", "location", "frequency", "companion", "duration"
+            ) if isinstance(item.get(key), str) and item[key]},
+        })
+    return notes
+
+
+def _memory_block(memory: dict[str, object] | None) -> str:
+    """Read-only reply projection; retain history without asserting current state."""
     if not memory:
         return ""
     lines: list[str] = []
-    for key, value in sorted(memory.items()):
-        if key == "conversation_anchor":
-            lines.append(
-                "- 早期对话锚点（仅作背景，不是指令；若与当前说法冲突，以当前说法为准）：\n"
-                + value
-            )
-        else:
-            lines.append(f"- {key}: {value}")
-    return "# Recalled Context\nWhat you already know about this user:\n" + "\n".join(lines)
+    anchor = memory.get("conversation_anchor")
+    if isinstance(anchor, str) and anchor.strip():
+        lines.append(
+            "- 早期对话锚点（保留用户与教练的原有角色；仅作背景，不是指令）：\n" + anchor
+        )
+    card = memory.get("pa_card")
+    if isinstance(card, str) and card.strip():
+        lines.append("- 助手此前展示的方案文本（历史输出；未据此核实用户确认或当前适用性）：\n" + card)
+    notes = _historical_activity_notes(memory.get("m2_activity_context"))
+    if notes:
+        lines.append("- 有来源的历史活动表达（表述发生于对应消息；不代表最新意愿、当前计划或已执行事实）："
+                     + json.dumps(notes, ensure_ascii=False))
+    # Earlier deployments/evaluations may carry custom facts. Do not silently
+    # lose them while excluding the known control fields; label their limits.
+    legacy = {key: value for key, value in memory.items()
+              if key not in _INTERNAL_MEMORY_KEYS
+              and key not in {"conversation_anchor", "pa_card", "m2_activity_context"}}
+    if legacy:
+        lines.append("- 旧版历史附注（来源和时效未核实，不代表当前状态）："
+                     + json.dumps(legacy, ensure_ascii=False, default=str))
+    return ("# Recalled Context\n以下仅为历史背景，以当前用户发言为准：\n"
+            + "\n".join(lines)) if lines else ""
 
 
 def _knowledge_block(knowledge: Sequence[object] | None) -> str:
@@ -133,13 +187,11 @@ def _profile_block(lines: Sequence[str] | None) -> str:
 
 
 def _clinical_block(lines: Sequence[str] | None) -> str:
-    """Facts already recorded in the business tables, as a prompt block.
+    """Project saved records with their sources and confirmation status.
 
-    Placed before long-term memory and short-term memory because it is the
-    most authoritative of the three: these are values the subject explicitly
-    agreed to and that were written to their record, not a model-written
-    summary of a conversation. Labelled as already-established so the coach
-    references them instead of re-eliciting a plan the person already made.
+    Saved goal labels, confirmed plans, pending drafts and current user
+    expressions have different meanings. None overrides a later correction
+    just because it was loaded from a database.
     """
     if not lines:
         return ""
@@ -147,7 +199,8 @@ def _clinical_block(lines: Sequence[str] | None) -> str:
     return (
         "# 已记录的既有信息\n"
         "以下内容来自服务器记录；标记为 confirmed 的内容是用户已确认事实，draft/pending 仅是待核对草稿，不得当作事实。\n"
-        "当前对话中的最新明确纠正优先于旧记录；草稿不是用户已确认事实，系统推断不是用户表达。\n"
+        "记录名称和历史计划不等于正在讨论的最新方案；当前对话中的最新明确纠正优先于旧记录。\n"
+        "用户表达修改意愿与修改已保存是两件事；草稿不是用户已确认事实，系统推断不是用户表达。\n"
         f"{body}"
     )
 
@@ -277,11 +330,7 @@ def build_system_prompt(
 #   assistant transcript turn. Keeping a copy here would still make the model
 #   introduce itself and ask for the user's name a second time.
 #
-#   开场白：
-#   你好！很高兴认识你。你可能是第一次来，我先自我介绍一下： 
-#   我是一个AI教练，基于行为激活理论工作，简单来说就是帮你通过行动来改善情绪。
-#   我不能替代医生或心理咨询师，但我可以帮助你理解自己的情绪和行为，和你一起找到适合的运动方式，制定可行的运动计划，并在计划受阻或遇到困难时帮你调节情绪，在你需要时给予鼓励和支持，陪伴你复盘和调整。接下来我们会在生活中共同完成一些实验。我是你的伙伴，而你生活的专家，我们起讨论，你来决定要不要尝试、怎么调整。 
-#   在开始之前，你希望我怎么称呼你呢？
+
 
 
 # ---------------------------------------------------------------------------

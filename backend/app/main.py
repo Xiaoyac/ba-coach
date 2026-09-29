@@ -117,6 +117,8 @@ def create_app() -> FastAPI:
     app.include_router(assessment_router, prefix=settings.api_prefix)
     app.include_router(admin_assessments_router, prefix=settings.api_prefix)
     app.include_router(conversation_router, prefix=settings.api_prefix)
+    from .routes.shares import router as shares_router
+    app.include_router(shares_router, prefix=settings.api_prefix)
     app.include_router(issue_reports_router, prefix=settings.api_prefix)
     app.include_router(profile_router, prefix=settings.api_prefix)
     from .routes.program import router as program_router

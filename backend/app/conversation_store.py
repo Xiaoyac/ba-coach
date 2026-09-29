@@ -30,6 +30,36 @@ TITLE_MAX_CHARS = 28
 SANDBOX_TITLE_PREFIX = "沙盒 · "
 
 
+async def load_reply_history(db: AsyncSession, *, subject_id: str, session_id: str,
+                             user_message_id: int, limit: int):
+    """Read owned, durable history at the current request's message boundary.
+
+    Called inside the generation turn lock with a fresh transaction. Incomplete
+    turns still contribute their saved user message; concurrently queued future
+    input must not leak into this reply. Never infer ordering from text equality.
+    """
+    from .schemas import Message
+    boundary = (await db.execute(select(
+        ConversationMessage.conversation_id, ConversationMessage.position,
+    ).join(Conversation, Conversation.id == ConversationMessage.conversation_id).where(
+        Conversation.session_id == session_id, Conversation.subject_id == subject_id,
+        ConversationMessage.id == user_message_id, ConversationMessage.role == "user",
+    ))).one_or_none()
+    if boundary is None:
+        raise ValueError("current_user_message_not_owned")
+    rows = (await db.execute(select(
+        ConversationMessage.role, ConversationMessage.content,
+        ConversationMessage.reasoning_content,
+    ).where(
+        ConversationMessage.conversation_id == boundary.conversation_id,
+        ConversationMessage.position < boundary.position,
+        ConversationMessage.role.in_(["user", "assistant"]),
+    ).order_by(ConversationMessage.position.desc(), ConversationMessage.id.desc())
+      .limit(max(1, limit)))).all()
+    return [Message(role=row.role, content=normalize_reasoning_channels(
+        row.content, row.reasoning_content).reply) for row in reversed(rows)]
+
+
 async def create_conversation_with_opening(
     db: AsyncSession, *, subject_id: str, session_id: str, start_from_m1: bool = False,
     routing_mode: str = "router_code",
@@ -49,19 +79,16 @@ async def create_conversation_with_opening(
     await db.flush()
     from .v2_profile import enabled as v2_enabled
     initial = "module_1" if start_from_m1 else None
-    opening_text = OPENING_MESSAGE_TEXT
     if v2_enabled():
         from .v2_repository import initial_module
         if not start_from_m1:
             initial = await initial_module(db, user_id=subject_id)
-        if initial == "module_2":
-            opening_text = "欢迎回来。之前的问题理解进度会保留；你可以继续一个已有目标，或直接告诉我想讨论的新方向，我们一起把它具体化。"
     db.add(
         ConversationMessage(
             conversation_id=conversation.id,
             position=-1,
             role="assistant",
-            content=opening_text,
+            content=OPENING_MESSAGE_TEXT,
         )
     )
     db.add(
@@ -114,7 +141,7 @@ async def create_sandbox_conversation(
 async def backfill_opening_messages(db: AsyncSession) -> int:
     """Add the canonical opening to transcripts created by older versions.
 
-    Idempotent by content and role.  This is a data migration rather than a
+    Idempotent by the reserved opening position (or canonical content) and role.  This is a data migration rather than a
     synthetic response-layer prepend: once repaired, every API consumer and
     the model itself reads exactly the same transcript.
     """
@@ -122,7 +149,8 @@ async def backfill_opening_messages(db: AsyncSession) -> int:
         select(ConversationMessage.id).where(
             ConversationMessage.conversation_id == Conversation.id,
             ConversationMessage.role == "assistant",
-            ConversationMessage.content == OPENING_MESSAGE_TEXT,
+            ((ConversationMessage.position == -1) |
+             (ConversationMessage.content == OPENING_MESSAGE_TEXT)),
         )
     )
     ids = (
@@ -347,7 +375,7 @@ async def finish_turn(
             "time_to_first_reasoning_token_ms": metrics.get("time_to_first_reasoning_token_ms"),
             "time_to_first_content_token_ms": metrics.get("time_to_first_content_token_ms"),
             "reply_recovery": metrics.get("reply_recovery"),
-            **{key: metrics.get(key) for key in ("main_input", "reply_trace", "prompt_sources",
+            **{key: metrics.get(key) for key in ("main_input", "reply_trace", "prompt_sources", "history_source", "history_messages",
                 "execution_timeline", "time_to_first_visible_content_ms", "first_visible_measurement",
                 "router_pre_reply")},
             # Permission-controlled execution trace; never include this in

@@ -16,31 +16,31 @@ import logging
 from datetime import date, datetime, timedelta, timezone, tzinfo
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..db import get_db
 from ..identity import require_subject_id
-from ..models import STATUS_COMPLETED, STATUS_SKIPPED, ActivityLog, AssessmentEntry
+from ..models import STATUS_COMPLETED, STATUS_SKIPPED, ActivityLog, AssessmentEntry, AssessmentRevision
 from ..schemas import (
     AssessmentOut,
     AssessmentHistoryPage,
     AssessmentSkip,
     AssessmentStatus,
     AssessmentSubmission,
+    AssessmentUpdate,
+    DailySummaryIn,
     ActivityLogOut,
 )
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/assessment", tags=["assessment"])
 
-# How far a client-supplied `local_date` may sit from the server's own idea of
-# the caller's local date. One day absorbs clock skew and the midnight edge;
-# anything further is a client backfilling arbitrary history, which this
-# endpoint deliberately does not offer.
+# Status/skip requests retain their current-day clock-skew tolerance.
+# Completed records use resolve_record_date, which also allows backfilling.
 _MAX_DATE_DRIFT = timedelta(days=1)
 
 
@@ -66,13 +66,7 @@ def resolve_timezone(name: str | None) -> tuple[tzinfo, str]:
 
 
 def resolve_local_date(claimed: date | None, tz_name: str | None) -> tuple[date, str]:
-    """Decide which local date a request is about.
-
-    The server computes the date from the caller's timezone. A client may state
-    one explicitly, but only within a day of that — otherwise "today" would be
-    whatever the client said it was, and the one-per-day rule would mean
-    nothing.
-    """
+    """Resolve the current-day status/skip request with clock-skew tolerance."""
     tz, resolved_name = resolve_timezone(tz_name)
     server_view = datetime.now(timezone.utc).astimezone(tz).date()
 
@@ -105,6 +99,7 @@ async def _entry_for(
 def _to_out(entry: AssessmentEntry) -> AssessmentOut:
     return AssessmentOut(
         id=entry.id,
+        revision_no=entry.revision_no,
         local_date=entry.recorded_on,
         timezone=entry.timezone,
         status=entry.status,  # type: ignore[arg-type]
@@ -131,6 +126,30 @@ def _to_out(entry: AssessmentEntry) -> AssessmentOut:
             for a in entry.activities
         ],
     )
+
+
+def resolve_record_date(claimed: date | None, tz_name: str | None) -> tuple[date, str]:
+    today, zone = resolve_local_date(None, tz_name)
+    on = claimed or today
+    if on > today:
+        raise HTTPException(422, "不能记录尚未发生的未来日期。")
+    return on, zone
+
+
+async def _save_revision(db: AsyncSession, entry: AssessmentEntry):
+    exists = await db.scalar(select(AssessmentRevision.id).where(
+        AssessmentRevision.entry_id == entry.id,
+        AssessmentRevision.revision_no == entry.revision_no))
+    if exists is None:
+        db.add(AssessmentRevision(entry_id=entry.id, revision_no=entry.revision_no,
+                                 snapshot=_to_out(entry).model_dump(mode="json")))
+
+
+async def revision_history(db: AsyncSession, entry_id: int):
+    rows = (await db.scalars(select(AssessmentRevision).where(
+        AssessmentRevision.entry_id == entry_id).order_by(AssessmentRevision.revision_no.desc()))).all()
+    return [{"revision_no": row.revision_no, "saved_at": row.saved_at,
+             "record": row.snapshot} for row in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -203,19 +222,21 @@ async def submit_assessment(
     db: AsyncSession = Depends(get_db),
 ) -> AssessmentOut:
     """Save a completed assessment for one local day."""
-    on, tz_name = resolve_local_date(payload.local_date, payload.timezone)
+    on, tz_name = resolve_record_date(payload.local_date, payload.timezone)
     entry = await _entry_for(db, subject_id, on)
 
     if entry is not None and entry.status == STATUS_COMPLETED:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"An assessment for {on} has already been submitted",
+            detail=f"{on} 已有记录，请在历史记录中修改；不会覆盖原记录。",
         )
 
     if entry is None:
-        entry = AssessmentEntry(subject_id=subject_id, recorded_on=on)
+        entry = AssessmentEntry(subject_id=subject_id, recorded_on=on, activities=[])
         db.add(entry)
     else:
+        await _save_revision(db, entry)
+        entry.revision_no += 1
         # Upgrading an earlier skip into a real submission. Clearing the list
         # relies on delete-orphan so a re-submit can't accumulate stale cards.
         entry.activities.clear()
@@ -246,6 +267,8 @@ async def submit_assessment(
         )
 
     try:
+        await db.flush()
+        await _save_revision(db, entry)
         await db.commit()
     except IntegrityError:
         # Two submits raced. The unique constraint is what actually enforces
@@ -253,7 +276,7 @@ async def submit_assessment(
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"An assessment for {on} has already been submitted",
+            detail=f"{on} 已有记录，请在历史记录中修改；不会覆盖原记录。",
         ) from None
 
     await db.refresh(entry)
@@ -297,5 +320,70 @@ async def skip_assessment(
             raise
         return _to_out(existing)
 
+    await db.refresh(entry)
+    return _to_out(entry)
+
+
+@router.get("/by-date", response_model=AssessmentOut | None)
+async def assessment_by_date(local_date: date, response: Response, subject_id: str = Depends(require_subject_id),
+                             db: AsyncSession = Depends(get_db)):
+    response.headers['Cache-Control'] = 'private, no-store'
+    entry = await _entry_for(db, subject_id, local_date)
+    return _to_out(entry) if entry and entry.status == STATUS_COMPLETED else None
+
+
+@router.get("/{entry_id}/revisions")
+async def assessment_revisions(entry_id: int, response: Response, subject_id: str = Depends(require_subject_id),
+                               db: AsyncSession = Depends(get_db)):
+    entry = await db.scalar(select(AssessmentEntry).where(
+        AssessmentEntry.id == entry_id, AssessmentEntry.subject_id == subject_id))
+    if entry is None:
+        raise HTTPException(404, "记录不存在。")
+    response.headers['Cache-Control'] = 'private, no-store'
+    return await revision_history(db, entry_id)
+
+
+@router.put("/{entry_id}", response_model=AssessmentOut)
+async def update_assessment(entry_id: int, payload: AssessmentUpdate,
+                            subject_id: str = Depends(require_subject_id),
+                            db: AsyncSession = Depends(get_db)):
+    entry = await db.scalar(select(AssessmentEntry).where(
+        AssessmentEntry.id == entry_id, AssessmentEntry.subject_id == subject_id,
+        AssessmentEntry.status == STATUS_COMPLETED).with_for_update())
+    if entry is None:
+        raise HTTPException(404, "记录不存在。")
+    if entry.revision_no != payload.expected_revision:
+        raise HTTPException(409, "这份记录已在别处修改，请重新打开最新记录后再编辑。")
+    on, _ = resolve_record_date(payload.local_date, entry.timezone)
+    other = await _entry_for(db, subject_id, on)
+    if other is not None and other.id != entry.id:
+        raise HTTPException(409, f"{on} 已有记录，请编辑该日期的记录；不会覆盖原记录。")
+    values = payload.summary.model_dump(exclude={"completion_not_applicable"})
+    if entry.scale_version == 2:
+        try:
+            DailySummaryIn.model_validate(payload.summary.model_dump())
+        except ValueError:
+            raise HTTPException(422, "请填写有效的 0–5 分总体评分；不适用时请明确选择。") from None
+        # Fields absent from today's form remain untouched, not silently erased.
+        for name in ('social_connection', 'approach_vs_avoidance'):
+            values.pop(name)
+    try:
+        await _save_revision(db, entry)  # Lazy baseline for pre-existing records.
+        changed = await db.execute(update(AssessmentEntry).where(
+            AssessmentEntry.id == entry.id, AssessmentEntry.subject_id == subject_id,
+            AssessmentEntry.revision_no == payload.expected_revision).values(
+                **values, recorded_on=on, revision_no=payload.expected_revision + 1))
+        if changed.rowcount != 1:
+            await db.rollback()
+            raise HTTPException(409, "记录已更新，请重新打开后再修改。")
+        entry.activities.clear()
+        for position, item in enumerate(payload.activities):
+            entry.activities.append(ActivityLog(position=position, **item.model_dump()))
+        await db.flush()
+        await _save_revision(db, entry)
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(409, "该日期已有记录或记录已更新，请重新打开后再修改。") from None
     await db.refresh(entry)
     return _to_out(entry)
