@@ -804,6 +804,10 @@ async def clinical_context(maker, user_id, session_id):
     lines = []
     async with maker() as db:
         context_conversation, state = await runtime_for(db, session_id) if session_id else (None, None)
+        if context_conversation and context_conversation.subject_id != user_id:
+            # A supplied session must not lend another account's workflow
+            # state to this user's otherwise account-scoped context.
+            context_conversation, state = None, None
         one = schema.tables["module_one_record"]
         m1 = schema.tables["user_module_one_state"]
         completion = (await db.execute(select(m1).where(m1.c.user_id == user_id))).mappings().one_or_none()
@@ -865,7 +869,12 @@ async def clinical_context(maker, user_id, session_id):
             }, ensure_ascii=False))
         if state and state["active_goal_id"]:
             goal = await owned_goal(db, user_id, state["active_goal_id"])
-            lines.append("本段聊天明确选择的目标：" + goal["title"])
+            lines.append("后台绑定目标记录（名称用于识别既有目标，不代表本轮讨论内容或计划已确认）：" + json.dumps({
+                "source": "pa_goals", "goal_id": goal["id"],
+                "stored_title": goal["title"], "status": goal["status"],
+                "created_from_conversation_id": goal["created_from_conversation_id"],
+                "updated_at": goal["updated_at"].isoformat() if goal["updated_at"] else None,
+            }, ensure_ascii=False))
             from .goal_contract import public_goal_details, public_activities
             details = (await public_goal_details(db, user_id)).get(goal["id"], {"goal_kind": "unclassified", "long_term_direction": None})
             lines.append("目标分类记录：" + json.dumps(details, ensure_ascii=False))
@@ -874,19 +883,32 @@ async def clinical_context(maker, user_id, session_id):
                 lines.append("本聊天用户自述活动及关联状态：" + json.dumps(activities[:12], ensure_ascii=False))
             cycles = schema.tables["pa_cycles"]
             cycle = (await db.execute(select(cycles).where(cycles.c.id == state["active_cycle_id"], cycles.c.goal_id == goal["id"]))).mappings().one_or_none()
+            plan = None
             if cycle and cycle["module_two_record_id"]:
                 plans = schema.tables["module_two_record"]
                 plan = (await db.execute(select(plans).where(plans.c.id == cycle["module_two_record_id"], plans.c.goal_id == goal["id"]))).mappings().one_or_none()
                 if plan:
-                    lines.append("本周期绑定计划：" + json.dumps({
+                    lines.append("本周期绑定计划（后台已存版本，不自动代表正在讨论的修改；draft 是未确认草稿）：" + json.dumps({
                         "source": "module_two_record", "record_id": plan["id"],
                         "goal_id": goal["id"], "cycle_id": cycle["id"],
+                        "binding_source": "pa_cycles.module_two_record_id",
                         "version_no": plan["version_no"], "record_status": plan["record_status"],
                         "confirmation_status": plan["confirmation_status"],
                         "confirmation_message_id": plan["confirmation_message_id"],
+                        "updated_at": plan["updated_at"].isoformat() if plan["updated_at"] else None,
                         "values": {k: plan[k] for k in ("activity_content", "schedule_text", "location",
                             "duration_minutes", "companion", "potential_barriers", "barrier_coping_plan")},
                     }, ensure_ascii=False))
+            # Draft rows are goal-scoped, without a durable source-session or
+            # cycle link. A latest-draft query here could borrow another
+            # conversation's changes; only project an explicitly bound row.
+            if not plan:
+                lines.append("后台计划绑定状态：" + json.dumps({
+                    "source": "conversation_runtime_states/pa_cycles", "goal_id": goal["id"],
+                    "cycle_id": cycle["id"] if cycle else None, "bound_plan_available": False,
+                }, ensure_ascii=False))
+            lines.append("后台记录与当前讨论分别理解：用户最新提出的修改仍是讨论中的意愿，不能因旧名称或旧版本而忽略；"
+                         "也不能仅凭对话声称新计划已保存或已确认。未展示草稿不代表用户没有表达。")
             if state["current_module"] == "module_4" and cycle:
                 from .m4_contract import contract_for
                 reviews = schema.tables["module_four_record"]
