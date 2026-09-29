@@ -87,6 +87,7 @@ def test_snapshot_copies_only_saved_panels_and_local_message_ids(
     assert [m["id"] for m in data["messages"]] == list(range(1, len(data["messages"]) + 1))
     message = data["messages"][-1]
     assert message["id"] != assistant_id
+    assert all("reply_to_message_id" not in m for m in data["messages"])
     assert message["reasoning_content"] == "已保存的回复思考"
     assert message["routing_reasoning_content"] == "已保存的路由思考"
     assert message["model_name"] == "stub-1" and message["router_model_name"] == "router-test"

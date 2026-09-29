@@ -700,6 +700,7 @@ class MessageTiming(BaseModel):
 
 class ConversationMessageDetail(Message):
     id: int | None = None
+    reply_to_message_id: int | None = None
     timing: MessageTiming | None = None
 
 
