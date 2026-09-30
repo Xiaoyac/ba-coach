@@ -40,6 +40,7 @@ interface AuthPayload {
 }
 
 export interface RegisterInput {
+  invitation_code: string;
   username: string;
   password: string;
   email: string;
@@ -112,6 +113,9 @@ async function parseAuth(res: Response): Promise<AuthPayload> {
     // FastAPI puts the human-readable reason in `detail`; a 422 puts a list of
     // field errors there instead, which is not worth rendering raw.
     const detail = typeof body?.detail === "string" ? body.detail : null;
+    if (res.status === 422 && Array.isArray(body?.detail) && body.detail.some((issue: { loc?: unknown[] }) => issue.loc?.includes("invitation_code"))) {
+      throw new AuthError("请填写管理员提供的完整邀请码。若没有邀请码栏，请刷新网页。", res.status);
+    }
     const birthdayInvalid = res.status === 422 && Array.isArray(body?.detail) &&
       body.detail.some((issue: { loc?: unknown[] }) => issue.loc?.includes("birth_date"));
     if (birthdayInvalid) {

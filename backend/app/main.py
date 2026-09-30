@@ -107,6 +107,8 @@ def create_app() -> FastAPI:
 
     # Auth first: every other router's identity dependency resolves against
     # the sessions this one mints.
+    from .routes.invitations import router as invitations_router
+    app.include_router(invitations_router, prefix=settings.api_prefix)
     app.include_router(auth_router, prefix=settings.api_prefix)
     app.include_router(admin_accounts_router, prefix=settings.api_prefix)
     app.include_router(admin_knowledge_router, prefix=settings.api_prefix)

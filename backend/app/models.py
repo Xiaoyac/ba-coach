@@ -190,6 +190,18 @@ class ActivityLog(Base):
         return f"<ActivityLog {self.time_slot!r} {self.activity[:20]!r}>"
 
 
+class RegistrationInvite(Base):
+    """An administrator-issued registration capability; consumption is permanent."""
+    __tablename__ = "registration_invites"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow, nullable=False)
+    created_by_account_id: Mapped[int | None] = mapped_column(ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    used_by_account_id: Mapped[int | None] = mapped_column(ForeignKey("user_accounts.id", ondelete="SET NULL"))
+
+
 class UserAccount(Base):
     """Login credentials. App-owned — the 7 business tables carry none.
 

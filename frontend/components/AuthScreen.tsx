@@ -45,6 +45,7 @@ export default function AuthScreen({
   onAuthenticated: (account: Account) => void;
 }) {
   const [mode, setMode] = useState<Mode>("login");
+  const [invitationCode, setInvitationCode] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
@@ -97,6 +98,7 @@ export default function AuthScreen({
         mode === "login"
           ? await login(username, password)
           : await register({
+              invitation_code: invitationCode.trim(),
               username,
               password,
               email,
@@ -235,6 +237,12 @@ export default function AuthScreen({
               </p>
             </div>
           )}
+
+          {registering && <Field label="邀请码" hint="必填，请向管理员获取；每码仅可注册一次，长期有效">
+            <input required value={invitationCode} onChange={(e) => setInvitationCode(e.target.value)}
+              autoComplete="off" autoCapitalize="characters" spellCheck={false} maxLength={64}
+              placeholder="粘贴管理员提供的邀请码" className={inputClass} />
+          </Field>}
 
           {!forgot && <Field
             label="登录账号"

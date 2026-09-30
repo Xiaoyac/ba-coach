@@ -1,3 +1,4 @@
+from invitation_helpers import with_test_invitation
 """Birthday registration and targeted legacy-age confirmation, isolated only."""
 import asyncio
 from datetime import date
@@ -20,7 +21,7 @@ def registration(**extra):
     {"birth_date": "2999-01-01"}, {"birth_date": "1800-01-01"}, {"birth_date": "2025-01-01"},
     {"birth_date": "2000-01-01T00:00:00Z"}])
 def test_bad_birthday_creates_nothing(client, db_sessionmaker, extra):
-    response = client.post("/api/auth/register", json=registration(**extra))
+    response = client.post("/api/auth/register", json=with_test_invitation(client, registration(**extra)))
     assert response.status_code == 422
     assert any(e["loc"] == ["body", "birth_date"] for e in response.json()["detail"])
     async def counts():
@@ -40,7 +41,7 @@ def test_age_boundaries_and_leap_birthday():
 @pytest.mark.parametrize("age", [10, 37, 120])
 def test_birthday_saved_and_new_ten_year_old_not_prompted(client, age):
     birthday = date(today().year-age, 1, 1)
-    result = client.post("/api/auth/register", json=registration(birth_date=birthday.isoformat()))
+    result = client.post("/api/auth/register", json=with_test_invitation(client, registration(birth_date=birthday.isoformat())))
     assert result.status_code == 201
     assert result.json()["account"]["birth_date_required"] is False
     headers = {"Authorization": f"Bearer {result.json()['token']}"}
@@ -50,7 +51,7 @@ def test_birthday_saved_and_new_ten_year_old_not_prompted(client, age):
 
 @pytest.mark.parametrize("old_age, required", [(10, True), (28, False), (None, False)])
 def test_targeted_prompt_persists_until_confirmed(client, db_sessionmaker, old_age, required):
-    result = client.post("/api/auth/register", json=registration(birth_date="1990-06-15"))
+    result = client.post("/api/auth/register", json=with_test_invitation(client, registration(birth_date="1990-06-15")))
     assert result.status_code == 201
     async def historical_profile():
         async with db_sessionmaker() as db:
@@ -94,7 +95,11 @@ async def test_v2_registration_and_confirmation(monkeypatch):
     app.dependency_overrides[get_db] = database
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            result = await client.post("/api/auth/register", json=registration(birth_date="1990-06-15"))
+            from app.models import RegistrationInvite
+            async with sessions() as db:
+                db.add(RegistrationInvite(code="C" * 32))
+                await db.commit()
+            result = await client.post("/api/auth/register", json={**registration(birth_date="1990-06-15"), "invitation_code": "C" * 32})
             assert result.status_code == 201, result.text
             headers = {"Authorization": f"Bearer {result.json()['token']}"}
             table = metadata.tables["user_profile"]

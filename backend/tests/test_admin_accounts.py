@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from invitation_helpers import with_test_invitation
+
 import asyncio
 import pytest
 from fastapi.testclient import TestClient
@@ -49,14 +51,14 @@ def test_admin_can_search_the_account_directory(
 ) -> None:
     target = client.post(
         "/api/auth/register",
-        json={
+        json=with_test_invitation(client, {
             "username": "QuietRiver",
             "password": "correct-horse-battery",
             "email": "quietriver@example.com",
             "nickname": "小河",
             "tag": "24680",
             "birth_date": "1998-01-01",
-        },
+        }),
     ).json()["account"]
 
     response = client.get(
@@ -77,14 +79,14 @@ def test_admin_grants_role_and_existing_session_observes_it(
 ) -> None:
     created = client.post(
         "/api/auth/register",
-        json={
+        json=with_test_invitation(client, {
             "username": "newmoderator",
             "password": "correct-horse-battery",
             "email": "newmoderator@example.com",
             "nickname": "New Moderator",
             "tag": "13579",
             "birth_date": "1998-01-01",
-        },
+        }),
     )
     target_headers = {
         "Authorization": f"Bearer {created.json()['token']}"
@@ -141,14 +143,14 @@ def test_admin_can_delete_another_account_and_cannot_delete_self(
 ) -> None:
     created = client.post(
         "/api/auth/register",
-        json={
+        json=with_test_invitation(client, {
             "username": "deletecandidate",
             "password": "correct-horse-battery",
             "email": "deletecandidate@example.com",
             "nickname": "待删除用户",
             "tag": "81023",
             "birth_date": "1998-01-01",
-        },
+        }),
     )
     assert created.status_code == 201, created.text
     target_id = next(
@@ -187,14 +189,14 @@ def test_same_nickname_can_use_distinct_user_chosen_tags(
     for username, tag in (("sharedone", "11111"), ("sharedtwo", "22222")):
         response = client.post(
             "/api/auth/register",
-            json={
+            json=with_test_invitation(client, {
                 "username": username,
                 "password": "correct-horse-battery",
                 "email": f"{username}@example.com",
                 "nickname": "Shared Name",
                 "tag": tag,
                 "birth_date": "1998-01-01",
-            },
+            }),
         )
         assert response.status_code == 201, response.text
         ids.append(response.json()["account"]["display_id"])

@@ -351,6 +351,19 @@ class RegisterRequest(BaseModel):
     healed injury or a changed preference must not be frozen at signup.
     """
 
+    invitation_code: str = Field(..., min_length=32, max_length=64)
+
+    @field_validator("invitation_code", mode="before")
+    @classmethod
+    def validate_invitation(cls, value):
+        from .invitations import normalize_invitation_code
+        if not isinstance(value, str):
+            raise ValueError("请填写管理员提供的邀请码")
+        value = normalize_invitation_code(value)
+        if len(value) != 32 or any(c not in "0123456789ABCDEF" for c in value):
+            raise ValueError("请填写完整有效的邀请码")
+        return value
+
     username: str = Field(..., min_length=3, max_length=32)
     # Length is the only rule enforced. Composition rules ("one digit, one
     # symbol") measurably push people toward predictable patterns without

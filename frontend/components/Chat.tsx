@@ -307,7 +307,7 @@ export default function Chat({
                       <span>
                         <span className="block text-[0.78rem] font-medium">账号与权限管理</span>
                         <span className="mt-0.5 block text-[0.64rem] leading-relaxed text-accent-ink/70">
-                          查看账号、授予管理员权限
+                          查看账号、管理注册邀请码
                         </span>
                       </span>
                     </button>
