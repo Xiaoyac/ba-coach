@@ -67,7 +67,7 @@ from ..retrieval_intent import decide_retrieval
 from ..router_agent import extract_pa_card
 from ..routing_modes import ROUTER_CODE, ROUTER_ONLY
 from ..schemas import Message
-from ..context_pipeline import prepare_context
+from ..context_pipeline import prepare_context, trim_history
 from ..conversation_time import utc_now, temporal_context, timed_transcript, time_label
 from ..workflow_state import (
     load_conversation_workflow,
@@ -726,6 +726,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
             module_steps=state.get("module_steps"),
             global_prompt=global_prompt,
             module_prompt=module_prompt,
+            history=trim_history(state.get("chat_history") or [], context.settings.max_history_messages),
         )
         if guidance_block:
             system.append(SystemPromptSegment(guidance_block, cacheable=False))
