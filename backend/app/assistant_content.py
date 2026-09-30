@@ -8,7 +8,10 @@ _HEADER = re.compile(
     rf"\A\s*(?P<message><message>\s*)?<datetime>{_TIME}</datetime>\s*",
 )
 _TIME_VALUE = re.compile(rf"{_TIME}\Z")
-_OPENERS = ("<message>", "<datetime>")
+_COMPACT_TIME = r"(?:unknown|\d{6}-\d{2}:\d{2})"
+_COMPACT_OPENER = '<message datetime="'
+_COMPACT_HEADER = re.compile(rf'\A\s*<message datetime="{_COMPACT_TIME}">')
+_OPENERS = ("<message>", "<datetime>", _COMPACT_OPENER)
 
 
 def _unfinished_header(text: str) -> bool:
@@ -18,6 +21,12 @@ def _unfinished_header(text: str) -> bool:
         return False
     if any(opener.startswith(value) for opener in _OPENERS):
         return True
+    if value.startswith(_COMPACT_OPENER):
+        stamp = value[len(_COMPACT_OPENER):]
+        if '"' in stamp:
+            stamp, tail = stamp.split('"', 1)
+            return bool(re.fullmatch(_COMPACT_TIME, stamp) and '">'.startswith('"' + tail))
+        return "unknown".startswith(stamp) or bool(re.fullmatch(r"\d[\d:-]*", stamp))
     if value.startswith("<message>"):
         value = value[len("<message>"):].lstrip()
         if "<datetime>".startswith(value):
@@ -31,9 +40,9 @@ def _unfinished_header(text: str) -> bool:
     return "unknown".startswith(stamp) or bool(re.fullmatch(r"\d[\dT:.+Z-]*", stamp))
 
 
-def _strip_content_tail(body: str, *, message: bool) -> str:
+def _strip_content_tail(body: str, *, message: bool, content: bool = True) -> str:
     """Remove complete or interrupted closing tags only at the outside edge."""
-    closers = ("</content>", "</message>") if message else ("</content>",)
+    closers = (("</content>",) if content else ()) + (("</message>",) if message else ())
     for _ in range(2):
         trimmed = body.rstrip()
         start = trimmed.rfind("<")
@@ -48,6 +57,10 @@ def _strip_content_tail(body: str, *, message: bool) -> str:
 
 def unwrap_assistant_message(text: str) -> str:
     for _ in range(8):
+        compact = _COMPACT_HEADER.match(text)
+        if compact:
+            text = unescape(_strip_content_tail(text[compact.end():], message=True, content=False))
+            continue
         match = _HEADER.match(text)
         if not match:
             return "" if _unfinished_header(text) else text

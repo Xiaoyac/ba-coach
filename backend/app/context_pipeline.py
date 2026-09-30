@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from importlib.metadata import version
+import re
 from time import perf_counter
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, trim_messages
@@ -28,6 +29,18 @@ _PROMPT = ChatPromptTemplate.from_messages([
     MessagesPlaceholder("history"),
     ("human", "{user_input}"),
 ])
+
+
+def _adapt_message_format(text: str) -> str:
+    """Update legacy transport examples only on the outgoing prompt copy."""
+    text = re.sub(
+        r"<message>\s*<datetime>[^<]*</datetime>\s*<content>(.*?)</content>\s*</message>",
+        lambda match: '<message datetime="260929-21:27">' + match[1] + '</message>',
+        text, flags=re.DOTALL,
+    )
+    return (text.replace("<user_message>", "<message>")
+            .replace("</user_message>", "</message>")
+            .replace("<content>", "<message>").replace("</content>", "</message>"))
 
 
 def _chat_messages(messages: Sequence[Message], *, annotate_time: bool = False) -> list[BaseMessage]:
@@ -92,10 +105,11 @@ def prepare_context(
     started = perf_counter()
     kept = trim_history(history, max_history_messages)
     # Older administrator overrides may still describe the retired envelope.
-    # Adapt only request copies; preserve saved prompts and user content.
+    # Adapt only policy request copies; preserve saved prompts and volatile
+    # user facts/memory even when they quote the old markup literally.
     system = [SystemPromptSegment(
-        segment.text.replace("<user_message>", "<content>").replace(
-            "</user_message>", "</content>"), cacheable=segment.cacheable
+        _adapt_message_format(segment.text) if segment.cacheable else segment.text,
+        cacheable=segment.cacheable
     ) for segment in system]
     system.append(SystemPromptSegment(TEMPORAL_RULES, cacheable=False))
     system.append(SystemPromptSegment(request_time_context(
@@ -127,7 +141,7 @@ def prepare_context(
         messages=compiled_messages,
         metrics={
             "engine": "langchain",
-            "time_format": "server_clock_user_message_v4",
+            "time_format": "server_clock_user_message_v5_compact",
             "langchain_core_version": LANGCHAIN_CORE_VERSION,
             "history_messages_before": len(history),
             "history_messages_kept": len(kept),
