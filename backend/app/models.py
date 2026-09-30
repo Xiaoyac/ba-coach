@@ -679,6 +679,18 @@ class Conversation(Base):
         return f"<Conversation {self.session_id[:8]}… {self.title[:20]!r}>"
 
 
+class ConversationReplySettings(Base):
+    """App-owned per-conversation settings, separate from workflow memory.
+
+    Startup create_all adds this table; no existing table needs alteration.
+    The foreign key also removes the preference when its conversation is deleted.
+    """
+    __tablename__ = "conversation_reply_settings"
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True)
+    thinking_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
 class ConversationMessage(Base):
     """One turn's worth of transcript. Append-only — never trimmed, never edited."""
 

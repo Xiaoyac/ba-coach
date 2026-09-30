@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..ai_telemetry import add_ai_event
 from ..config import get_settings
+from ..conversation_thinking import effective_thinking
 from ..conversation_store import finish_turn, save_runtime_state, start_turn
 from ..db import get_db, get_sessionmaker
 from ..graph import (
@@ -161,6 +162,13 @@ async def _persist_assistant_message(
         await db.rollback()
         logger.exception("failed to persist assistant message for session %s", session_id)
         return None
+
+
+async def _apply_conversation_thinking(context, *, session_id, subject_id, state):
+    async with get_sessionmaker()() as preference_db:
+        enabled = await effective_thinking(preference_db, session_id=session_id, subject_id=subject_id)
+    context.provider = context.provider.with_thinking(enabled)
+    state["telemetry"] = {**(state.get("telemetry") or {}), "reply_thinking_enabled": enabled}
 
 
 async def _resolve_provider(
@@ -363,6 +371,7 @@ async def chat(
 
     turn_lock = await store.get_turn_lock(session_id)
     async with turn_lock:
+        await _apply_conversation_thinking(context, session_id=session_id, subject_id=subject_id, state=state)
         final_state = await get_graph().ainvoke(
             state,
             context=context,
@@ -535,6 +544,7 @@ async def _prepare_chat_stream(
         turn_lock = await store.get_turn_lock(session_id)
         async with turn_lock:
             try:
+                await _apply_conversation_thinking(context, session_id=session_id, subject_id=subject_id, state=state)
                 # Ask for the running state as well as custom token events.
                 # LangGraph 1.2.11 can complete a graph while yielding no
                 # custom events in some production runtimes. The final values

@@ -12,6 +12,7 @@ import {
   isMissing,
   listConversations,
   routingModeLabels,
+  setConversationThinking,
   subscribeConversation,
   updateConversation,
   type ConversationDetail,
@@ -100,6 +101,9 @@ export default function ConversationWorkspace({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [conversationRoutingMode, setConversationRoutingMode] = useState<ConversationRoutingMode>("router_code");
+  const [thinkingEnabled, setThinkingEnabled] = useState(true);
+  const [thinkingSaving, setThinkingSaving] = useState(false);
+  const thinkingSaveRef = useRef(false);
   const [modeChooserOpen, setModeChooserOpen] = useState(false);
   const [modeChooserBusy, setModeChooserBusy] = useState(false);
   const [modeChooserError, setModeChooserError] = useState<string | null>(null);
@@ -199,6 +203,9 @@ export default function ConversationWorkspace({
     activeSessionIdRef.current = detail.session_id;
     setSessionId(detail.session_id);
     setConversationRoutingMode(detail.routing_mode ?? "router_code");
+    if ((detail.revision ?? 0) >= (appliedRevisions.current.get(detail.session_id) ?? -1)) {
+      setThinkingEnabled(detail.thinking_enabled ?? true);
+    }
     const turn = turns.current.get(detail.session_id);
     if (turn) {
       publishTurn(turn);
@@ -234,6 +241,9 @@ export default function ConversationWorkspace({
     // but never attach its module state or messages to the active chat.
     if (activeSessionIdRef.current !== detail.session_id) return;
     setConversationRoutingMode(detail.routing_mode ?? "router_code");
+    if ((detail.revision ?? 0) >= (appliedRevisions.current.get(detail.session_id) ?? -1)) {
+      setThinkingEnabled(detail.thinking_enabled ?? true);
+    }
 
     // Some mobile/proxy connections keep the POST body open after the server
     // has committed the assistant row and the client never receives the SSE
@@ -628,7 +638,24 @@ export default function ConversationWorkspace({
     }
   }
 
+  async function handleThinkingToggle() {
+    const target = activeSessionIdRef.current;
+    if (!isAdmin || !target || loadingConversation || turns.current.has(target) || thinkingSaveRef.current) return;
+    thinkingSaveRef.current = true;
+    setThinkingSaving(true);
+    try {
+      const detail = await setConversationThinking(target, !thinkingEnabled);
+      if (activeSessionIdRef.current === target) applyRemoteSnapshot(detail);
+    } catch (err) {
+      if (activeSessionIdRef.current === target) setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      thinkingSaveRef.current = false;
+      setThinkingSaving(false);
+    }
+  }
+
   async function handleSend(text: string) {
+    if (thinkingSaveRef.current) return;
     const sourceId = activeSessionIdRef.current;
     if (!sourceId || sourceId !== sessionId || loadingConversation || turns.current.has(sourceId)) return;
     const controller = new AbortController();
@@ -985,6 +1012,9 @@ export default function ConversationWorkspace({
           routing={routing}
           headerContent={isAdmin ? <><h1 className="truncate text-[0.92rem] font-semibold tracking-[0.02em] text-ink">对话</h1>{sessionId && !loadingConversation && <p aria-label="当前对话模式" title="本段对话创建时选定，不能在对话中切换" className="mt-0.5 text-xs leading-4 text-accent-ink">{routingModeLabels[conversationRoutingMode]}</p>}</> : undefined}
           busy={busy}
+          thinkingEnabled={thinkingEnabled}
+          thinkingBusy={thinkingSaving}
+          onToggleThinking={isAdmin && sessionId ? handleThinkingToggle : undefined}
           generationStartedAt={sessionId ? turns.current.get(sessionId)?.startedAt : undefined}
           loading={loadingConversation}
           error={error}

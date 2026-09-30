@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from copy import copy
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from typing import Literal
@@ -65,6 +66,14 @@ class LLMProvider(ABC):
     #: Configured model id for the main (non-router) calls. Reported back to
     #: the caller, and used when streaming, where no model id comes back.
     model: str = ""
+    thinking_override: bool | None = None
+
+    def with_thinking(self, enabled: bool | None) -> "LLMProvider":
+        # Registry clients are shared. Copy only the wrapper; never mutate its
+        # settings or override for another concurrent conversation.
+        scoped = copy(self)
+        scoped.thinking_override = enabled
+        return scoped
 
     @abstractmethod
     async def complete(

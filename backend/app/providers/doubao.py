@@ -73,7 +73,7 @@ class DoubaoProvider(LLMProvider):
                     model=self.model,
                     max_tokens=self._settings.doubao_max_tokens,
                     messages=self._payload(system, messages),
-                    extra_body=main_thinking_options(self._settings, self.name, messages),
+                    extra_body=main_thinking_options(self._settings, self.name, messages, enabled_override=self.thinking_override),
                 )
         except (TimeoutError, asyncio.TimeoutError, openai.APITimeoutError) as exc:
             raise ProviderError(
@@ -121,7 +121,7 @@ class DoubaoProvider(LLMProvider):
                     messages=self._payload(system, messages),
                     stream=True,
                     stream_options={"include_usage": True},
-                    extra_body=main_thinking_options(self._settings, self.name, messages),
+                    extra_body=main_thinking_options(self._settings, self.name, messages, enabled_override=self.thinking_override),
                 )
                 usage_payload: dict[str, int] = {}
                 finish_reason: str | None = None

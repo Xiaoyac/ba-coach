@@ -33,7 +33,7 @@ def native_thinking_options(settings, provider: str, *, enabled: bool, model: st
     return options
 
 
-def main_thinking_options(settings, provider: str, messages) -> dict:
+def main_thinking_options(settings, provider: str, messages, *, enabled_override: bool | None = None) -> dict:
     latest = messages[-1] if messages else None
     content = getattr(latest, "source_content", latest.content) if latest is not None else ""
     # Inspect server-owned raw text, never parse user-supplied XML as metadata.
@@ -41,14 +41,15 @@ def main_thinking_options(settings, provider: str, messages) -> dict:
             and latest.role == "user" and is_simple_ack(content))
     configured_effort = getattr(settings, f"{provider}_reasoning_effort", None)
     explicitly_disabled = configured_effort == "disabled"
-    options = native_thinking_options(settings, provider, enabled=not (fast or explicitly_disabled))
+    enabled = enabled_override if enabled_override is not None else not (fast or explicitly_disabled)
+    options = native_thinking_options(settings, provider, enabled=enabled)
     # Keep the same model, full system prompt/history/profile, and all guards.
     # This controls native hidden reasoning only; it never fabricates a reply.
     effort = configured_effort
     # DashScope Qwen uses enable_thinking/thinking_budget rather than the
     # DeepSeek reasoning_effort field; sending both can be rejected.
-    if ("enable_thinking" not in options and not fast and not explicitly_disabled
-            and effort and effort != "provider_default"):
+    if ("enable_thinking" not in options and enabled
+            and effort and effort not in {"provider_default", "disabled"}):
         options["reasoning_effort"] = effort
     return options
 

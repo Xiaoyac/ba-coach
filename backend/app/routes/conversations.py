@@ -24,7 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..conversation_store import create_conversation_with_opening
 from ..db import get_db, get_sessionmaker
-from ..identity import CallerIdentity, require_caller, require_subject_id
+from ..identity import CallerIdentity, require_caller, require_subject_id, require_admin
+from ..conversation_thinking import effective_thinking
 from ..knowledge_references import KnowledgeReferences
 from ..graph.nodes import wait_for_pending_routing
 from ..models import (
@@ -33,6 +34,7 @@ from ..models import (
     ClinicalRecordCycleLink,
     Conversation,
     ConversationMessage,
+    ConversationReplySettings,
     ConversationModuleProgress,
     ConversationRuntimeState,
     PACycle,
@@ -43,6 +45,7 @@ from ..reasoning import normalize_reasoning_channels
 from ..session import SessionStore, get_session_store
 from ..schemas import (
     ConversationCreate,
+    ConversationThinkingUpdate,
     ConversationDetail,
     ConversationMessageDetail,
     MessageTiming,
@@ -87,7 +90,7 @@ def _summary(c: Conversation) -> ConversationSummary:
 
 
 def _detail(c: Conversation, *, next_module: str | None = None,
-            routing_mode: str = "router_code") -> ConversationDetail:
+            routing_mode: str = "router_code", thinking_enabled: bool | None = None) -> ConversationDetail:
     # Replies occupy the odd slot reserved by start_turn for that user row.
     # Do not infer ownership from adjacent list indices or repeated text.
     users_by_position: dict[int, list[int]] = {}
@@ -136,6 +139,7 @@ def _detail(c: Conversation, *, next_module: str | None = None,
         revision=c.revision,
         next_module=next_module,
         routing_mode=routing_mode,
+        thinking_enabled=thinking_enabled,
     )
 
 
@@ -148,7 +152,8 @@ async def _detail_with_runtime(
     mode = await effective_routing_mode(db, conversation=conversation,
         state={"memory": runtime.memory if runtime else {}}, user_id=conversation.subject_id)
     return _detail(
-        conversation, next_module=runtime.module if runtime else None, routing_mode=mode
+        conversation, next_module=runtime.module if runtime else None, routing_mode=mode,
+        thinking_enabled=await effective_thinking(db, session_id=conversation.session_id, subject_id=conversation.subject_id)
     )
 
 
@@ -413,6 +418,32 @@ async def conversation_events(
     )
 
 
+@router.patch("/{session_id}/thinking", response_model=ConversationDetail)
+async def update_conversation_thinking(
+    session_id: str, payload: ConversationThinkingUpdate,
+    caller: CallerIdentity = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+    store: SessionStore = Depends(get_session_store),
+) -> ConversationDetail:
+    turn_lock = await store.get_turn_lock(session_id)
+    if turn_lock.locked():
+        raise HTTPException(status_code=409, detail="回复正在生成，请结束后再切换深度思考。")
+    async with turn_lock:
+        conversation = (await db.execute(select(Conversation).where(
+            Conversation.session_id == session_id, Conversation.subject_id == caller.subject_id)
+            .with_for_update())).scalar_one_or_none()
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="对话不存在")
+        preference = await db.get(ConversationReplySettings, conversation.id)
+        if preference is None:
+            preference = ConversationReplySettings(conversation_id=conversation.id)
+            db.add(preference)
+        preference.thinking_enabled = payload.enabled
+        conversation.revision += 1
+        await db.commit()
+        return await _detail_with_runtime(db, conversation)
+
+
 @router.patch("/{session_id}", response_model=ConversationSummary)
 async def update_conversation(
     session_id: str,
@@ -498,6 +529,8 @@ async def delete_conversation(
         conversation = await _owned_or_404(
             db, session_id=session_id, subject_id=subject_id
         )
+        await db.execute(delete(ConversationReplySettings).where(
+            ConversationReplySettings.conversation_id == conversation.id))
         from ..v2_profile import enabled as v2_enabled
         if v2_enabled():
             from ..v2_deletion import detach_conversation

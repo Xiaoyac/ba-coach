@@ -729,10 +729,15 @@ class ConversationMessageDetail(Message):
     timing: MessageTiming | None = None
 
 
+class ConversationThinkingUpdate(BaseModel):
+    enabled: bool = Field(strict=True)
+
+
 class ConversationDetail(ConversationSummary):
     """A conversation's full transcript, for switching into it."""
 
     revision: int = 0
+    thinking_enabled: bool | None = None
     messages: list[ConversationMessageDetail] = Field(default_factory=list)
     # Durable pointer for the next turn. This is deliberately not called
     # `module`: the latest assistant reply may belong to the previous module.

@@ -75,8 +75,10 @@ class ClaudeProvider(LLMProvider):
             "system": self._system_blocks(system),
             # Adaptive thinking: Claude decides per turn how much to reason.
             # Depth/cost is tuned with `effort`, not a token budget.
-            "thinking": {"type": "adaptive"},
-            "output_config": {"effort": self._settings.claude_effort},
+            **({"thinking": {"type": "disabled"}} if self.thinking_override is False else {
+                "thinking": {"type": "adaptive"},
+                "output_config": {"effort": self._settings.claude_effort},
+            }),
             "messages": [{"role": m.role, "content": m.content} for m in messages],
         }
 
