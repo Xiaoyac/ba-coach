@@ -19,6 +19,9 @@ def native_thinking_options(settings, provider: str, *, enabled: bool, model: st
     """Use the selected model's wire format for both on and off requests."""
     model_name = str(model or getattr(settings, f"{provider}_model", "") or "").casefold()
     base_url = str(getattr(settings, f"{provider}_base_url", "") or "").casefold()
+    # DashScope Kimi accepts the thinking switch but rejects Qwen's budget.
+    if "dashscope.aliyuncs.com" in base_url and model_name.startswith("kimi"):
+        return {"enable_thinking": enabled}
     # DashScope's OpenAI-compatible Qwen endpoints do not use DeepSeek's
     # ``thinking: {type: ...}`` extension.  They require the Qwen wire field
     # ``enable_thinking``. In particular, Qwen3.8 defaults to thinking, so an
