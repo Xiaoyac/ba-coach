@@ -1,11 +1,11 @@
 from app.config import Settings
 
 
-def test_default_compatibility_provider_uses_qwen_38_max_wire_model():
+def test_default_compatibility_provider_uses_qwen_38_flash_wire_model():
     settings = Settings(_env_file=None)
 
-    assert settings.deepseek_model == "qwen3.8-max"
-    assert settings.deepseek_router_model == "qwen3.8-max"
+    assert settings.deepseek_model == "qwen3.8-flash"
+    assert settings.deepseek_router_model == "qwen3.8-flash"
     assert settings.qwen_thinking_budget == 1024
 
 

@@ -117,10 +117,10 @@ async def test_same_full_prompt_and_history_one_request(provider_type,stream,lat
 
 async def test_qwen_reasoning_alias_is_copied_into_the_thinking_channel():
     provider = object.__new__(DeepSeekProvider)
-    provider.model = 'qwen3.8-max'
+    provider.model = 'qwen3.8-flash'
     provider._settings = Settings(_env_file=None)
     response = SimpleNamespace(
-        model='qwen3.8-max', usage=None,
+        model='qwen3.8-flash', usage=None,
         choices=[SimpleNamespace(
             message=SimpleNamespace(content='可见答复', reasoning_content=None, reasoning='Qwen 原生思考'),
             finish_reason='stop')],
@@ -135,7 +135,7 @@ async def test_qwen_reasoning_alias_is_copied_into_the_thinking_channel():
 
     assert result.text == '可见答复'
     assert result.reasoning_content == 'Qwen 原生思考'
-    assert result.model == 'qwen3.8-max'
+    assert result.model == 'qwen3.8-flash'
 
 
 @pytest.mark.parametrize('content,enabled', [
@@ -151,7 +151,7 @@ def test_graph_envelope_preserves_ack_thinking_policy(content, enabled):
 
 
 @pytest.mark.parametrize('model,expected', [
-    ('qwen3.8-max', {'enable_thinking': False}),
+    ('qwen3.8-flash', {'enable_thinking': False}),
     ('deepseek-chat', {'thinking': {'type': 'disabled'}}),
 ])
 @pytest.mark.parametrize('path', ['classification', 'disabled_router', 'recovery'])

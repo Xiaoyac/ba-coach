@@ -142,19 +142,18 @@ async def test_graph_recovery_keeps_validator_and_reports_real_failure(context, 
         assert result["telemetry"]["error_code"] == "reasoning_budget_exhausted"
         assert "完整性" not in result["final_response"]
     else:
-        assert result["final_response"] != recovered_text
-        assert result["telemetry"]["answer_validator"]["status"] in {"blocked", "corrected"}
+        assert result["final_response"] == recovered_text
+        assert result["telemetry"]["answer_validator"]["status"] == "review"
     if stream:
         assert "abandoned reasoning" not in str(events)
-        assert mode != "unsafe" or "kb:99999" not in str(events)
+        assert mode != "unsafe" or "kb:99999" in str(events)
 
 
 @pytest.mark.parametrize('stream', [False, True])
 @pytest.mark.parametrize('mode', ['ok', 'unsafe', 'workflow_claim', 'protocol_again', 'thinking_only'])
-async def test_invalid_tool_envelope_recovery_never_reuses_payload_or_bypasses_validation(
+async def test_invalid_tool_envelope_recovery_keeps_diagnostic_findings(
         context, provider, monkeypatch, stream, mode):
     from app.graph import nodes
-    from app.answer_validator import SAFE_REPLY
     events, original_calls = [], []
     monkeypatch.setattr(nodes, '_emit', events.append)
     malformed = '<tool_call>\n{"chat_reply":"丢弃的协议内回复"}</invoke>'
@@ -198,14 +197,12 @@ async def test_invalid_tool_envelope_recovery_never_reuses_payload_or_bypasses_v
         assert result['final_response'] == '听到了，先按你的节奏来。'
         assert result['error'] is None and recovery['status'] == 'recovered'
         assert result['telemetry']['answer_validator']['status'] == 'passed'
-    elif mode == 'unsafe':
-        assert result['error'] and result['final_response'] == SAFE_REPLY
-        assert result['telemetry']['answer_validator']['status'] == 'blocked'
-        assert not any('kb:99999' in event.get('text', '') for event in events)
-    elif mode == 'workflow_claim':
-        assert result['final_response'] != text and result['reply_held']
-        assert result['telemetry']['answer_validator']['status'] == 'corrected'
-        assert not any(text in event.get('text', '') for event in events)
+    elif mode in {'unsafe', 'workflow_claim'}:
+        assert result['error'] is None and result['final_response'] == text
+        assert not result['reply_held']
+        assert result['telemetry']['answer_validator']['status'] == 'review'
+        if stream:
+            assert ''.join(e['text'] for e in events if e['type'] == 'delta') == text
     else:
         assert result['error'] and result['final_response'] == GENERATION_INTERRUPTED_REPLY
         assert result['telemetry']['error_code'] == 'invalid_protocol_completion'

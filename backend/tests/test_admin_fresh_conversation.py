@@ -102,7 +102,7 @@ async def main():
                 session = await store.get(created.session_id)
                 assert session.module == 'module_1'
             assert member.next_module == 'module_2'
-            assert member.messages[0].content != OPENING_MESSAGE_TEXT
+            assert member.messages[0].content == OPENING_MESSAGE_TEXT
             runtime = metadata.tables['conversation_runtime_states']
             rows = (await db.execute(select(runtime))).mappings().all()
             assert all(row['active_goal_id'] is None and row['active_cycle_id'] is None for row in rows)

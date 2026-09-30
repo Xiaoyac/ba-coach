@@ -1,6 +1,6 @@
 import dataclasses
 import pytest
-from app.answer_validator import validate_answer, SAFE_REPLY
+from app.answer_validator import validate_answer
 from app.graph import get_graph
 from app.providers.base import StreamDelta
 
@@ -51,7 +51,7 @@ def test_natural_finality_after_a_long_plan_reference_uses_committed_state(commi
 
 
 @pytest.mark.parametrize("module", ["module_1","module_2","module_3","module_4"])
-async def test_block_before_stream_delivery(context,provider,monkeypatch,module):
+async def test_findings_do_not_block_stream_delivery(context,provider,monkeypatch,module):
     async def bad_stream(**kwargs):
         yield StreamDelta(kind="content",text="不可靠的引用 kb:99999")
     monkeypatch.setattr(provider,"stream",bad_stream)
@@ -60,10 +60,10 @@ async def test_block_before_stream_delivery(context,provider,monkeypatch,module)
     async for kind,value in get_graph().astream({"user_input":"请解释这个方法","forced_module":module},context=context,stream_mode=["custom","values"]):
         if kind=="custom": events.append(value)
         else: final=value
-    assert final["final_response"]==SAFE_REPLY
-    assert final["telemetry"]["answer_validator"]["status"]=="blocked"
-    assert final.get("error")
-    assert "".join(e.get("text","") for e in events if e.get("type")=="delta")==SAFE_REPLY
+    assert final["final_response"]=="不可靠的引用 kb:99999"
+    assert final["telemetry"]["answer_validator"]["status"]=="review"
+    assert not final.get("error")
+    assert "".join(e.get("text","") for e in events if e.get("type")=="delta")==final["final_response"]
 
 
 async def test_nonstream_validates_too(context,provider):

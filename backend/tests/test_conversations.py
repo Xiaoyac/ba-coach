@@ -9,6 +9,7 @@ Identity comes from a real registered account rather than an invented header:
 """
 
 from __future__ import annotations
+from xml.etree import ElementTree
 
 import pytest
 from fastapi.testclient import TestClient
@@ -77,10 +78,10 @@ def test_create_conversation_persists_opening_and_seeds_agent_history(
         headers=headers,
     )
     assert response.status_code == 200, response.text
-    assert [message.content for message in provider.seen[-1]] == [
-        OPENING_MESSAGE_TEXT,
-        "<user_message>我叫小雨</user_message>",
-    ]
+    assert provider.seen[-1][0].content == OPENING_MESSAGE_TEXT
+    current = ElementTree.fromstring(provider.seen[-1][1].content)
+    assert current.tag == "message" and current.attrib["datetime"] != "unknown"
+    assert current.text == "我叫小雨"
 
     refreshed = client.get(
         f"/api/conversations/{detail['session_id']}", headers=headers
@@ -113,6 +114,27 @@ def test_legacy_conversation_opening_backfill_is_idempotent(
     assert asyncio.get_event_loop().run_until_complete(repair_twice()) == (1, 0)
     detail = client.get(f"/api/conversations/{session_id}", headers=headers).json()
     assert detail["messages"][0]["content"] == OPENING_MESSAGE_TEXT
+
+
+def test_opening_copy_change_does_not_duplicate_historical_opening(
+    client, headers, db_sessionmaker,
+) -> None:
+    import asyncio
+    from app.models import ConversationMessage
+
+    created = client.post("/api/conversations", headers=headers).json()
+    old_text = "之前版本已发送的开场白。"
+
+    async def preserve_history():
+        async with db_sessionmaker() as db:
+            message = await db.get(ConversationMessage, created["messages"][0]["id"])
+            message.content = old_text
+            await db.commit()
+            assert await backfill_opening_messages(db) == 0
+
+    asyncio.get_event_loop().run_until_complete(preserve_history())
+    detail = client.get(f"/api/conversations/{created['session_id']}", headers=headers).json()
+    assert [message["content"] for message in detail["messages"]] == [old_text]
 
 
 def test_list_requires_authentication(client: TestClient) -> None:
@@ -627,7 +649,8 @@ def test_a_resumed_session_still_carries_its_history(
         "/api/chat", json={"message": "二", "session_id": session_id}, headers=headers
     )
     # The model saw the rehydrated history, not a bare first turn.
-    assert [m.content for m in provider.seen[-1]] == ["一", "saw 1 messages", "<user_message>二</user_message>"]
+    assert [ElementTree.fromstring(m.content).text if m.role == "user" else m.content
+            for m in provider.seen[-1]] == ["一", "saw 1 messages", "二"]
 
 
 def test_a_resumed_session_keeps_the_router_module(
