@@ -5,6 +5,7 @@ import { createInvitations, listInvitations, type InvitationList } from "@/lib/i
 
 const button = "min-h-11 rounded-xl border border-line px-4 py-2 text-sm text-ink transition-colors hover:bg-raised disabled:cursor-not-allowed disabled:opacity-50";
 const date = (value: string) => new Date(value).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
+const quantities = [1, 5, 10, 20];
 
 export default function InvitationManager() {
   const [data, setData] = useState<InvitationList>({ invitations: [], has_more: false });
@@ -50,10 +51,12 @@ export default function InvitationManager() {
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-2">
           <span className="text-xs text-ink-muted">数量</span>
-          <div role="group" aria-label="生成邀请码数量" className="flex gap-1 rounded-2xl border border-line bg-raised p-1">
-            {[1, 5, 10, 20].map((n) => <button key={n} type="button" aria-label={`${n} 个邀请码`} aria-pressed={count === n}
+          <div role="group" aria-label="生成邀请码数量" className="relative isolate flex gap-1 rounded-2xl border border-line bg-raised p-1">
+            <span aria-hidden="true" className="pointer-events-none absolute bottom-1 left-1 top-1 w-11 rounded-xl bg-accent shadow-sm transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+              style={{ transform: `translateX(${quantities.indexOf(count) * 3}rem)` }} />
+            {quantities.map((n) => <button key={n} type="button" aria-label={`${n} 个邀请码`} aria-pressed={count === n}
               disabled={saving} onClick={() => setCount(n)}
-              className={`min-h-11 min-w-11 rounded-xl px-2 text-sm tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-edge disabled:opacity-50 ${count === n ? "bg-accent text-on-accent shadow-sm" : "text-ink-muted hover:bg-panel hover:text-ink"}`}>{n}</button>)}
+              className={`relative min-h-11 w-11 shrink-0 rounded-xl px-2 text-sm tabular-nums transition-colors duration-300 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-edge disabled:opacity-50 ${count === n ? "text-on-accent" : "text-ink-muted hover:text-ink"}`}>{n}</button>)}
           </div>
         </div>
         <button type="button" className={`${button} border-accent-edge bg-accent-wash text-accent-ink`} disabled={saving} onClick={() => void generate()}>

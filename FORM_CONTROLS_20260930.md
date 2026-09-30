@@ -23,3 +23,10 @@
 - Deployment package contains 249 source files. Reuses existing Python environment and settings; no database/schema or dependency changes.
 - To provide build space, removed only regenerable frontend/node_modules directories from our inactive releases 20260930T022500Z and 20260930T024423Z. Their sources and build output remain; redeploying either requires npm ci. Current and immediate previous releases, all databases, and shared Python environments are preserved.
 - Post-deploy: all 249 source hashes match; backend, frontend and push services are active; internal health and public homepage passed. Missing invitation returns 422; anonymous list/generation returns 401. Final in-app browser production navigation timed out twice, so screenshots document local browser QA; production UI was not visually rechecked. Viewport override was reset before these timeouts.
+
+## Quantity sliding animation follow-up
+
+- InvitationManager now keeps one persistent highlight behind four fixed-width buttons. Selecting a quantity translates that highlight by a 3rem step over 300ms with eased deceleration. Button backgrounds do not swap, and rapid changes retarget the current transition. Reduced-motion preferences disable the transition.
+- Local browser verified 1 → 20 → 1 → 5 → 10 and keyboard Enter → 20 on a 390px viewport. Computed style confirmed a 0.3s transform transition, a 144px endpoint and an intermediate transform while moving. Highlight and buttons remain 44px wide; mobile document width is 390px. Checked text contrast, stable layout, rounded highlight, focus and overflow. Screenshots: output/slide-qa/desktop.png and mobile.png (mobile captures movement).
+- Production build (including type checks) and git diff checks passed. No backend or invitation behavior changes.
+- Release target: 20260930T035015Z; rollback: 20260930T034109Z.
