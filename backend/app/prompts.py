@@ -118,19 +118,24 @@ def _historical_activity_notes(value: object) -> list[dict]:
 
 def _anchor_already_visible(anchor: str, history: Sequence[Message]) -> bool:
     """Suppress only an exact, role-preserving duplicate of visible history."""
+    from .conversation_time import time_label
+
     remaining = iter(history)
     found = False
     for line in anchor.splitlines():
         if not line.strip():
             continue
-        match = re.fullmatch(r"\s*(?:\[[^\]]*\]\s*)?(用户|教练)：(.*)", line)
+        match = re.fullmatch(r"\s*(?:\[([^\]]*)\]\s*)?(用户|教练)：(.*)", line)
         if not match:
             return False  # Unknown/legacy summaries may contain facts not in the window.
-        role = "user" if match[1] == "用户" else "assistant"
-        text = " ".join(match[2].split())
+        stamp, speaker, content = match.groups()
+        role = "user" if speaker == "用户" else "assistant"
+        text = " ".join(content.split())
         if not text:
             return False
-        if not any(m.role == role and " ".join(m.content.split()).startswith(text) for m in remaining):
+        if not any(m.role == role and " ".join(m.content.split()).startswith(text)
+                   and (stamp in (None, "时间未知", "unknown") or time_label(m.created_at) == stamp)
+                   for m in remaining):
             return False
         found = True
     return found
