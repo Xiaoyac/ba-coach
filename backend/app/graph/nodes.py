@@ -967,7 +967,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
             authority = await reply_authority()  # recheck after generation, including other-chat updates
             validation = validate_answer(reply=update.get("final_response", ""), module=module_name,
                 evidence_ids=[str(k.id) for k in guided_knowledge], workflow=authority,
-                current_user=user_input)
+                current_user=user_input, history=state.get("chat_history") or [])
             telemetry["answer_validator"] = validation
             validation["mode"] = "diagnostic_only"
             validation["original_status"] = validation["status"]
