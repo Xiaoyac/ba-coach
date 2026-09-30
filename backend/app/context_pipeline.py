@@ -18,7 +18,8 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from .prompts import SystemPromptSegment
 from .schemas import Message
-from .conversation_time import temporal_context
+from .conversation_time import TEMPORAL_RULES, dated_content, request_time_context
+from .assistant_content import unwrap_assistant_message
 
 
 LANGCHAIN_CORE_VERSION = version("langchain-core")
@@ -29,13 +30,15 @@ _PROMPT = ChatPromptTemplate.from_messages([
 ])
 
 
-def _chat_messages(messages: Sequence[Message]) -> list[BaseMessage]:
+def _chat_messages(messages: Sequence[Message], *, annotate_time: bool = False) -> list[BaseMessage]:
     # Deliberately exclude stored reasoning, routing traces and display metadata.
     # Index IDs let history trimming select original records without losing UI
     # metadata in the session store or confusing duplicate message contents.
     return [
         (HumanMessage if message.role == "user" else AIMessage)(
-            content=message.content, id=str(index)
+            content=(unwrap_assistant_message(message.content) if message.role == "assistant"
+                     else dated_content(message.content, message.created_at)
+                     if annotate_time else message.content), id=str(index)
         )
         for index, message in enumerate(messages)
     ]
@@ -88,15 +91,23 @@ def prepare_context(
     """
     started = perf_counter()
     kept = trim_history(history, max_history_messages)
-    system = [*system, SystemPromptSegment(temporal_context(
-        kept, user_created_at=user_created_at, current_time=current_time), cacheable=False)]
+    # Older administrator overrides may still describe the retired envelope.
+    # Adapt only request copies; preserve saved prompts and user content.
+    system = [SystemPromptSegment(
+        segment.text.replace("<user_message>", "<content>").replace(
+            "</user_message>", "</content>"), cacheable=segment.cacheable
+    ) for segment in system]
+    system.append(SystemPromptSegment(TEMPORAL_RULES, cacheable=False))
+    system.append(SystemPromptSegment(request_time_context(
+        user_created_at=user_created_at, current_time=current_time), cacheable=False))
+    current = Message(role="user", content=user_input, created_at=user_created_at)
     prompt = _PROMPT.format_prompt(
         system_segments=[
             SystemMessage(content=segment.text, additional_kwargs={"cacheable": segment.cacheable})
             for segment in system
         ],
-        history=_chat_messages(kept),
-        user_input=user_input,
+        history=_chat_messages(kept, annotate_time=True),
+        user_input=dated_content(user_input, user_created_at),
     )
     compiled_system = []
     compiled_messages = []
@@ -106,15 +117,17 @@ def prepare_context(
                 message.content, cacheable=message.additional_kwargs["cacheable"]
             ))
         else:
-            compiled_messages.append(Message(
-                role="user" if isinstance(message, HumanMessage) else "assistant",
-                content=message.content,
-            ))
+            # Keep raw content and immutable timestamp in private/request
+            # metadata. Fast acknowledgements must not parse datetime markup.
+            source = kept[len(compiled_messages)] if len(compiled_messages) < len(kept) else current
+            compiled_messages.append(Message(role=source.role, content=source.content,
+                created_at=source.created_at).for_provider(message.content))
     return PreparedContext(
         system=compiled_system,
         messages=compiled_messages,
         metrics={
             "engine": "langchain",
+            "time_format": "server_clock_user_message_v4",
             "langchain_core_version": LANGCHAIN_CORE_VERSION,
             "history_messages_before": len(history),
             "history_messages_kept": len(kept),

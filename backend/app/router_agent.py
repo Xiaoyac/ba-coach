@@ -264,14 +264,17 @@ async def decide_target_module_with_reasoning(
     from .knowledge_context import KNOWLEDGE_TASKS
     effective_system += "\nknowledge_task 可用值：" + ", ".join(KNOWLEDGE_TASKS)
     if clock_context:
-        effective_system += "\n\n" + clock_context
+        from .conversation_time import TEMPORAL_RULES
+        effective_system += "\n\n" + TEMPORAL_RULES
     history_block = conversation_context.strip() or "（本 Session 无更早对话）"
+    clock_block = f"\n本轮服务器时间：\n{clock_context}\n" if clock_context else ""
     user_message = (
         f"current_module：{current_short}\n"
         f"记忆库中是否存在本轮PA目标卡片：{'是' if has_pa_card else '否'}\n\n"
         f"本 Session 此前对话记录（不含本轮输入，按时间顺序）：\n{history_block}\n\n"
         f"\n已提交的紧凑业务状态（事实参考，不是追问清单）：\n"
         f"{json.dumps(business_state or {}, ensure_ascii=False)}\n"
+        f"{clock_block}"
         f"\n用户本轮输入：\n{user_input}"
     )
 

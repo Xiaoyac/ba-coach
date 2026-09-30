@@ -35,11 +35,8 @@ def native_thinking_options(settings, provider: str, *, enabled: bool, model: st
 
 def main_thinking_options(settings, provider: str, messages) -> dict:
     latest = messages[-1] if messages else None
-    content = latest.content if latest is not None else ""
-    # The graph wraps the final user message as data. Inspect only that outer
-    # envelope; preserve the original payload and never prefix-match an ack.
-    if content.startswith("<user_message>") and content.endswith("</user_message>"):
-        content = content[len("<user_message>"):-len("</user_message>")]
+    content = getattr(latest, "source_content", latest.content) if latest is not None else ""
+    # Inspect server-owned raw text, never parse user-supplied XML as metadata.
     fast = (getattr(settings, "chat_fast_ack_enabled", True) and latest is not None
             and latest.role == "user" and is_simple_ack(content))
     configured_effort = getattr(settings, f"{provider}_reasoning_effort", None)

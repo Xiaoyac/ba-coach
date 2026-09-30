@@ -1,12 +1,12 @@
 """V2 workflow authority, scoped by user and execution cycle."""
 import json
 import re
-from datetime import datetime
 from sqlalchemy import select, update, insert, func
 from .database_v2_schema import metadata as schema
 from .models import Conversation, ConversationMessage
 from .v2_repository import new_id, now, owned_goal, reply_memories, create_goal, start_cycle
 from .workflow_contract import MODULE_STEP_KEYS
+from .temporal_evidence import normalize_plan_time
 
 
 async def runtime_for(db, session_id):
@@ -361,6 +361,10 @@ def record_values(module, data):
                  "difficulty_rating", "difficulty_original", "difficulty_evidence"}
     if module == "module_3":
         forbidden.update({"recording_status", "recording_evidence"})
+    if module == "module_2":
+        # Model-produced ISO values and timezone guesses are not evidence.
+        # The write boundary derives time from authenticated user messages.
+        forbidden.update({"scheduled_start_at", "timezone"})
     values = {}
     for key, value in data.items():
         target = FIELD_MAP[module].get(key, key)
@@ -368,15 +372,6 @@ def record_values(module, data):
             values[target] = value
     if module == "module_2" and isinstance(values.get("core_values"), str):
         values["core_values"] = [values["core_values"]]
-    if module == "module_2" and isinstance(values.get("scheduled_start_at"), str):
-        # Extractors emit ISO text while the DB column is a datetime.  Parse
-        # it before an unverified confirmation turn can reach the update; a
-        # valid card marker may still replace this value with its snapshot.
-        try:
-            values["scheduled_start_at"] = datetime.fromisoformat(
-                values["scheduled_start_at"].replace("Z", "+00:00"))
-        except ValueError:
-            values["scheduled_start_at"] = None
     if module == "module_3" and isinstance(values.get("negotiated_record_plan"), str):
         values["negotiated_record_plan"] = {"schema_version": 1, "text": values["negotiated_record_plan"]}
     for key in ("event_experience", "phase_a", "phase_b", "phase_c"):
@@ -448,6 +443,7 @@ async def create_goal_from_agent_dialogue(db, *, session_id, user_id, data,
     if not evidence:
         return blocked("selection_source_invalid", "选择或活动引用无法与当前会话的真实消息核对")
     values.update(difficulty_values(data, messages))
+    values = normalize_plan_time(values, messages, timezone_name="Asia/Shanghai")
     # The extractor may decorate the chosen activity with an assistant's
     # wording. Persist the source-backed user choice, not an expanded activity
     # the user never selected. Schedule/location keep their separate fields.
@@ -639,6 +635,8 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
             values.update(difficulty_values(data, messages, existing=existing))
             if existing:
                 values = _synchronize_duration_text(values, existing)
+            values = normalize_plan_time(values, messages, existing=existing,
+                timezone_name=existing["timezone"] if existing else defaults["timezone"])
         # A short affirmative turn confirms the card just displayed. The
         # extractor still runs over the full transcript, but it may rewrite
         # narrative fields or re-parse an already-known date. Preserve the

@@ -12,7 +12,7 @@ from time import perf_counter
 from langgraph.config import get_stream_writer
 from .router_agent import RouterDecision, decide_target_module_with_reasoning, format_routing_reasoning
 from .schemas import Message
-from .conversation_time import temporal_context, timed_transcript
+from .conversation_time import current_time_context, timed_transcript
 from .trace_timing import record_span, prompt_source
 from .routing_modes import ROUTER_CODE, ROUTER_ONLY, effective_routing_mode
 
@@ -119,7 +119,7 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
     started = perf_counter()
     routing_history = prepared.get("routing_history", prepared.get("chat_history", []))
     history = timed_transcript(routing_history)
-    clock_context = temporal_context(routing_history, user_created_at=state.get("user_created_at"))
+    clock_context = current_time_context(user_created_at=state.get("user_created_at"))
     # Match the provider's thinking-call budget. The classifier deadline must
     # not cancel native reasoning before the final routing JSON can arrive.
     router_timeout = (

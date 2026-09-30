@@ -250,7 +250,7 @@ async def _resume_or_create(
                             role=m.role,
                             created_at=m.created_at,
                             content=normalize_reasoning_channels(
-                                m.content, m.reasoning_content
+                                m.content, m.reasoning_content, unwrap_message=m.role == "assistant"
                             ).reply,
                         )
                         for m in conversation.messages
@@ -268,6 +268,7 @@ async def _initial_state(
     db: AsyncSession,
     *,
     subject_id: str | None,
+    received_at: datetime | None = None,
 ) -> tuple[AgentState, str]:
     """Seed the graph's state and make sure the session exists.
 
@@ -275,7 +276,7 @@ async def _initial_state(
     `extract_memory_node` reads one merged view rather than having to reconcile
     request and session metadata itself.
     """
-    received_at = utc_now()
+    received_at = received_at or utc_now()
     session = await _resume_or_create(request, store, db, subject_id=subject_id)
     if request.metadata:
         session.metadata.update(request.metadata)
@@ -335,6 +336,7 @@ async def chat(
     subject_id: str | None = Depends(optional_subject_id),
 ) -> ChatResponse:
     request_started = perf_counter()
+    received_at = utc_now()
     settings = get_settings()
     await wait_for_pending_routing(
         request.session_id,
@@ -347,7 +349,7 @@ async def chat(
     )
     provider = await _resolve_provider(request, db, subject_id=subject_id)
     router_prompt = await effective_router_prompt(db)
-    state, session_id = await _initial_state(request, store, db, subject_id=subject_id)
+    state, session_id = await _initial_state(request, store, db, subject_id=subject_id, received_at=received_at)
     user_message_id = await _persist_user_message(
         db,
         subject_id=subject_id,
@@ -431,12 +433,13 @@ async def chat_stream(
     db: AsyncSession = Depends(get_db),
     subject_id: str | None = Depends(optional_subject_id),
 ) -> StreamingResponse:
+    received_at = utc_now()
     try:
         control = generations.begin(subject_id, str(request.generation_id or uuid4()))
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
-        response = await control.run(_prepare_chat_stream(request, store, db, subject_id, control))
+        response = await control.run(_prepare_chat_stream(request, store, db, subject_id, control, received_at=received_at))
     except GenerationStopped:
         generations.finish(control)
         async def stopped():
@@ -474,8 +477,10 @@ async def cancel_generation(
 async def _prepare_chat_stream(
     request: ChatRequest, store: SessionStore, db: AsyncSession,
     subject_id: str | None, control: GenerationControl,
+    *, received_at: datetime | None = None,
 ) -> StreamingResponse:
     request_started = perf_counter()
+    received_at = received_at or utc_now()
     settings = get_settings()
     await wait_for_pending_routing(
         request.session_id,
@@ -484,7 +489,7 @@ async def _prepare_chat_stream(
     )
     provider = await _resolve_provider(request, db, subject_id=subject_id)
     router_prompt = await effective_router_prompt(db)
-    state, session_id = await _initial_state(request, store, db, subject_id=subject_id)
+    state, session_id = await _initial_state(request, store, db, subject_id=subject_id, received_at=received_at)
     user_message_id = await _persist_user_message(
         db,
         subject_id=subject_id,

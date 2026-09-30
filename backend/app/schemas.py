@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, PrivateAttr, field_validator, model_validator
 
 Role = Literal["user", "assistant"]
 
@@ -21,6 +21,18 @@ class Message(BaseModel):
     role: Role
     content: str
     created_at: datetime | None = None
+    # Request-only metadata, never serialized into stored/public messages.
+    # Compute policy must inspect original text, not parse user-supplied tags.
+    _source_content: str | None = PrivateAttr(default=None)
+
+    @property
+    def source_content(self) -> str:
+        return self.content if self._source_content is None else self._source_content
+
+    def for_provider(self, content: str) -> Message:
+        projected = self.model_copy(update={"content": content})
+        projected._source_content = self.source_content
+        return projected
 
     @field_validator("created_at")
     @classmethod

@@ -97,7 +97,7 @@ def _detail(c: Conversation, *, next_module: str | None = None,
 
     def project_message(message: ConversationMessage) -> ConversationMessageDetail:
         normalized = normalize_reasoning_channels(
-            message.content, message.reasoning_content
+            message.content, message.reasoning_content, unwrap_message=message.role == "assistant"
         )
         def duration(value):
             return value if type(value) is int and value >= 0 else None

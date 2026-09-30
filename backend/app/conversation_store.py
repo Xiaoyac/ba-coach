@@ -57,7 +57,7 @@ async def load_reply_history(db: AsyncSession, *, subject_id: str, session_id: s
     ).order_by(ConversationMessage.position.desc(), ConversationMessage.id.desc())
       .limit(max(1, limit)))).all()
     return [Message(role=row.role, content=normalize_reasoning_channels(
-        row.content, row.reasoning_content).reply, created_at=row.created_at) for row in reversed(rows)]
+        row.content, row.reasoning_content, unwrap_message=row.role == "assistant").reply, created_at=row.created_at) for row in reversed(rows)]
 
 
 async def create_conversation_with_opening(
