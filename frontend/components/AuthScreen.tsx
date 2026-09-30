@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import BirthdayPicker from "@/components/BirthdayPicker";
 import {
   AuthError,
   login,
@@ -325,16 +326,10 @@ export default function AuthScreen({
                 </div>
               </Field>
 
-              <Field label="出生日期" hint="必填，用于计算年龄；当前支持 10–120 岁，不会自动填写">
-                <input
-                  required
-                  type="date"
-                  autoComplete="bday"
-                  value={birthDate}
-                  onChange={(e) => setBirthDate(e.target.value)}
-                  className={inputClass}
-                />
-              </Field>
+              <div className="mb-5">
+                <p className="mb-1.5 text-[0.78rem] font-medium text-ink-muted">出生日期 <span className="text-[0.68rem] text-ink-faint">必填 · 支持 10–120 岁</span></p>
+                <BirthdayPicker value={birthDate} onChange={setBirthDate} disabled={busy} />
+              </div>
 
               <Field label="目前和谁住" optional>
                 <div className="flex flex-wrap gap-1.5">

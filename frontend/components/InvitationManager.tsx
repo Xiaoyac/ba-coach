@@ -48,12 +48,14 @@ export default function InvitationManager() {
       <div><h3 className="text-base font-medium text-ink">注册邀请码</h3>
         <p className="mt-1 text-xs leading-6 text-ink-muted">长期有效 · 每码一人 · 成功注册后不可再次使用</p></div>
       <div className="flex flex-wrap items-center gap-2">
-        <label className="text-sm text-ink-muted">数量
-          <select aria-label="生成邀请码数量" value={count} onChange={(e) => setCount(Number(e.target.value))} disabled={saving}
-            className="ml-2 min-h-11 rounded-xl border border-line bg-panel px-3 text-ink">
-            {[1, 5, 10, 20].map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </label>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-ink-muted">数量</span>
+          <div role="group" aria-label="生成邀请码数量" className="flex gap-1 rounded-2xl border border-line bg-raised p-1">
+            {[1, 5, 10, 20].map((n) => <button key={n} type="button" aria-label={`${n} 个邀请码`} aria-pressed={count === n}
+              disabled={saving} onClick={() => setCount(n)}
+              className={`min-h-11 min-w-11 rounded-xl px-2 text-sm tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-edge disabled:opacity-50 ${count === n ? "bg-accent text-on-accent shadow-sm" : "text-ink-muted hover:bg-panel hover:text-ink"}`}>{n}</button>)}
+          </div>
+        </div>
         <button type="button" className={`${button} border-accent-edge bg-accent-wash text-accent-ink`} disabled={saving} onClick={() => void generate()}>
           {saving ? "正在生成…" : "生成邀请码"}
         </button>

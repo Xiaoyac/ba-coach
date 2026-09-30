@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import BirthdayPicker from "@/components/BirthdayPicker";
 import { saveBirthDate, type Account } from "@/lib/auth";
 
 export default function RequiredBirthDateModal({ onSaved, onLogout }: {
@@ -45,10 +46,9 @@ export default function RequiredBirthDateModal({ onSaved, onLogout }: {
     <h1 id="required-birthday-title" className="text-xl font-semibold">补充一下你的生日</h1>
     <p className="mt-3 text-sm leading-7 text-ink-muted">旧资料中的年龄记录为 10 岁，需要你确认出生日期，让建议更贴合实际情况。</p>
     <form onSubmit={submit} className="mt-6 space-y-5" aria-busy={busy}>
-      <label className="block text-sm">出生日期（必填）
-        <input type="date" autoComplete="bday" required disabled={busy} value={birthday} onChange={event => setBirthday(event.target.value)}
-          className="mt-2 block min-h-12 w-full min-w-0 rounded-xl border border-line bg-raised px-3 text-ink focus:outline-accent" />
-      </label>
+      <div className="text-sm"><p className="mb-2">出生日期（必填）</p>
+        <BirthdayPicker value={birthday} onChange={setBirthday} disabled={busy} />
+      </div>
       <p className="text-xs leading-6 text-ink-faint">请填写真实生日，系统会自动计算年龄。填好后即可继续，之后仍可在「我的档案」中更正。</p>
       {error && <p role="alert" className="rounded-xl bg-alert-wash p-3 text-sm text-alert-ink">{error}</p>}
       <button type="submit" disabled={busy || !birthday} className="min-h-12 w-full rounded-full bg-accent px-4 font-medium text-on-accent disabled:opacity-40">{busy ? "正在保存…" : "保存并继续"}</button>
