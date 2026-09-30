@@ -12,6 +12,7 @@ import time
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from test_admin_accounts import admin_headers
 
 from app.models import AIExecutionEvent
 from app.providers.base import Completion, ProviderError, StreamDelta
@@ -185,11 +186,11 @@ def test_authenticated_provider_failure_is_recorded_in_ai_telemetry(
 
 
 def test_saved_model_preference_drives_chat(
-    client: TestClient, register, provider, monkeypatch
+    client: TestClient, admin_headers, provider, monkeypatch
 ) -> None:
     from app.routes import chat as chat_route
 
-    headers = register(username="modelchoice")
+    headers = admin_headers
     assert client.patch(
         "/api/profile", json={"preferred_provider": "doubao"}, headers=headers
     ).status_code == 200
@@ -206,14 +207,14 @@ def test_saved_model_preference_drives_chat(
 
 
 def test_explicit_provider_overrides_saved_preference(
-    client: TestClient, register, provider, monkeypatch
+    client: TestClient, admin_headers, provider, monkeypatch
 ) -> None:
     from app.routes import chat as chat_route
 
-    headers = register(username="modeloverride")
-    client.patch(
+    headers = admin_headers
+    assert client.patch(
         "/api/profile", json={"preferred_provider": "doubao"}, headers=headers
-    )
+    ).status_code == 200
     selected: list[str | None] = []
 
     def capture(name=None):

@@ -8,22 +8,20 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..graph.nodes import has_pending_routing
 from ..identity import require_subject_id
-from ..knowledge_references import KnowledgeReferences
-from ..models import AIExecutionEvent, Conversation, ConversationShare
+from ..models import Conversation, ConversationShare
 from ..session import SessionStore, get_session_store
 from ..share_schemas import (
     ConversationShareCreated,
     ConversationShareSnapshot,
     SharedMessage,
 )
-from .conversations import _detail, _owned_or_404
+from .conversations import _owned_or_404
 
 router = APIRouter(tags=["conversation shares"])
 TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{43}$")
@@ -72,40 +70,14 @@ async def create_share(
             ))
         if not conversation.messages:
             raise HTTPException(status_code=409, detail="对话还没有可分享的消息。")
-        assistant_ids = [m.id for m in conversation.messages if m.role == "assistant"]
-        references: dict[int, KnowledgeReferences] = {}
-        if assistant_ids:
-            events = (await db.execute(select(
-                AIExecutionEvent.assistant_message_id, AIExecutionEvent.event_metadata,
-            ).where(
-                AIExecutionEvent.conversation_id == conversation.id,
-                AIExecutionEvent.session_id == session_id,
-                AIExecutionEvent.subject_id == subject_id,
-                AIExecutionEvent.stage == "main_generation",
-                AIExecutionEvent.assistant_message_id.in_(assistant_ids),
-            ).order_by(AIExecutionEvent.id.desc()))).all()
-            for message_id, metadata in events:
-                if message_id in references:
-                    continue
-                try:
-                    # Never copy the whole telemetry object: it also contains
-                    # prompts, memory and account state outside this share.
-                    raw = metadata.get("knowledge_references") if isinstance(metadata, dict) else None
-                    references[message_id] = KnowledgeReferences.model_validate(raw or {})
-                except ValidationError:
-                    references[message_id] = KnowledgeReferences()
-        from ..request_records import request_records
-        requests = await request_records(db, conversation)
         created_at = datetime.now(timezone.utc)
         snapshot = ConversationShareSnapshot(
             title=conversation.title,
             created_at=created_at,
             messages=[SharedMessage(
-                **{**message.model_dump(), "id": index},
-                request_records=requests.get(message.id),
-                knowledge_references=(references.get(message.id, KnowledgeReferences())
-                                      if message.role == "assistant" else None),
-            ) for index, message in enumerate(_detail(conversation).messages, start=1)],
+                id=index, role=message.role, content=message.content,
+                created_at=message.created_at,
+            ) for index, message in enumerate(conversation.messages, start=1)],
         )
         token = secrets.token_urlsafe(32)
         share = ConversationShare(

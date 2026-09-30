@@ -478,6 +478,7 @@ class ProfileOut(BaseModel):
     # "待配置" state instead of allowing a selection that will fail later.
     preferred_provider: ModelProvider = "deepseek"
     available_providers: dict[str, bool] = Field(default_factory=dict)
+    can_manage_models: bool = False
 
     # Read-only, shown for orientation. `current_module` is the programme's
     # own state machine and `risk_level` is a clinical judgement — neither is

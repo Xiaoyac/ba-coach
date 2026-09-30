@@ -29,6 +29,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..clinical_store import set_values
 from ..birth_dates import age_on
 from ..db import get_db
-from ..identity import require_subject_id
+from ..identity import CallerIdentity, require_caller
 from ..account_identity import normalize_display_name
 from ..models import AccountHandle, AccountSettings, ProfileExtension, UserAccount
 from ..models_business import UserProfile
@@ -230,19 +231,26 @@ async def _account_id(db: AsyncSession, subject_id: str) -> int:
     return account_id
 
 
+def _visible_profile(result: ProfileOut, caller: CallerIdentity) -> Response:
+    result.can_manage_models = bool(caller.account.settings and caller.account.settings.role == "admin")
+    excluded = set() if result.can_manage_models else {"preferred_provider", "available_providers"}
+    return JSONResponse(result.model_dump(mode="json", exclude=excluded), headers={"Cache-Control": "no-store"})
+
+
 @router.get("", response_model=ProfileOut)
 async def read_profile(
     response: Response,
-    subject_id: str = Depends(require_subject_id),
+    caller: CallerIdentity = Depends(require_caller),
     db: AsyncSession = Depends(get_db),
-) -> ProfileOut:
+) -> Response:
+    subject_id = caller.subject_id
     # This response includes live provider availability derived from the
     # process environment. A cached response can keep a newly configured
     # provider disabled in the UI even after the backend has restarted.
     response.headers["Cache-Control"] = "no-store"
     from .. import v2_profile
     if v2_profile.enabled():
-        return await v2_profile.read(db, subject_id)
+        return _visible_profile(await v2_profile.read(db, subject_id), caller)
     profile = await _own_profile(db, subject_id)
     result = _to_out(
         profile,
@@ -251,19 +259,24 @@ async def read_profile(
         await _load_account_handle(db, subject_id),
     )
     result.current_module = await derived_current_module(db, subject_id=subject_id)
-    return result
+    return _visible_profile(result, caller)
 
 
 @router.patch("", response_model=ProfileOut)
 async def update_profile(
     payload: ProfileUpdate,
-    subject_id: str = Depends(require_subject_id),
+    caller: CallerIdentity = Depends(require_caller),
     db: AsyncSession = Depends(get_db),
-) -> ProfileOut:
+) -> Response:
+    subject_id = caller.subject_id
+    if "preferred_provider" in payload.model_fields_set and not (
+        caller.account.settings and caller.account.settings.role == "admin"
+    ):
+        raise HTTPException(403, "只有管理员可以修改模型偏好")
     from .. import v2_profile
     if v2_profile.enabled():
         try:
-            return await v2_profile.patch(db, subject_id, payload)
+            return _visible_profile(await v2_profile.patch(db, subject_id, payload), caller)
         except IntegrityError:
             await db.rollback()
             raise HTTPException(409, "昵称标签已被使用，请刷新后重试") from None
@@ -411,4 +424,4 @@ async def update_profile(
     )
     result = _to_out(profile, extension, account_settings, handle)
     result.current_module = await derived_current_module(db, subject_id=subject_id)
-    return result
+    return _visible_profile(result, caller)

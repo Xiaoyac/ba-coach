@@ -1,5 +1,4 @@
-import { API_BASE, type ChatMessage } from "@/lib/api";
-import type { KnowledgeReferences } from "@/lib/conversations";
+import { API_BASE } from "@/lib/api";
 import { apiHeaders, checkAuthentication } from "@/lib/http";
 
 export interface CreatedConversationShare {
@@ -16,7 +15,7 @@ export interface SharedConversation {
   snapshot_version: number;
   title: string;
   created_at: string;
-  messages: (ChatMessage & { knowledge_references: KnowledgeReferences | null })[];
+  messages: { id: number; role: "user" | "assistant"; content: string; created_at: string | null }[];
 }
 
 export class ShareRequestError extends Error {

@@ -1,12 +1,14 @@
-"""Deliberately limited share schemas: transcript and existing detail panels."""
+"""Public shares contain only visible transcript fields, including legacy links."""
 from datetime import datetime
+import re
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from .knowledge_references import KnowledgeReferences
-from .schemas import MessageTiming
-from .request_records import MessageRequests
+from .assistant_content import unwrap_assistant_message
+from .reasoning import contains_internal_protocol
+
+_PRIVATE_THOUGHT = re.compile(r"<(think|thinking)\b[^>]*>.*?(?:</\1\s*>|$)", re.IGNORECASE | re.DOTALL)
 
 
 class SharedMessage(BaseModel):
@@ -17,13 +19,14 @@ class SharedMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     created_at: datetime | None = None
-    request_records: MessageRequests | None = None
-    reasoning_content: str | None = None
-    model_name: str | None = None
-    routing_reasoning_content: str | None = None
-    router_model_name: str | None = None
-    timing: MessageTiming | None = None
-    knowledge_references: KnowledgeReferences | None = None
+    @model_validator(mode="after")
+    def visible_reply_only(self):
+        if self.role == "assistant":
+            # Never promote private reasoning into an empty public reply.
+            self.content = _PRIVATE_THOUGHT.sub("", unwrap_assistant_message(self.content)).strip()
+            if contains_internal_protocol(self.content):
+                self.content = ""
+        return self
 
 
 class ConversationShareSnapshot(BaseModel):

@@ -111,8 +111,9 @@ export interface Profile {
   reminder_window: ReminderWindow | null;
 
   /** Temporary product setting: which configured model answers new turns. */
-  preferred_provider: ModelProvider;
-  available_providers: Record<ModelProvider, boolean>;
+  can_manage_models: boolean;
+  preferred_provider?: ModelProvider;
+  available_providers?: Record<ModelProvider, boolean>;
 
   /** Read-only — programme state, not something the subject sets. */
   current_module: string | null;
@@ -125,7 +126,7 @@ export interface Profile {
  * silently revert a change made on another device.
  */
 export type ProfilePatch = Partial<
-  Omit<Profile, "current_module" | "available_providers" | "display_id">
+  Omit<Profile, "current_module" | "available_providers" | "display_id" | "can_manage_models">
 >;
 
 async function parse<T>(res: Response, what: string): Promise<T> {

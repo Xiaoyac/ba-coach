@@ -272,7 +272,7 @@ export default function ProfileModal({
               </Field>
             </Section>
 
-            <Section
+            {profile.can_manage_models && <Section
               title="模型偏好"
               hint="选择接下来由哪个模型回复。这个入口是项目阶段性设置，之后可以直接移除，不影响账号和对话记录。"
             >
@@ -283,7 +283,7 @@ export default function ProfileModal({
                     ["doubao", "豆包 Doubao", "火山方舟"],
                   ] as const
                 ).map(([provider, label, description]) => {
-                  const available = profile.available_providers[provider];
+                  const available = profile.available_providers?.[provider];
                   const selected = value("preferred_provider") === provider;
                   return (
                     <button
@@ -312,12 +312,12 @@ export default function ProfileModal({
                   );
                 })}
               </div>
-              {!profile.available_providers.doubao && (
+              {!profile.available_providers?.doubao && (
                 <p className="mt-2 text-[0.66rem] leading-relaxed text-ink-faint">
                   豆包需要在后端配置 API Key 与模型 ID 后才能启用。
                 </p>
               )}
-            </Section>
+            </Section>}
 
             <Section
               title="安全边界"
