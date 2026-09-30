@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from decimal import Decimal
 from typing import Any
 
@@ -15,6 +17,18 @@ from .config import get_settings
 from .models import AIExecutionEvent, Conversation
 
 logger = logging.getLogger(__name__)
+
+_turn_scope: ContextVar[tuple[str, int | None] | None] = ContextVar("ai_event_turn", default=None)
+
+
+@asynccontextmanager
+async def request_event_scope(session_id: str, user_message_id: int | None):
+    token = _turn_scope.set((session_id, user_message_id))
+    try:
+        yield
+    finally:
+        _turn_scope.reset(token)
+
 
 
 def _pricing() -> tuple[dict[str, dict[str, float]], str]:
@@ -69,6 +83,9 @@ async def add_ai_event(
                 select(Conversation.id).where(Conversation.session_id == session_id)
             )
         ).scalar_one_or_none()
+    scope = _turn_scope.get()
+    if scope and scope[0] == session_id and scope[1] is not None:
+        event_metadata = {**(event_metadata or {}), "user_message_id": scope[1]}
     usage = usage or {}
     cost, pricing_version = estimate_cost(model_name, usage)
     event = AIExecutionEvent(

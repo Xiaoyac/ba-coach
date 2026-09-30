@@ -1,6 +1,6 @@
 /** Client for the sidebar's conversation list, backed by `/api/conversations`. */
 
-import { API_BASE, type ChatMessage } from "@/lib/api";
+import { API_BASE, type ChatMessage, type MessageRequests } from "@/lib/api";
 import { apiHeaders, checkAuthentication } from "@/lib/http";
 
 export interface ConversationSummary {
@@ -241,4 +241,11 @@ export async function deleteConversation(
     const detail = await res.text();
     throw new Error(`Deleting the conversation failed (${res.status}): ${detail}`);
   }
+}
+
+export async function fetchMessageRequests(messageId: number, signal?: AbortSignal): Promise<MessageRequests> {
+  const response = await fetch(`${API_BASE}/api/conversations/messages/${messageId}/requests`, {
+    headers: apiHeaders(), signal, cache: "no-store",
+  });
+  return parse(response, "加载请求记录");
 }

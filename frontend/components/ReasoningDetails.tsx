@@ -2,6 +2,7 @@
 
 import { useId, useState } from "react";
 import type { ChatMessage } from "@/lib/api";
+import RequestRecordDetails from "@/components/RequestRecordDetails";
 import KnowledgeReferenceDetails, { type KnowledgeReferenceSource } from "@/components/KnowledgeReferenceDetails";
 
 function durationLabel(value: number | null | undefined, pending: boolean) {
@@ -17,7 +18,7 @@ export default function ReasoningDetails({ message, replyPending, routingPending
   knowledgeSource?: KnowledgeReferenceSource;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [active, setActive] = useState<"reply" | "router" | "knowledge" | "mediator" | null>(null);
+  const [active, setActive] = useState<"reply" | "router" | "knowledge" | "mediator" | "requests" | null>(null);
   const id = useId();
   const reply = message.reasoning_content?.trim() ?? "";
   const router = message.routing_reasoning_content?.trim() ?? "";
@@ -51,7 +52,7 @@ export default function ReasoningDetails({ message, replyPending, routingPending
             {channel.pending && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-label="生成中" />}
           </button>
         ))}
-        {([{key: "knowledge", label: "对话参考 chunk"}, {key: "mediator", label: "中介节点使用建议内容"}] as const).map(channel =>
+        {([{key: "knowledge", label: "对话参考 chunk"}, {key: "mediator", label: "中介节点使用建议内容"}, {key: "requests", label: "请求记录"}] as const).map(channel =>
           <button key={channel.key} id={`${id}-${channel.key}-button`} type="button"
             onClick={() => setActive(value => value === channel.key ? null : channel.key)}
             aria-expanded={active === channel.key} aria-controls={`${id}-${channel.key}-panel`}
@@ -64,6 +65,11 @@ export default function ReasoningDetails({ message, replyPending, routingPending
         className="zen-scroll mt-2 max-h-96 overflow-y-auto rounded-xl bg-panel/60 px-3 py-3 text-[0.78rem] font-normal leading-[1.75] tracking-normal text-ink-muted [overflow-wrap:anywhere]">
         {expanded && active === view && <KnowledgeReferenceDetails messageId={message.id} pending={replyPending} view={view} source={knowledgeSource} />}
       </section>)}
+      <section id={`${id}-requests-panel`} role="region" aria-labelledby={`${id}-requests-button`}
+        hidden={active !== "requests"}
+        className="zen-scroll mt-2 max-h-96 overflow-y-auto rounded-xl bg-panel/60 px-3 py-3 text-[0.78rem] leading-[1.75] text-ink-muted [overflow-wrap:anywhere]">
+        {expanded && active === "requests" && <RequestRecordDetails message={message} snapshot={knowledgeSource?.kind === "snapshot"} pending={replyPending} />}
+      </section>
       {channels.map(channel => (
         <section key={channel.key} id={`${id}-${channel.key}-panel`} role="region"
           aria-labelledby={`${id}-${channel.key}-button`} hidden={active !== channel.key}

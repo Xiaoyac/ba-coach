@@ -300,6 +300,24 @@ async def get_conversation(
     return await _detail_with_runtime(db, conversation)
 
 
+@router.get("/messages/{message_id}/requests")
+async def message_request_records(
+    message_id: int, response: Response,
+    caller: CallerIdentity = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from ..request_records import request_records
+    response.headers["Cache-Control"] = "private, no-store"
+    conversation = (await db.execute(select(Conversation).join(
+        ConversationMessage, ConversationMessage.conversation_id == Conversation.id,
+    ).where(ConversationMessage.id == message_id,
+            ConversationMessage.role == "assistant",
+            Conversation.subject_id == caller.subject_id))).scalar_one_or_none()
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return (await request_records(db, conversation))[message_id]
+
+
 @router.get("/messages/{message_id}/knowledge", response_model=KnowledgeReferences)
 async def message_knowledge_references(
     message_id: int,

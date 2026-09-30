@@ -712,6 +712,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 model_name=mediator_metrics.get("model"), duration_ms=mediator_metrics["duration_ms"],
                 usage=mediator_metrics.get("usage"), error_code=mediator_metrics["reason"] if mediator_metrics["status"] == "fallback" else None,
                 finish_reason=mediator_metrics.get("finish_reason"),
+                request_id=mediator_metrics.get("request_id"),
                 prompt_version=mediator_metrics.get("prompt_sha256"),
                 event_metadata={k:v for k,v in mediator_metrics.items() if k not in ("guidance","cautions","selections","applications","note","usage")})
         system = build_system_segments(

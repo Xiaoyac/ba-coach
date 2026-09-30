@@ -12,6 +12,8 @@ Omit `session_id` on the first turn; the server returns the one it minted.
 
 from __future__ import annotations
 
+from ..ai_telemetry import request_event_scope
+
 import json
 import logging
 from uuid import uuid4
@@ -373,7 +375,7 @@ async def chat(
     context = _context(provider, store, stream=False, router_prompt=router_prompt)
 
     turn_lock = await store.get_turn_lock(session_id)
-    async with turn_lock:
+    async with turn_lock, request_event_scope(session_id, user_message_id):
         await _apply_conversation_thinking(context, session_id=session_id, subject_id=subject_id, state=state)
         final_state = await get_graph().ainvoke(
             state,
@@ -545,7 +547,7 @@ async def _prepare_chat_stream(
         saw_error = False
         first_visible_at = None
         turn_lock = await store.get_turn_lock(session_id)
-        async with turn_lock:
+        async with turn_lock, request_event_scope(session_id, user_message_id):
             try:
                 await _apply_conversation_thinking(context, session_id=session_id, subject_id=subject_id, state=state)
                 # Ask for the running state as well as custom token events.

@@ -94,12 +94,15 @@ async def create_share(
                     references[message_id] = KnowledgeReferences.model_validate(raw or {})
                 except ValidationError:
                     references[message_id] = KnowledgeReferences()
+        from ..request_records import request_records
+        requests = await request_records(db, conversation)
         created_at = datetime.now(timezone.utc)
         snapshot = ConversationShareSnapshot(
             title=conversation.title,
             created_at=created_at,
             messages=[SharedMessage(
                 **{**message.model_dump(), "id": index},
+                request_records=requests.get(message.id),
                 knowledge_references=(references.get(message.id, KnowledgeReferences())
                                       if message.role == "assistant" else None),
             ) for index, message in enumerate(_detail(conversation).messages, start=1)],

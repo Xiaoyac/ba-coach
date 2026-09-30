@@ -20,7 +20,15 @@ export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 export type Role = "user" | "assistant";
 
+export interface MessageRequests {
+  user_sent_at: string | null;
+  assistant_created_at: string | null;
+  requests: { stage: string; model: string | null; request_id: string | null;
+    recorded_at: string | null; duration_ms: number | null; error_code: string | null }[];
+}
+
 export interface ChatMessage {
+  request_records?: MessageRequests | null;
   id?: number | null;
   reply_to_message_id?: number | null;
   role: Role;

@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from .knowledge_references import KnowledgeReferences
 from .schemas import MessageTiming
+from .request_records import MessageRequests
 
 
 class SharedMessage(BaseModel):
@@ -15,6 +16,8 @@ class SharedMessage(BaseModel):
     id: int
     role: Literal["user", "assistant"]
     content: str
+    created_at: datetime | None = None
+    request_records: MessageRequests | None = None
     reasoning_content: str | None = None
     model_name: str | None = None
     routing_reasoning_content: str | None = None

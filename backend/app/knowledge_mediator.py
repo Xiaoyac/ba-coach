@@ -165,6 +165,7 @@ async def mediate_knowledge(*, state, module, knowledge, provider, settings, pro
             "model": completion.model,
             "usage": completion.usage,
             "finish_reason": completion.finish_reason,
+            "request_id": completion.request_id,
             # Boolean only: do not persist provider reasoning text in
             # telemetry/logs.  This flag helps detect providers that ignore
             # the requested thinking=disabled mode.
