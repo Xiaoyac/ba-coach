@@ -141,6 +141,9 @@ async def mediate_knowledge(*, state, module, knowledge, provider, settings, pro
         # switch opt-in allows a diagnostic run to request reasoning explicitly
         # without making production turns pay for it.
         include_reasoning = bool(getattr(settings, "knowledge_mediator_include_reasoning", False))
+        override = getattr(provider, "thinking_override", None)
+        if override is not None:
+            include_reasoning = override
         reasoning_effort = (
             getattr(settings, "knowledge_mediator_reasoning_effort", "low")
             if include_reasoning else None

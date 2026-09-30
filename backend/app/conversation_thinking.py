@@ -1,4 +1,4 @@
-"""Owned, administrator-only preference for the main conversational model."""
+"""Owned, administrator-only preference for all conversation model calls."""
 from sqlalchemy import select
 
 from .models import AccountSettings, Conversation, ConversationReplySettings, UserAccount

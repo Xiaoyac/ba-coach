@@ -171,6 +171,8 @@ class DoubaoProvider(LLMProvider):
     async def _router_completion(
         self, *, system: str, user: str, max_tokens: int | None = None
     ) -> Completion:
+        if self.thinking_override is True:
+            return await self.route_with_reasoning(system=system, user=user, max_tokens=max_tokens)
         try:
             timeout_seconds = getattr(
                 self._settings, "router_request_timeout_seconds", 12.0
@@ -235,12 +237,18 @@ class DoubaoProvider(LLMProvider):
             reasoning_effort = getattr(self._settings, "module_router_reasoning_effort", None)
         if reasoning_effort == "provider_default":
             reasoning_effort = None
-        if reasoning_effort == "disabled":
+        if self.thinking_override is False or (reasoning_effort == "disabled" and self.thinking_override is None):
             # Safety-mode accounts can exhaust the native reasoning quota even
             # when ordinary completion quota remains.  Keep routing available
             # with the same structured JSON call, but honestly expose no
             # reasoning channel instead of failing the whole conversation.
             return await self._router_completion(system=system, user=user, max_tokens=max_tokens)
+        if self.thinking_override is True:
+            if reasoning_effort == "disabled":
+                reasoning_effort = None
+            # Auxiliary JSON/text needs output room in addition to native reasoning.
+            max_tokens = max(max_tokens or 0, self._settings.router_reasoning_max_tokens) + int(
+                getattr(self._settings, "qwen_thinking_budget", 1024))
         try:
             client = self._client.with_options(max_retries=0) if reasoning_effort is not None else self._client
             timeout_seconds = getattr(

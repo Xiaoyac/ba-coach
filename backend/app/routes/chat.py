@@ -168,7 +168,10 @@ async def _apply_conversation_thinking(context, *, session_id, subject_id, state
     async with get_sessionmaker()() as preference_db:
         enabled = await effective_thinking(preference_db, session_id=session_id, subject_id=subject_id)
     context.provider = context.provider.with_thinking(enabled)
-    state["telemetry"] = {**(state.get("telemetry") or {}), "reply_thinking_enabled": enabled}
+    context.router_provider = context.router_provider.with_thinking(enabled)
+    if hasattr(context.knowledge_base, "with_thinking"):
+        context.knowledge_base = context.knowledge_base.with_thinking(enabled)
+    state["telemetry"] = {**(state.get("telemetry") or {}), "conversation_thinking_enabled": enabled}
 
 
 async def _resolve_provider(

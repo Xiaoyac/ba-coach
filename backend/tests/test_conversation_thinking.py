@@ -51,6 +51,12 @@ def test_permissions_ownership_persistence_and_deletion(client, sandbox_admin_he
 def test_saved_choice_reaches_request_scoped_provider_and_cannot_be_spoofed(client, sandbox_admin_headers,
         auth_headers, provider, monkeypatch, stream, store, db_sessionmaker):
     observed = []
+    routed = []
+    original_router = type(provider).route_with_reasoning
+    async def record_router(self, **kwargs):
+        routed.append(self.thinking_override)
+        return await original_router(self, **kwargs)
+    monkeypatch.setattr(type(provider), "route_with_reasoning", record_router)
     method = 'stream' if stream else 'complete'
     original = getattr(type(provider), method)
     if stream:
@@ -76,6 +82,7 @@ def test_saved_choice_reaches_request_scoped_provider_and_cannot_be_spoofed(clie
         store._sessions.clear()
         send(sandbox_admin_headers, sid)
         assert observed[-1] is enabled
+        assert routed[-1] is enabled
         assert provider.thinking_override is None
     send(auth_headers)
     assert observed[-1] is None
@@ -156,3 +163,73 @@ def test_claude_off_omits_adaptive_effort():
     assert request['thinking'] == {'type': 'disabled'}
     assert 'output_config' not in request
     assert provider._request_kwargs('system', [])['thinking'] == {'type': 'adaptive'}
+
+
+@pytest.mark.parametrize('name', ['deepseek', 'doubao'])
+async def test_total_switch_overrides_all_auxiliary_entry_points(name):
+    settings = Settings(_env_file=None, deepseek_api_key='fake', doubao_api_key='fake',
+                        doubao_model='seed-test', module_router_reasoning_effort='disabled')
+    provider = (DeepSeekProvider if name == 'deepseek' else DoubaoProvider)(settings)
+    calls = []
+    async def create_response(**kwargs):
+        calls.append(kwargs)
+        await asyncio.sleep(0)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='yes'), finish_reason='stop')],
+                               usage=None, model='test')
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create_response)))
+    client.with_options = lambda **kw: client
+    provider._client = client
+    for enabled in (False, True):
+        scoped = provider.with_thinking(enabled)
+        calls.clear()
+        await asyncio.gather(
+            scoped.classify(system='system', user='x', allowed=['yes'], default='no'),
+            scoped.route(system='system', user='x', max_tokens=128),
+            scoped.route_detailed(system='system', user='x', include_reasoning=False),
+            scoped.route_detailed(system='system', user='x', include_reasoning=True),
+            scoped.route_with_reasoning(system='system', user='x', reasoning_effort='disabled'),
+        )
+        assert len(calls) == 5
+        for call in calls:
+            body = call['extra_body']
+            assert (body['enable_thinking'] if name == 'deepseek' else body['thinking']['type'] == 'enabled') is enabled
+            if enabled:
+                assert call['max_tokens'] >= settings.router_reasoning_max_tokens + settings.qwen_thinking_budget
+            else:
+                assert 'reasoning_effort' not in call and 'thinking_budget' not in body
+    if name == 'deepseek':
+        for enabled in (False, True):
+            await provider.with_thinking(enabled).complete_without_reasoning(system='s', messages=[])
+            assert calls[-1]['extra_body']['enable_thinking'] is enabled
+    assert provider.thinking_override is None
+
+
+async def test_claude_auxiliary_switch_uses_compatible_model():
+    provider = ClaudeProvider(Settings(_env_file=None, anthropic_api_key='fake'))
+    request = AsyncMock(return_value=SimpleNamespace(stop_reason='end_turn', content=[SimpleNamespace(type='text', text='yes')]))
+    provider._client = SimpleNamespace(messages=SimpleNamespace(create=request))
+    for enabled in (False, True):
+        assert await provider.with_thinking(enabled).route(system='system', user='x') == 'yes'
+        sent = request.call_args.kwargs
+        assert sent['thinking']['type'] == ('adaptive' if enabled else 'disabled')
+        assert sent['model'] == (provider.model if enabled else provider._settings.claude_router_model)
+
+
+async def test_catalog_switch_isolated_and_cache_keys_separate():
+    from app.catalog_knowledge_base import CatalogDatabaseKnowledgeBase
+    provider = DeepSeekProvider(Settings(_env_file=None, deepseek_api_key='fake'))
+    seen = []
+    async def record(self, **kwargs):
+        seen.append(self.thinking_override)
+        return SimpleNamespace(text='{}', finish_reason='stop')
+    from unittest.mock import patch
+    kb = CatalogDatabaseKnowledgeBase(provider)
+    on, off = kb.with_thinking(True), kb.with_thinking(False)
+    with patch.object(DeepSeekProvider, 'route_detailed', record):
+        await asyncio.gather(on._ask('s', {}), off._ask('s', {}))
+    assert seen == [True, False]
+    assert kb.provider.thinking_override is None
+    assert kb.with_thinking(True) is on
+    assert on._cache_namespace() != off._cache_namespace()
+    kb.invalidate()
+    assert kb.with_thinking(True) is not on

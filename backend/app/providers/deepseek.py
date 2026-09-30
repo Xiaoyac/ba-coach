@@ -64,12 +64,14 @@ class DeepSeekProvider(LLMProvider):
         Not a router call: using its model/prompt would lose coaching context.
         Never feeds the unfinished reasoning back as evidence or retries again.
         """
+        # An explicit administrator choice applies even to a bounded recovery.
+        enabled = self.thinking_override is True
         try:
             response = await self._client.with_options(max_retries=0).chat.completions.create(
                 model=self.model,
                 messages=self._payload(system, messages),
-                max_tokens=min(self._settings.deepseek_max_tokens, 1200),
-                extra_body=native_thinking_options(self._settings, self.name, enabled=False, model=self.model),
+                max_tokens=min(self._settings.deepseek_max_tokens, 1200 + (self._settings.qwen_thinking_budget if enabled else 0)),
+                extra_body=native_thinking_options(self._settings, self.name, enabled=enabled, model=self.model),
             )
         except openai.OpenAIError as exc:
             raise ProviderError(f"{self.model} reply recovery failed") from exc
@@ -79,7 +81,8 @@ class DeepSeekProvider(LLMProvider):
             text=choice.message.content or "", model=response.model,
             usage={"input_tokens": usage.prompt_tokens if usage else 0,
                    "output_tokens": usage.completion_tokens if usage else 0,
-                   "reasoning_tokens": 0},
+                   "reasoning_tokens": getattr(getattr(usage, "completion_tokens_details", None), "reasoning_tokens", 0) or 0},
+            reasoning_content=getattr(choice.message, "reasoning_content", None) or "",
             finish_reason=choice.finish_reason,
             request_id=getattr(response, "_request_id", None),
         )
@@ -209,6 +212,8 @@ class DeepSeekProvider(LLMProvider):
     ) -> Completion:
         """Raw text from the small, fast router model, shared by `classify`
         and `route`. Never raises — returns `""` on any failure."""
+        if self.thinking_override is True:
+            return await self.route_with_reasoning(system=system, user=user, max_tokens=max_tokens)
         try:
             timeout_seconds = getattr(
                 self._settings, "router_request_timeout_seconds", 12.0
@@ -274,8 +279,14 @@ class DeepSeekProvider(LLMProvider):
             reasoning_effort = getattr(self._settings, "module_router_reasoning_effort", None)
         if reasoning_effort == "provider_default":
             reasoning_effort = None
-        if reasoning_effort == "disabled":
+        if self.thinking_override is False or (reasoning_effort == "disabled" and self.thinking_override is None):
             return await self._router_completion(system=system, user=user, max_tokens=max_tokens)
+        if self.thinking_override is True:
+            if reasoning_effort == "disabled":
+                reasoning_effort = None
+            # Auxiliary JSON/text needs output room in addition to native reasoning.
+            max_tokens = max(max_tokens or 0, self._settings.router_reasoning_max_tokens) + int(
+                getattr(self._settings, "qwen_thinking_budget", 1024))
         try:
             # A bounded mediator request must not spend its deadline on SDK retries.
             client = self._client.with_options(max_retries=0) if reasoning_effort is not None else self._client

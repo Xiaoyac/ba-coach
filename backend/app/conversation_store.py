@@ -381,7 +381,7 @@ async def finish_turn(
             "reply_recovery": metrics.get("reply_recovery"),
             **{key: metrics.get(key) for key in ("main_input", "reply_trace", "prompt_sources", "history_source", "history_messages",
                 "execution_timeline", "time_to_first_visible_content_ms", "first_visible_measurement",
-                "router_pre_reply", "context_pipeline", "reply_thinking_enabled")},
+                "router_pre_reply", "context_pipeline", "conversation_thinking_enabled")},
             # Permission-controlled execution trace; never include this in
             # ordinary user-visible chat content.
             "answer_validator": metrics.get("answer_validator"),

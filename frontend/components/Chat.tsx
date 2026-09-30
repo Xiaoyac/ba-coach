@@ -406,10 +406,10 @@ export default function Chat({
         </div>
       </header>
       {accountRole === "admin" && onToggleThinking && <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-4 py-2 sm:px-6">
-        <p className="text-xs leading-5 text-ink-muted">仅当前对话的后续回复</p>
+        <p className="text-xs leading-5 text-ink-muted">当前对话 · 全流程生效</p>
         <button type="button" role="switch" aria-checked={thinkingEnabled} aria-label="深度思考"
           onClick={onToggleThinking} disabled={busy || loading || thinkingBusy}
-          title={busy ? "回复结束后可切换" : "开关主回复的模型思考；模块判断保持原有方式"}
+          title={busy ? "回复结束后可切换" : "统一控制当前对话的回复、路由、知识筛选与信息提取的深度思考"}
           className={`inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-edge disabled:cursor-not-allowed disabled:opacity-50 ${thinkingEnabled ? "bg-accent-wash text-accent-ink" : "bg-raised text-ink-muted"}`}>
           <span>深度思考 · {thinkingBusy ? "保存中…" : thinkingEnabled ? "开" : "关"}</span>
           <span aria-hidden="true" className={`flex h-5 w-9 items-center rounded-full px-0.5 ${thinkingEnabled ? "justify-end bg-accent" : "justify-start bg-ink-faint"}`}>

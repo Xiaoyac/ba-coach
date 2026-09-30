@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import math
+from copy import copy
 from collections import Counter
 from time import perf_counter
 
@@ -30,9 +31,21 @@ class CatalogDatabaseKnowledgeBase(DatabaseKnowledgeBase):
         self._catalog = None
         self._catalog_index = None
         self._public_cache_counts = Counter()
+        self._thinking_variants = {}
+
+    def with_thinking(self, enabled):
+        if enabled is None:
+            return self
+        if enabled not in self._thinking_variants:
+            scoped = copy(self)
+            scoped._provider_cache_identity = id(self.provider)
+            scoped.provider = self.provider.with_thinking(enabled)
+            self._thinking_variants[enabled] = scoped
+        return self._thinking_variants[enabled]
 
     def invalidate(self, reason="manual"):
         super().invalidate(reason)
+        self._thinking_variants.clear()
         self._catalog = None
         self._catalog_index = None
 
@@ -66,7 +79,8 @@ class CatalogDatabaseKnowledgeBase(DatabaseKnowledgeBase):
         return {**super()._cache_namespace(), "catalog_version": VERSION,
                 "plan_prompt": PLAN_PROMPT, "judge_prompt": JUDGE_PROMPT,
                 "provider_type": type(self.provider).__qualname__,
-                "provider_instance": id(self.provider),
+                "provider_instance": getattr(self, "_provider_cache_identity", id(self.provider)),
+                "thinking_override": getattr(self.provider, "thinking_override", None),
                 "provider_name": getattr(self.provider, "name", None),
                 "model": getattr(self.provider, "model", None), "configured": configured,
                 "max_tokens": 256, "timeout_seconds": self.timeout_seconds}
