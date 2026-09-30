@@ -700,7 +700,7 @@ class ConversationReplySettings(Base):
     __tablename__ = "conversation_reply_settings"
     conversation_id: Mapped[int] = mapped_column(
         ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True)
-    thinking_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    thinking_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class ConversationMessage(Base):

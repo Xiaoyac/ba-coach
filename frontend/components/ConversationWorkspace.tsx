@@ -101,7 +101,7 @@ export default function ConversationWorkspace({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [conversationRoutingMode, setConversationRoutingMode] = useState<ConversationRoutingMode>("router_code");
-  const [thinkingEnabled, setThinkingEnabled] = useState(true);
+  const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [thinkingSaving, setThinkingSaving] = useState(false);
   const thinkingSaveRef = useRef(false);
   const [modeChooserOpen, setModeChooserOpen] = useState(false);
@@ -204,7 +204,7 @@ export default function ConversationWorkspace({
     setSessionId(detail.session_id);
     setConversationRoutingMode(detail.routing_mode ?? "router_code");
     if ((detail.revision ?? 0) >= (appliedRevisions.current.get(detail.session_id) ?? -1)) {
-      setThinkingEnabled(detail.thinking_enabled ?? true);
+      setThinkingEnabled(detail.thinking_enabled ?? false);
     }
     const turn = turns.current.get(detail.session_id);
     if (turn) {
@@ -242,7 +242,7 @@ export default function ConversationWorkspace({
     if (activeSessionIdRef.current !== detail.session_id) return;
     setConversationRoutingMode(detail.routing_mode ?? "router_code");
     if ((detail.revision ?? 0) >= (appliedRevisions.current.get(detail.session_id) ?? -1)) {
-      setThinkingEnabled(detail.thinking_enabled ?? true);
+      setThinkingEnabled(detail.thinking_enabled ?? false);
     }
 
     // Some mobile/proxy connections keep the POST body open after the server

@@ -26,8 +26,8 @@ def test_permissions_ownership_persistence_and_deletion(client, sandbox_admin_he
     other = create(client, sandbox_admin_headers)
     member = create(client, auth_headers)
     path = f"/api/conversations/{admin['session_id']}/thinking"
-    assert admin['thinking_enabled'] is True
-    assert member['thinking_enabled'] is None
+    assert admin['thinking_enabled'] is False
+    assert member['thinking_enabled'] is False
     assert client.patch(path, json={'enabled': False}).status_code == 401
     assert client.patch(path, headers=auth_headers, json={'enabled': False}).status_code == 403
     assert client.patch(f"/api/conversations/{member['session_id']}/thinking", headers=sandbox_admin_headers,
@@ -39,7 +39,7 @@ def test_permissions_ownership_persistence_and_deletion(client, sandbox_admin_he
     assert changed.json()['revision'] == admin['revision'] + 1
     store._sessions.clear()
     assert client.get(path.rsplit('/', 1)[0], headers=sandbox_admin_headers).json()['thinking_enabled'] is False
-    assert client.get(f"/api/conversations/{other['session_id']}", headers=sandbox_admin_headers).json()['thinking_enabled'] is True
+    assert client.get(f"/api/conversations/{other['session_id']}", headers=sandbox_admin_headers).json()['thinking_enabled'] is False
     assert client.delete(path.rsplit('/', 1)[0], headers=sandbox_admin_headers).status_code == 204
     async def preferences():
         async with db_sessionmaker() as db:
@@ -73,9 +73,11 @@ def test_saved_choice_reaches_request_scoped_provider_and_cannot_be_spoofed(clie
     sid = convo['session_id']
     def send(headers, session_id=None):
         response = client.post('/api/chat' + ('/stream' if stream else ''), headers=headers,
-            json={'session_id': session_id, 'message': '你好', 'thinking_enabled': False,
-                  'metadata': {'thinking_enabled': 'false', 'role': 'admin'}})
+            json={'session_id': session_id, 'message': '最近一直感到紧张，想聊一聊', 'thinking_enabled': True,
+                  'metadata': {'thinking_enabled': 'true', 'role': 'admin'}})
         assert response.status_code == 200, response.text
+    send(sandbox_admin_headers, sid)
+    assert observed[-1] is False and routed[-1] is False
     for enabled in (False, True):
         assert client.patch(f'/api/conversations/{sid}/thinking', headers=sandbox_admin_headers,
                             json={'enabled': enabled}).status_code == 200
@@ -85,7 +87,7 @@ def test_saved_choice_reaches_request_scoped_provider_and_cannot_be_spoofed(clie
         assert routed[-1] is enabled
         assert provider.thinking_override is None
     send(auth_headers)
-    assert observed[-1] is None
+    assert observed[-1] is False and routed[-1] is False
     async def demote():
         async with db_sessionmaker() as db:
             row = await db.scalar(select(AccountSettings).join(UserAccount).where(UserAccount.username == 'sandboxadmin'))
@@ -93,9 +95,23 @@ def test_saved_choice_reaches_request_scoped_provider_and_cannot_be_spoofed(clie
             await db.commit()
     asyncio.run(demote())
     send(sandbox_admin_headers, sid)
-    assert observed[-1] is None
+    assert observed[-1] is False and routed[-1] is False
     assert client.patch(f'/api/conversations/{sid}/thinking', headers=sandbox_admin_headers,
                         json={'enabled': False}).status_code == 403
+
+
+async def test_missing_identity_or_settings_never_defer_to_provider_default():
+    from app.conversation_thinking import effective_thinking
+    db = SimpleNamespace(execute=AsyncMock())
+    assert await effective_thinking(db, session_id='missing', subject_id=None) is False
+    db.execute.assert_not_awaited()
+    for row in (None, SimpleNamespace(role='user', thinking_enabled=True),
+                SimpleNamespace(role='admin', thinking_enabled=None),
+                SimpleNamespace(role='admin', thinking_enabled=False)):
+        db.execute.return_value = SimpleNamespace(one_or_none=lambda: row)
+        assert await effective_thinking(db, session_id='missing', subject_id='owner') is False
+    db.execute.return_value = SimpleNamespace(one_or_none=lambda: SimpleNamespace(role='admin', thinking_enabled=True))
+    assert await effective_thinking(db, session_id='owned', subject_id='owner') is True
 
 
 def test_setting_is_rejected_during_active_generation(client, sandbox_admin_headers, store):
