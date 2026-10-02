@@ -34,15 +34,31 @@ class Settings(BaseSettings):
     knowledge_hybrid_storage: str = ".rag-local/hybrid"
     knowledge_hybrid_preload: bool = False
     knowledge_embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    knowledge_embedding_backend: Literal["local", "openai", "dashscope"] = "local"
+    knowledge_embedding_url: str | None = None
+    knowledge_embedding_api_key: str | None = Field(default=None, repr=False)
+    knowledge_embedding_dimensions: int = Field(default=1024, ge=1, le=8192)
+    knowledge_embedding_batch_size: int = Field(default=10, ge=1, le=100)
+    knowledge_embedding_timeout_seconds: float = Field(default=15, ge=1, le=60)
     knowledge_hybrid_dense_weight: float = Field(default=0.9, ge=0, le=1)
-    knowledge_hybrid_min_cosine: float = Field(default=0.5, ge=-1, le=1)
-    knowledge_hybrid_sparse_min_coverage: float = Field(default=0.5, ge=0, le=1)
+    # Per knowledge category, BEFORE fusion. No early cosine/coverage pruning.
+    knowledge_hybrid_dense_candidates: int = Field(default=50, ge=1, le=200)
+    knowledge_hybrid_sparse_candidates: int = Field(default=50, ge=1, le=200)
+    # AstrBot's default fusion pool; independently configurable for evaluation.
     knowledge_hybrid_candidates: int = Field(default=20, ge=1, le=100)
-    knowledge_hybrid_timeout_seconds: float = Field(default=3, ge=0.1, le=15)
+    knowledge_hybrid_final_results: int = Field(default=5, ge=1, le=20)
+    knowledge_hybrid_timeout_seconds: float = Field(default=20, ge=0.1, le=60)
     # Optional dedicated reranker, disabled by default. Never uses a chat model.
     knowledge_rerank_model: str | None = None
     knowledge_rerank_url: str | None = None
-    knowledge_rerank_api_key: str | None = None
+    knowledge_rerank_api_key: str | None = Field(default=None, repr=False)
+    knowledge_rerank_backend: Literal["compatible", "dashscope"] = "compatible"
+    knowledge_rerank_timeout_seconds: float = Field(default=15, ge=1, le=60)
+    # Optional POST-rerank relevance gate. Calibrate on development examples;
+    # None matches AstrBot's default (return ranked results, no score cutoff).
+    knowledge_rerank_min_score: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    # Quality experiments must not silently accept a missing/failed reranker.
+    knowledge_hybrid_require_rerank: bool = False
     # BM25F has its own score scale. Never silently reuse P0 thresholds.
     knowledge_enhanced_min_score: float = Field(default=0.1, ge=0, allow_inf_nan=False)
     knowledge_enhanced_min_coverage: float = Field(default=0.25, ge=0, le=1)

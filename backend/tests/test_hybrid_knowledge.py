@@ -35,6 +35,7 @@ DOCS = tuple(index_chunk(id=i, source_id=1, source_name="synthetic", category=ca
 
 def synthetic(tmp_path, docs=DOCS, embedder=None):
     kb = HybridDatabaseKnowledgeBase(embedder=embedder or Embedder(), storage=tmp_path)
+    kb.settings = kb.settings.model_copy()
     kb._load_index = AsyncMock(return_value=docs)
     return kb
 
@@ -56,7 +57,9 @@ async def test_faiss_module_scope_text_dedup_same_source_and_empty(tmp_path):
     assert all(h.score_type == "relative_score_fusion" for h in hits)
     assert "kb:2" in {h.id for h in await kb.search(module="module_2", query="semantic-only", top_k=5)}
     assert "kb:3" not in {h.id for h in await kb.search(module="module_2", query="semantic-only", top_k=5)}
-    assert await kb.search(module="module_1", query="unrelated") == []
+    # Candidate recall has no absolute cosine gate. Intent/relevance must be
+    # evaluated downstream; a candidate list is not a claim of relevance.
+    assert await kb.search(module="module_1", query="unrelated")
     assert await kb.search(module="unknown", query="semantic-only") == []
 
 
@@ -158,3 +161,140 @@ async def test_optional_reranker_failure_retains_order(tmp_path, monkeypatch):
     hits = await kb.search(module="module_1", query="semantic-only")
     monkeypatch.setattr(httpx.AsyncClient, "post", AsyncMock(side_effect=httpx.ConnectError("unavailable")))
     assert await kb._rerank("query", hits) == hits
+
+
+async def test_per_category_quotas_preserve_weak_dense_and_low_coverage_sparse(tmp_path):
+    docs = tuple(index_chunk(id=i, source_id=i, source_name="test", category=category,
+        heading="", content=f"{text} number{i}") for i, category, text in (
+            (1, "BA", "alpha"), (2, "BA", "beta"), (3, "PA", "gamma"), (4, "PA", "delta")))
+    kb = synthetic(tmp_path, docs)
+    kb.settings.knowledge_hybrid_dense_candidates = 1
+    kb.settings.knowledge_hybrid_sparse_candidates = 1
+    await kb.warmup()
+    _, metrics = await kb.search_with_diagnostics(module="module_2", query="beta delta extra irrelevant tokens")
+    trace = metrics["retriever_details"]
+    assert trace["candidates_by_category"] == {"BA": {"dense": 1, "sparse": 1}, "PA": {"dense": 1, "sparse": 1}}
+    assert set(trace["sparse_ids"]) == {"kb:2", "kb:4"}
+    assert len(trace["dense_ids"]) == 2
+
+
+@pytest.mark.parametrize("backend", ["compatible", "dashscope"])
+async def test_real_rerank_order_and_wire_contract(tmp_path, monkeypatch, backend):
+    import httpx
+    kb = synthetic(tmp_path)
+    kb.settings.knowledge_rerank_backend = backend
+    kb.settings.knowledge_rerank_model = "dedicated-test-reranker"
+    kb.settings.knowledge_rerank_url = "https://example.invalid/rerank"
+    kb.settings.knowledge_rerank_api_key = "test-only"
+    kb.settings.knowledge_hybrid_require_rerank = True
+    await kb.warmup()
+    captured = []
+    async def post(self, url, *, headers, json):
+        captured.append(json)
+        documents = json["input"]["documents"] if backend == "dashscope" else json["documents"]
+        rows = [{"index": i, "relevance_score": i / 10} for i in range(len(documents))]
+        data = {"output": {"results": rows}} if backend == "dashscope" else {"results": rows}
+        data["usage"] = {"total_tokens": 42}
+        return httpx.Response(200, json=data, request=httpx.Request("POST", url))
+    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+    hits, metrics = await kb.search_with_diagnostics(module="module_1", query="semantic-only", top_k=1)
+    assert hits[0].id == "kb:5"
+    assert hits[0].score_type == "cross_encoder"
+    trace = metrics["retriever_details"]
+    assert trace["rerank"] == "completed" and trace["rerank_usage"] == {"total_tokens": 42}
+    # Rerank sees the fusion pool before final truncation.
+    body = captured[0]["input"] if backend == "dashscope" else captured[0]
+    assert len(body["documents"]) == 2
+
+
+async def test_quality_failure_is_visible_and_never_cached(tmp_path, monkeypatch):
+    import httpx
+    kb = synthetic(tmp_path)
+    kb.settings.knowledge_hybrid_require_rerank = True
+    with pytest.raises(ValueError, match="requires"):
+        await kb.warmup()
+    kb.settings.knowledge_rerank_model = "test-reranker"
+    kb.settings.knowledge_rerank_url = "https://example.invalid/rerank"
+    kb.settings.knowledge_rerank_api_key = "test-only"
+    await kb.warmup()
+    post = AsyncMock(side_effect=httpx.ConnectError("unavailable"))
+    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+    for _ in range(2):
+        hits, metrics = await kb.search_with_diagnostics(module="module_1", query="semantic-only", cache_scope=("u", "s"))
+        assert not hits and metrics["status"] == "withheld_rerank_error" and metrics["cache"] != "hit"
+    assert post.await_count == 2
+
+
+def test_sparse_fts_literals_and_separate_scales():
+    from app.knowledge_sparse import SparseIndex
+    first = SparseIndex([1, 2], [["a", "b"], ["b"]])
+    second = SparseIndex([3], [["a"]])
+    assert first.search(["a"], 50)[0][0] == 1
+    assert second.search(["a"], 50)[0][0] == 3
+    assert first.search(['a" OR b*'], 50) == []
+    assert first.search([], 50) == []
+
+
+def test_dense_rank_breaks_equal_score_and_equal_rrf_tie():
+    assert fuse([(2, .5), (1, .5)], [(1, 1), (2, 1)], {1: 'BA', 2: 'BA'})[0][0] == 2
+
+
+@pytest.mark.parametrize('rows', [
+    [{'index': 0, 'relevance_score': .7}, {'index': 0, 'relevance_score': .8}],
+    [{'index': 0, 'relevance_score': .7}],
+    [{'index': -1, 'relevance_score': .7}, {'index': 0, 'relevance_score': .8}],
+    [{'index': 0, 'relevance_score': 'NaN'}, {'index': 1, 'relevance_score': .8}],
+])
+async def test_invalid_rerank_results_fail_quality_mode(tmp_path, monkeypatch, rows):
+    import httpx
+    kb = synthetic(tmp_path)
+    kb.settings.knowledge_hybrid_require_rerank = True
+    kb.settings.knowledge_rerank_model = 'test'
+    kb.settings.knowledge_rerank_url = 'https://example.invalid/rerank'
+    kb.settings.knowledge_rerank_api_key = 'test-only'
+    await kb.warmup()
+    async def post(self, url, **kw):
+        return httpx.Response(200, json={'results': rows}, request=httpx.Request('POST', url))
+    monkeypatch.setattr(httpx.AsyncClient, 'post', post)
+    hits, metrics = await kb.search_with_diagnostics(module='module_1', query='semantic-only')
+    assert not hits and metrics['status'] == 'withheld_rerank_error'
+    assert metrics['model_calls'] == 1
+
+
+async def test_optional_relevance_cutoff_runs_after_rerank_and_cache_tracks_policy(tmp_path, monkeypatch):
+    import httpx
+    kb = synthetic(tmp_path)
+    kb.settings.knowledge_rerank_model = 'test'
+    kb.settings.knowledge_rerank_url = 'https://example.invalid/rerank'
+    kb.settings.knowledge_rerank_api_key = 'test-only'
+    await kb.warmup()
+    async def post(self, url, **kw):
+        return httpx.Response(200, json={'results': [{'index': i, 'relevance_score': .1}
+            for i in range(len(kw['json']['documents']))]}, request=httpx.Request('POST', url))
+    monkeypatch.setattr(httpx.AsyncClient, 'post', post)
+    kwargs = dict(module='module_1', query='semantic-only', cache_scope=('u','s'))
+    hits, _ = await kb.search_with_diagnostics(**kwargs)
+    assert hits
+    kb.settings.knowledge_rerank_min_score = .5
+    hits, metrics = await kb.search_with_diagnostics(**kwargs)
+    assert not hits and metrics['status'] == 'hybrid_completed' and metrics['cache'] != 'hit'
+    assert metrics['retriever_details']['rerank'] == 'completed'
+
+
+async def test_rerank_has_total_deadline_and_withholds_in_quality_profile(tmp_path, monkeypatch):
+    import httpx
+    kb = synthetic(tmp_path)
+    kb.settings.knowledge_hybrid_require_rerank = True
+    kb.settings.knowledge_rerank_model = 'test'
+    kb.settings.knowledge_rerank_url = 'https://example.invalid/rerank'
+    kb.settings.knowledge_rerank_api_key = 'test-only'
+    kb.settings.knowledge_rerank_timeout_seconds = .01
+    await kb.warmup()
+    async def stalled(*args, **kwargs):
+        await asyncio.sleep(1)
+        raise AssertionError('total deadline was not enforced')
+    monkeypatch.setattr(httpx.AsyncClient, 'post', stalled)
+    start = time.perf_counter()
+    hits, metrics = await kb.search_with_diagnostics(module='module_1', query='semantic-only')
+    assert time.perf_counter() - start < .5
+    assert not hits and metrics['status'] == 'withheld_rerank_error'

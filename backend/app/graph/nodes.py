@@ -619,6 +619,8 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 if decision.retrieve:
                     outcome = "error"
                     search_args = {"module": module_name, "query": _knowledge_query(state), "top_k": module_config.top_k}
+                    if getattr(context.knowledge_base, "ranking_mode", None) == "astrbot_hybrid":
+                        search_args["top_k"] = context.settings.knowledge_hybrid_final_results
                     if isinstance(context.knowledge_base, DatabaseKnowledgeBase):
                         subject, session = state.get("subject_id"), state.get("session_id")
                         scope = (subject, session, str(bool((state.get("memory") or {}).get("sandbox_mode")))) if subject and session else None

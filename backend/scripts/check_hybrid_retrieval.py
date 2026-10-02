@@ -48,9 +48,13 @@ async def main(args):
         if not gate.retrieve:
             report["cases"].append(row)
             continue
-        hits, metrics = await hybrid.search_with_diagnostics(module=module, query=query, top_k=4)
+        hits, metrics = await hybrid.search_with_diagnostics(module=module, query=query,
+            top_k=settings.knowledge_hybrid_final_results)
         assert metrics["status"] == "hybrid_completed", metrics
-        assert metrics["model_calls"] == 0
+        details = metrics["retriever_details"]
+        assert details["catalog_calls"] == details["mediator_calls"] == 0
+        if settings.knowledge_hybrid_require_rerank:
+            assert details["rerank"] == "completed", details
         row["hybrid"] = {"metrics": metrics, "hits": [asdict(hit) for hit in hits]}
         if name == "out_of_domain":
             assert not hits, "Unrelated question must not pull incidental word matches"
