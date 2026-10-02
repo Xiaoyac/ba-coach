@@ -298,3 +298,35 @@ async def test_rerank_has_total_deadline_and_withholds_in_quality_profile(tmp_pa
     hits, metrics = await kb.search_with_diagnostics(module='module_1', query='semantic-only')
     assert time.perf_counter() - start < .5
     assert not hits and metrics['status'] == 'withheld_rerank_error'
+
+
+async def test_sparse_reserve_rescues_evidence_outside_fusion_pool(tmp_path):
+    class DifferentEmbeddings(Embedder):
+        def passages(self, texts):
+            return [[1,0,0] if 'alpha' in t else [.1,.9,0] for t in texts]
+    docs = tuple(index_chunk(id=i, source_id=i, source_name='test', category='BA',
+                            heading='', content=text) for i,text in [(1,'alpha unrelated'),(2,'target evidence')])
+    kb = synthetic(tmp_path, docs, DifferentEmbeddings())
+    kb.settings.knowledge_hybrid_candidates = 1
+    kb.settings.knowledge_hybrid_sparse_reserve = 1
+    await kb.warmup()
+    _, metrics = await kb.search_with_diagnostics(module='module_1', query='target', top_k=1)
+    trace = metrics['retriever_details']
+    assert trace['fused_ids'] == ['kb:1']
+    assert trace['rerank_pool_ids'] == ['kb:1','kb:2']
+
+
+async def test_k3_sees_original_refusal_even_when_embedding_query_is_focused(tmp_path):
+    kb = synthetic(tmp_path)
+    kb.settings.knowledge_rerank_backend = 'k3'
+    kb.settings.knowledge_rerank_model = 'kimi-k3'
+    kb.settings.knowledge_hybrid_require_rerank = True
+    rank = AsyncMock(return_value=[])
+    from types import SimpleNamespace
+    kb._k3_reranker = SimpleNamespace(rank=rank)
+    await kb.warmup()
+    query = '我不想跳绳，只想散步'
+    hits, metrics = await kb.search_with_diagnostics(module='module_2', query=query)
+    assert not hits and metrics['retriever_details']['rerank'] == 'completed'
+    assert rank.call_args.args[0] == query
+    assert metrics['model_calls'] == 1

@@ -67,7 +67,8 @@ async def evaluate(args):
             hits, metrics = await kb.search_with_diagnostics(module=case['module'], query=case['query'], top_k=args.top_k) if gate.retrieve else ([], {'status': 'gate_skipped'})
             trace = metrics.get('retriever_details', {})
             stages = {stage: bool(labels[case['id']] & set(trace.get(key, [])))
-                      for stage, key in [('dense_target_hit', 'dense_ids'), ('sparse_target_hit', 'sparse_ids'), ('fusion_target_hit', 'fused_ids')]} if trace.get('version', '').endswith('v2') and not case['expect_empty'] else {}
+                      for stage, key in [('dense_target_hit', 'dense_ids'), ('sparse_target_hit', 'sparse_ids'),
+                                         ('fusion_target_hit', 'fused_ids'), ('rerank_pool_target_hit', 'rerank_pool_ids')]} if trace.get('version', '').endswith('v2') and not case['expect_empty'] else {}
             row[name] = {**measure(hits, labels[case['id']], expect_empty=case['expect_empty'], k=args.top_k),
                 **stages, 'elapsed_ms': round((perf_counter()-start)*1000, 3),
                 'metrics': metrics, 'hits': [asdict(h) for h in hits]}
