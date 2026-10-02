@@ -8,7 +8,7 @@ from sqlalchemy import insert, select, event
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from app.database_v2_schema import metadata as schema
-from app.models import Conversation, ConversationMessage, AIExecutionEvent, ConversationModuleProgress
+from app.models import Conversation, ConversationMessage, ConversationReplySettings, AIExecutionEvent, ConversationModuleProgress, ConversationContextCheckpoint
 from app.v2_deletion import detach_conversation
 from app.v2_repository import create_goal, start_cycle, append_memory, active_memories, initial_module
 
@@ -21,7 +21,8 @@ async def deletion_db():
         connection.execute("PRAGMA foreign_keys=ON")
     async with engine.begin() as conn:
         await conn.run_sync(schema.create_all)
-        for model in (Conversation, ConversationMessage, AIExecutionEvent, ConversationModuleProgress):
+        # Match the app-owned tables touched by the real conversation-delete endpoint.
+        for model in (Conversation, ConversationMessage, AIExecutionEvent, ConversationModuleProgress, ConversationReplySettings, ConversationContextCheckpoint):
             await conn.run_sync(model.__table__.create)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
@@ -130,9 +131,13 @@ async def test_endpoint_rejects_other_owner_and_resets_live_memory(deletion_db,m
     monkeypatch.setattr("app.v2_profile.enabled",lambda:True)
     store=InMemorySessionStore(ttl_seconds=60,max_messages=40)
     await store.get_or_create("delete-me")
+    db.add(ConversationContextCheckpoint(conversation_id=1,through_message_id=0,
+        source_digest="empty",summary="private summary",state_baseline={"private":"fact"}))
+    await db.commit()
     with pytest.raises(HTTPException) as error:
         await delete_conversation("delete-me",subject_id="b",db=db,store=store)
     assert error.value.status_code==404
     await delete_conversation("delete-me",subject_id="a",db=db,store=store)
     assert (await db.execute(select(Conversation.id).where(Conversation.id==1))).first() is None
+    assert (await db.execute(select(ConversationContextCheckpoint))).first() is None
     assert (await store.get_or_create("delete-me")).session_id != "delete-me"

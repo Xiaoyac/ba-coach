@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from .assistant_content import unwrap_assistant_message
 
 
 _THINKING_BLOCK = re.compile(
@@ -126,6 +127,7 @@ def _response_candidate(text: str) -> str | None:
 def normalize_reasoning_channels(
     reply: str | None,
     reasoning: str | None,
+    *, unwrap_message: bool = True,
 ) -> NormalizedReasoning:
     """Return a safe visible reply and a genuine provider thought trace.
 
@@ -171,6 +173,11 @@ def normalize_reasoning_channels(
     if thought_match:
         thought = thought_match.group("body").strip()
         repaired = True
+
+    if unwrap_message:
+        unwrapped = unwrap_assistant_message(visible)
+        repaired = repaired or unwrapped != visible
+        visible = unwrapped
 
     return NormalizedReasoning(
         reply=visible.strip(),

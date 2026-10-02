@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from invitation_helpers import with_test_invitation
+
 import asyncio
 import re
 
@@ -45,14 +47,14 @@ def _token(message: dict[str, str], path: str) -> str:
 def test_registration_requires_email(client: TestClient) -> None:
     payload = _registration()
     payload.pop("email")
-    assert client.post("/api/auth/register", json=payload).status_code == 422
+    assert client.post("/api/auth/register", json=with_test_invitation(client, payload)).status_code == 422
 
 
 def test_register_verify_forgot_and_reset_is_single_use(
     client: TestClient, monkeypatch
 ) -> None:
     sent = _capture_mail(monkeypatch)
-    registered = client.post("/api/auth/register", json=_registration())
+    registered = client.post("/api/auth/register", json=with_test_invitation(client, _registration()))
     assert registered.status_code == 201, registered.text
     account = registered.json()["account"]
     assert account["email"] == "recoverme@example.com"
@@ -101,7 +103,7 @@ def test_forgot_response_does_not_reveal_unknown_or_unverified_email(
     client: TestClient, monkeypatch
 ) -> None:
     sent = _capture_mail(monkeypatch)
-    assert client.post("/api/auth/register", json=_registration()).status_code == 201
+    assert client.post("/api/auth/register", json=with_test_invitation(client, _registration())).status_code == 201
     sent.clear()
     unknown = client.post(
         "/api/auth/password/forgot", json={"email": "ghost@example.com"}
@@ -118,7 +120,7 @@ def test_legacy_account_is_prompted_until_it_adds_email(
     client: TestClient, db_sessionmaker, monkeypatch
 ) -> None:
     sent = _capture_mail(monkeypatch)
-    registered = client.post("/api/auth/register", json=_registration()).json()
+    registered = client.post("/api/auth/register", json=with_test_invitation(client, _registration())).json()
 
     async def remove_email() -> None:
         async with db_sessionmaker() as db:
@@ -146,12 +148,12 @@ def test_legacy_account_is_prompted_until_it_adds_email(
 
 
 def test_email_address_is_globally_unique(client: TestClient) -> None:
-    assert client.post("/api/auth/register", json=_registration()).status_code == 201
+    assert client.post("/api/auth/register", json=with_test_invitation(client, _registration())).status_code == 201
     second = client.post(
         "/api/auth/register",
-        json=_registration(
+        json=with_test_invitation(client, _registration(
             username="anotheruser", nickname="另一个", tag="59302",
             email="RECOVERME@example.com",
-        ),
+        )),
     )
     assert second.status_code == 409

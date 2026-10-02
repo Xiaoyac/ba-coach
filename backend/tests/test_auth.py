@@ -21,6 +21,8 @@ def _register(client: TestClient, **overrides) -> dict:
         "tag": "12345",
         "birth_date": "1998-01-01",
     }
+    from invitation_helpers import issue_test_invitation
+    payload["invitation_code"] = issue_test_invitation(client)
     payload.update(overrides)
     payload.setdefault("email", f"{payload['username'].lower()}@example.com")
     return client.post("/api/auth/register", json=payload)

@@ -10,6 +10,7 @@ LangGraph injects it via `Runtime[GraphContext]`.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, TypedDict
 
 from ..config import Settings
@@ -31,6 +32,8 @@ class AgentState(TypedDict, total=False):
     # ---- Input, set by the caller ------------------------------------
     session_id: str
     user_input: str
+    user_created_at: datetime
+    assistant_created_at: datetime
     user_message_id: int | None
     turn_started_monotonic: float
     metadata: dict[str, str]
@@ -103,6 +106,7 @@ class AgentState(TypedDict, total=False):
     reply_held: bool
     # Present only after the chat transaction has actually committed consent.
     confirmation_receipt: dict
+    pa_tools_used: bool
 
     # ---- Output -------------------------------------------------------
     final_response: str
@@ -153,3 +157,5 @@ class GraphContext:
     # An isolated evaluation can freeze effective prompts without enabling DB side effects.
     prompt_snapshot: dict[str, str] | None = None
     generation: GenerationControl | None = None
+    # Set before any native write so interrupted streams cannot persist a stale graph cache.
+    pa_tools_started: bool = False

@@ -49,6 +49,9 @@ export default function Chat({
   generationStartedAt,
   onOpenSidebar,
   onShareConversation,
+  onToggleThinking,
+  thinkingEnabled = true,
+  thinkingBusy = false,
   headerContent,
   sidebarExpanded = true,
   onOpenAssessment,
@@ -81,6 +84,9 @@ export default function Chat({
   generationStartedAt?: number;
   onOpenSidebar: () => void;
   onShareConversation?: () => void;
+  onToggleThinking?: () => void;
+  thinkingEnabled?: boolean;
+  thinkingBusy?: boolean;
   headerContent?: React.ReactNode;
   sidebarExpanded?: boolean;
   /** Opens the daily record on demand — nothing here waits on it. */
@@ -158,12 +164,12 @@ export default function Chat({
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const text = input.trim();
-    if (!text || busy || loading) return;
+    if (!text || busy || loading || thinkingBusy) return;
     setInput("");
     onSend(text);
   }
 
-  const canSend = input.trim().length > 0 && !busy && !loading;
+  const canSend = input.trim().length > 0 && !busy && !loading && !thinkingBusy;
   const replyModule = routing.reply_module;
   const nextModule = routing.next_module;
   const displayedModule = nextModule ?? replyModule;
@@ -301,7 +307,7 @@ export default function Chat({
                       <span>
                         <span className="block text-[0.78rem] font-medium">账号与权限管理</span>
                         <span className="mt-0.5 block text-[0.64rem] leading-relaxed text-accent-ink/70">
-                          查看账号、授予管理员权限
+                          查看账号、管理注册邀请码
                         </span>
                       </span>
                     </button>
@@ -399,6 +405,18 @@ export default function Chat({
           </div>
         </div>
       </header>
+      {accountRole === "admin" && onToggleThinking && <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-4 py-2 sm:px-6">
+        <p className="text-xs leading-5 text-ink-muted">当前对话 · 全流程生效</p>
+        <button type="button" role="switch" aria-checked={thinkingEnabled} aria-label="深度思考"
+          onClick={onToggleThinking} disabled={busy || loading || thinkingBusy}
+          title={busy ? "回复结束后可切换" : "统一控制当前对话的回复、路由、知识筛选与信息提取的深度思考"}
+          className={`inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-edge disabled:cursor-not-allowed disabled:opacity-50 ${thinkingEnabled ? "bg-accent-wash text-accent-ink" : "bg-raised text-ink-muted"}`}>
+          <span>深度思考 · {thinkingBusy ? "保存中…" : thinkingEnabled ? "开" : "关"}</span>
+          <span aria-hidden="true" className={`flex h-5 w-9 items-center rounded-full px-0.5 ${thinkingEnabled ? "justify-end bg-accent" : "justify-start bg-ink-faint"}`}>
+            <span className="h-4 w-4 rounded-full bg-panel" />
+          </span>
+        </button>
+      </div>}
 
       {loading ? (
         <div className="flex flex-1 items-center justify-center" aria-busy="true">

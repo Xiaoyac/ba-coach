@@ -17,6 +17,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 from .config import get_settings
+from .context_pipeline import trim_history
 from .schemas import Message
 
 
@@ -151,10 +152,7 @@ class InMemorySessionStore(SessionStore):
                 # same way ``append`` trims — a resumed session must not
                 # re-enter the graph carrying more history than a live one
                 # ever would.
-                history = list(messages)
-                if len(history) > self._max_messages:
-                    overflow = len(history) - self._max_messages
-                    history = history[overflow + (overflow % 2) :]
+                history = trim_history(messages, self._max_messages)
                 session = Session(
                     session_id=session_id,
                     messages=history,
@@ -184,10 +182,7 @@ class InMemorySessionStore(SessionStore):
             session.messages.append(message)
             session.updated_at = time.time()
             if len(session.messages) > self._max_messages:
-                # Drop from the front. Keeping the count even preserves the
-                # user/assistant alternation the models expect.
-                overflow = len(session.messages) - self._max_messages
-                session.messages = session.messages[overflow + (overflow % 2) :]
+                session.messages = trim_history(session.messages, self._max_messages)
 
     async def set_module(self, session_id: str, module: str) -> None:
         async with self._lock:

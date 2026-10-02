@@ -1,5 +1,6 @@
 """Regressions for the shared conversation: missed input and stale recall."""
 import asyncio
+from xml.etree import ElementTree
 import pytest
 from sqlalchemy import insert, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -25,9 +26,14 @@ def test_interrupted_user_survives_live_cache_and_repeated_text(client, auth_hea
     endpoint = '/api/chat/stream' if stream else '/api/chat'
     response = client.post(endpoint, headers=auth_headers, json={'session_id':sid, 'message':'健身操'})
     assert response.status_code == 200, response.text
-    contents = [m.content for m in provider.seen[-1]]
-    assert contents[-2:] == ['健身操', '<user_message>健身操</user_message>']
-    assert contents.count('健身操') == 1
+    contents = [m.source_content for m in provider.seen[-1]]
+    assert contents[-2:] == ['健身操', '健身操']
+    assert contents.count('健身操') == 2
+    # Compact transport keeps both identical turns and their source timestamps.
+    user_inputs = [ElementTree.fromstring(m.content) for m in provider.seen[-1] if m.role == 'user']
+    assert [m.text for m in user_inputs[-2:]] == ['健身操', '健身操']
+    assert all(m.tag == 'message' and m.attrib.get('datetime') not in (None, 'unknown')
+               for m in user_inputs[-2:])
 
 
 @pytest.mark.asyncio

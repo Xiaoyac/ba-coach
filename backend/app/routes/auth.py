@@ -26,7 +26,7 @@ from hmac import compare_digest
 from time import monotonic
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,6 +44,7 @@ from ..account_identity import (
     normalize_display_name,
 )
 from ..models import (
+    RegistrationInvite,
     AccountEmail,
     AccountEmailToken,
     AccountHandle,
@@ -241,6 +242,8 @@ async def register(
     normalized_nickname = normalize_display_name(nickname)
     email = str(payload.email).strip()
     normalized_email = _normalise_email(payload.email)
+    from ..invitations import claim_invitation
+    await claim_invitation(db, payload.invitation_code)
     password_hash = hash_password(payload.password)
 
     if await find_account_by_username(db, username) is not None:
@@ -324,6 +327,8 @@ async def register(
             )
         await db.flush()
         token, session = await _issue_session(db, account)
+        await db.execute(update(RegistrationInvite).where(RegistrationInvite.code == payload.invitation_code)
+            .values(used_by_account_id=account.id))
         account.last_login_at = _utcnow()
         await db.commit()
     except IntegrityError:

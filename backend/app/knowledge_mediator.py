@@ -141,6 +141,9 @@ async def mediate_knowledge(*, state, module, knowledge, provider, settings, pro
         # switch opt-in allows a diagnostic run to request reasoning explicitly
         # without making production turns pay for it.
         include_reasoning = bool(getattr(settings, "knowledge_mediator_include_reasoning", False))
+        override = getattr(provider, "thinking_override", None)
+        if override is not None:
+            include_reasoning = override
         reasoning_effort = (
             getattr(settings, "knowledge_mediator_reasoning_effort", "low")
             if include_reasoning else None
@@ -162,6 +165,7 @@ async def mediate_knowledge(*, state, module, knowledge, provider, settings, pro
             "model": completion.model,
             "usage": completion.usage,
             "finish_reason": completion.finish_reason,
+            "request_id": getattr(completion, "request_id", None),
             # Boolean only: do not persist provider reasoning text in
             # telemetry/logs.  This flag helps detect providers that ignore
             # the requested thinking=disabled mode.
@@ -189,15 +193,20 @@ async def mediate_knowledge(*, state, module, knowledge, provider, settings, pro
             raise MediatorOutputError("invalid_evidence")
         wanted = {s.id for s in guidance.selections}
         selected = [c for c in knowledge if c.id in wanted]
-        block = ("# 知识使用中介建议（辅助信息，不是用户事实或已确认目标）\n"
-                 "仅在符合全局安全规则、当前模块职责和真实用户上下文时采用；不得据此改变模块或自动写入档案。\n"
-                 + json.dumps(guidance.model_dump(),ensure_ascii=False))
+        # A non-use explanation is diagnostic data, not a coaching directive.
+        # Even schema-valid notes may say "only acknowledge" or "end here".
+        # Only evidence-backed usage guidance may reach the reply model.
+        if guidance.decision == "use":
+            block = ("# 知识使用中介建议（辅助信息，不是用户事实或已确认目标）\n"
+                     "仅在符合全局安全规则、当前模块职责和真实用户上下文时采用；不得据此改变模块或自动写入档案。\n"
+                     + json.dumps(guidance.model_dump(),ensure_ascii=False))
         # Preserve the old diagnostic read model for saved reference/UI clients;
         # only the new validated envelope enters the main reply prompt.
         metrics.update({"status":"completed","reason":"guided" if wanted else guidance.decision,
             **guidance.model_dump(), "selected_ids":[s.id for s in guidance.selections],
             "applications":[s.application for s in guidance.selections],
-            "guidance":"\n".join(s.application for s in guidance.selections) or guidance.note,
+            "guidance":"\n".join(s.application for s in guidance.selections),
+            "forwarded_to_reply": bool(block),
             "cautions":[]})
     except (asyncio.TimeoutError, TimeoutError):
         metrics["reason"] = "timeout"

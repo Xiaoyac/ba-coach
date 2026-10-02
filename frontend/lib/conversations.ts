@@ -1,6 +1,6 @@
 /** Client for the sidebar's conversation list, backed by `/api/conversations`. */
 
-import { API_BASE, type ChatMessage } from "@/lib/api";
+import { API_BASE, type ChatMessage, type MessageRequests } from "@/lib/api";
 import { apiHeaders, checkAuthentication } from "@/lib/http";
 
 export interface ConversationSummary {
@@ -18,6 +18,7 @@ export const routingModeLabels: Record<ConversationRoutingMode, string> = {
 
 export interface ConversationDetail extends ConversationSummary {
   revision?: number;
+  thinking_enabled?: boolean | null;
   messages: ChatMessage[];
   next_module: string | null;
   routing_mode?: ConversationRoutingMode;
@@ -87,6 +88,13 @@ async function parse<T>(res: Response, what: string): Promise<T> {
     );
   }
   return res.json() as Promise<T>;
+}
+
+export async function setConversationThinking(sessionId: string, enabled: boolean): Promise<ConversationDetail> {
+  const res = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}/thinking`, {
+    method: "PATCH", headers: apiHeaders({ json: true }), body: JSON.stringify({ enabled }),
+  });
+  return parse(res, "保存深度思考设置");
 }
 
 export async function listConversations(
@@ -233,4 +241,11 @@ export async function deleteConversation(
     const detail = await res.text();
     throw new Error(`Deleting the conversation failed (${res.status}): ${detail}`);
   }
+}
+
+export async function fetchMessageRequests(messageId: number, signal?: AbortSignal): Promise<MessageRequests> {
+  const response = await fetch(`${API_BASE}/api/conversations/messages/${messageId}/requests`, {
+    headers: apiHeaders(), signal, cache: "no-store",
+  });
+  return parse(response, "加载请求记录");
 }

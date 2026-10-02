@@ -75,8 +75,10 @@ class ClaudeProvider(LLMProvider):
             "system": self._system_blocks(system),
             # Adaptive thinking: Claude decides per turn how much to reason.
             # Depth/cost is tuned with `effort`, not a token budget.
-            "thinking": {"type": "adaptive"},
-            "output_config": {"effort": self._settings.claude_effort},
+            **({"thinking": {"type": "disabled"}} if self.thinking_override is False else {
+                "thinking": {"type": "adaptive"},
+                "output_config": {"effort": self._settings.claude_effort},
+            }),
             "messages": [{"role": m.role, "content": m.content} for m in messages],
         }
 
@@ -171,12 +173,18 @@ class ClaudeProvider(LLMProvider):
             if (max_tokens or 0) > 512:
                 timeout_seconds = getattr(self._settings, "background_model_timeout_seconds", 30.0)
             async with timeout(timeout_seconds):
-                response = await self._client.messages.create(
-                    model=self._settings.claude_router_model,
-                    max_tokens=max_tokens or self._settings.router_max_tokens,
-                    system=system,
-                    messages=[{"role": "user", "content": user}],
-                )
+                if self.thinking_override is True:
+                    # The fast router model may not support adaptive thinking.
+                    # Use the configured thinking-capable conversational model.
+                    request = self._request_kwargs(system, [Message(role="user", content=user)])
+                    request["max_tokens"] = max(max_tokens or 0, 4096)
+                else:
+                    request = dict(model=self._settings.claude_router_model,
+                        max_tokens=max_tokens or self._settings.router_max_tokens,
+                        system=system, messages=[{"role": "user", "content": user}])
+                    if self.thinking_override is False:
+                        request["thinking"] = {"type": "disabled"}
+                response = await self._client.messages.create(**request)
             if response.stop_reason == "refusal":
                 return ""
             return "".join(

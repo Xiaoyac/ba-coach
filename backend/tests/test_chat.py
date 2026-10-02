@@ -12,6 +12,7 @@ import time
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from test_admin_accounts import admin_headers
 
 from app.models import AIExecutionEvent
 from app.providers.base import Completion, ProviderError, StreamDelta
@@ -126,7 +127,7 @@ def test_history_accumulates_across_turns(client: TestClient, provider) -> None:
 
     assert second["session_id"] == session_id
     assert second["reply"] == "saw 3 messages"
-    assert [m.content for m in provider.seen[-1]] == ["one", "saw 1 messages", "<user_message>two</user_message>"]
+    assert [m.source_content for m in provider.seen[-1]] == ["one", "saw 1 messages", "two"]
 
 
 def test_unknown_session_id_starts_fresh(client: TestClient) -> None:
@@ -185,11 +186,11 @@ def test_authenticated_provider_failure_is_recorded_in_ai_telemetry(
 
 
 def test_saved_model_preference_drives_chat(
-    client: TestClient, register, provider, monkeypatch
+    client: TestClient, admin_headers, provider, monkeypatch
 ) -> None:
     from app.routes import chat as chat_route
 
-    headers = register(username="modelchoice")
+    headers = admin_headers
     assert client.patch(
         "/api/profile", json={"preferred_provider": "doubao"}, headers=headers
     ).status_code == 200
@@ -206,14 +207,14 @@ def test_saved_model_preference_drives_chat(
 
 
 def test_explicit_provider_overrides_saved_preference(
-    client: TestClient, register, provider, monkeypatch
+    client: TestClient, admin_headers, provider, monkeypatch
 ) -> None:
     from app.routes import chat as chat_route
 
-    headers = register(username="modeloverride")
-    client.patch(
+    headers = admin_headers
+    assert client.patch(
         "/api/profile", json={"preferred_provider": "doubao"}, headers=headers
-    )
+    ).status_code == 200
     selected: list[str | None] = []
 
     def capture(name=None):
@@ -315,7 +316,7 @@ def test_stream_reply_is_persisted(client: TestClient, provider) -> None:
     follow_up = client.post(
         "/api/chat", json={"message": "again", "session_id": session_id}
     ).json()
-    assert [m.content for m in provider.seen[-1]] == ["hi", "hello", "<user_message>again</user_message>"]
+    assert [m.source_content for m in provider.seen[-1]] == ["hi", "hello", "again"]
     assert follow_up["session_id"] == session_id
 
 

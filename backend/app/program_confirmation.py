@@ -1,14 +1,12 @@
 """Shared transaction-level confirmation; callers own authentication, locking and commit."""
 import hashlib
 import json
-import re
 from types import SimpleNamespace
 from fastapi import HTTPException
-from sqlalchemy import select, update, insert, func
+from sqlalchemy import select, update, insert
 from .database_v2_schema import metadata as schema
 from .models import ConversationMessage
-from .v2_repository import (now, confirm_plan, continue_reviewed_cycle, start_cycle,
-    append_plan_draft, PLAN_WRITABLE_FIELDS, V2Conflict)
+from .v2_repository import now, confirm_plan, V2Conflict
 from .v2_workflow import TABLES, module_extraction_is_current
 from .workflow_contract import MODULE_STEP_KEYS
 
@@ -115,7 +113,7 @@ async def confirmation_readiness(
     # published the verified summary and opened the confirmation boundary.
     # Expose that phase gate here so the program API and reply guard cannot
     # accidentally promise a transition from a merely complete extraction.
-    from .workflow_readiness import CONFIRMATION_WINDOW_CLOSED, REVIEW_ACTION_MISSING
+    from .workflow_readiness import CONFIRMATION_WINDOW_CLOSED
     if module in {"module_2", "module_4"} and state.get("last_transition_reason") != "awaiting_record_confirmation":
         readiness["ready"] = False
         readiness["reasons"].append({
@@ -123,31 +121,6 @@ async def confirmation_readiness(
             "message": "当前模块尚未进入可确认状态",
         })
     review_action = None
-    if module == "module_4" and pending:
-        review_details = schema.tables["pa_review_details"]
-        detail = (await db.execute(select(review_details).where(
-            review_details.c.review_id == pending["id"]))).mappings().one_or_none()
-        review_action = detail["action"] if detail else None
-        allowed_actions = {1: {"continue"}, 3: {"adjust"},
-                           4: {"end", "pause"}, 2: {"replace_keep", "replace_pause"}}
-        valid_source = False
-        quote = detail.get("source_quote") if detail else None
-        if detail and detail["source_message_id"] and isinstance(quote, str) and quote.strip():
-            source = (await db.execute(select(ConversationMessage).where(
-                ConversationMessage.id == detail["source_message_id"],
-                ConversationMessage.conversation_id == conversation.id,
-                ConversationMessage.role == "user"))).scalar_one_or_none()
-            valid_source = bool(source and quote in source.content)
-        pause_word = r"暂停|先停|停一阵|暂时不做|先放一放"
-        action_semantics_ok = review_action not in {"pause", "replace_pause"} or bool(
-            detail and isinstance(quote, str) and re.search(pause_word, quote))
-        if (review_action not in allowed_actions.get(pending.get("review_decision"), set())
-                or not valid_source or not action_semantics_ok):
-            readiness["ready"] = False
-            readiness["reasons"].append({
-                "code": REVIEW_ACTION_MISSING,
-                "message": "复盘方向缺少聊天中的真实决定证据",
-            })
     readiness["review_action"] = review_action
     if module == "module_3":
         from .m3_contract import contract_for
@@ -201,14 +174,8 @@ async def validate_confirmation(
     if module == "module_4":
         from .m4_contract import missing_fields
         if missing_fields(pending, session_id=session_id, cycle_id=cycle_id):
-            raise HTTPException(409, "本轮执行、ABC核对、BA理解或后续方向的证据尚未完整，请继续讨论")
+            raise HTTPException(409, "本轮执行、ABC核对、BA理解或复盘收尾的证据尚未完整，请继续讨论")
     review_action = None
-    if module == "module_4":
-        review_details = schema.tables["pa_review_details"]
-        review_action = (await db.execute(select(review_details.c.action).where(review_details.c.review_id == pending["id"]))).scalar_one_or_none()
-        allowed_actions = {1: {"continue"}, 3: {"adjust"}, 4: {"end", "pause"}, 2: {"replace_keep", "replace_pause"}}
-        if review_action not in allowed_actions.get(pending["review_decision"], set()):
-            raise HTTPException(409, "请在聊天中明确下一步决定，再核对复盘记录")
     return pending, review_action
 
 
@@ -266,51 +233,9 @@ async def commit_confirmation(db, *, conversation, state, user_id, pending, mess
             confirmed_at=pending["confirmed_at"] or now()))
         cycles, goals = schema.tables["pa_cycles"], schema.tables["pa_goals"]
         await db.execute(update(cycles).where(cycles.c.id == cycle_id, cycles.c.goal_id == goal_id).values(
-            status="completed", completed_at=now()))
-        decision = pending["review_decision"]
-        if decision == 1:
-            next_cycle = await continue_reviewed_cycle(db, user_id=user_id, goal_id=goal_id,
-                cycle_id=cycle_id, conversation_id=conversation.id)
-            successor_status = (await db.execute(select(cycles.c.status).where(
-                cycles.c.id == next_cycle, cycles.c.goal_id == goal_id))).scalar_one()
-            next_module = "module_3"
-            flow = "waiting_execution" if successor_status == "waiting_execution" else "active"
-        elif decision == 3:
-            next_cycle = await start_cycle(db, user_id=user_id, goal_id=goal_id, conversation_id=conversation.id)
-            # Start a new editable version, never overwrite historical plans.
-            source_cycle = (await db.execute(select(cycles).where(cycles.c.id == cycle_id,
-                cycles.c.goal_id == goal_id))).mappings().one()
-            plans = schema.tables["module_two_record"]
-            baseline = (await db.execute(select(plans).where(
-                plans.c.id == source_cycle["module_two_record_id"], plans.c.goal_id == goal_id,
-                plans.c.record_status == "confirmed"))).mappings().one_or_none()
-            if not baseline:
-                raise V2Conflict("调整计划缺少已确认的原版本")
-            new_plan_id = await append_plan_draft(db, user_id=user_id, goal_id=goal_id,
-                fields={key: baseline[key] for key in PLAN_WRITABLE_FIELDS})
-            context_table = schema.tables["pa_plan_details"]
-            baseline_context = (await db.execute(select(context_table).where(context_table.c.plan_id == baseline["id"]))).mappings().one_or_none()
-            if baseline_context:
-                await db.execute(insert(context_table), {"plan_id": new_plan_id,
-                    **{k: baseline_context[k] for k in ("schedule_kind", "review_cadence", "difficulty", "resources")}})
-            progress = schema.tables["pa_cycle_progress"]
-            previous = (await db.execute(select(progress).where(progress.c.cycle_id == cycle_id))).mappings().one_or_none()
-            retained = {"pa_concept_understood", "values_or_intention_explored", "activity_selected"}
-            await db.execute(update(progress).where(progress.c.cycle_id == next_cycle).values(
-                module_2_steps=[step for step in (previous["module_2_steps"] or []) if step in retained] if previous else []))
-            next_module = "module_2"
-        elif decision == 2:
-            # Selection of a replacement is explicit; do not abandon other active goals.
-            await db.execute(update(goals).where(goals.c.id == goal_id).values(
-                status="paused", status_reason="user_requested_replacement_pause") if review_action == "replace_pause" else
-                update(goals).where(goals.c.id == goal_id).values(status="active", status_reason="user_kept_goal_while_replacing_focus"))
-            next_goal, next_cycle, next_module = None, None, "module_2"
-        else:
-            paused = review_action == "pause"
-            await db.execute(update(goals).where(goals.c.id == goal_id).values(
-                status="paused" if paused else "completed", closed_at=None if paused else now(),
-                status_reason="user_requested_pause" if paused else "user_requested_end"))
-            flow = "paused" if paused else "completed"
+            status="completed", completed_at=now(), updated_at=now()))
+        # Close only this attempt. M2 owns the user's next-goal choice.
+        next_goal, next_cycle, next_module = None, None, "module_2"
         from .models_business import InteractionStatus
         interaction = (await db.execute(select(InteractionStatus).where(InteractionStatus.user_id == user_id))).scalar_one_or_none()
         if not interaction:
@@ -318,6 +243,15 @@ async def commit_confirmation(db, *, conversation, state, user_id, pending, mess
             db.add(interaction)
         interaction.full_m2_m3_m4_cycle_count = int(interaction.full_m2_m3_m4_cycle_count or 0) + 1
         interaction.has_entered_closure_or_transition = True
+    next_memory = confirmation_memory(state["memory"])
+    if module == "module_4":
+        from .m4_contract import contract_for
+        next_memory["last_reviewed_cycle"] = {
+            "goal_id": goal_id, "cycle_id": cycle_id,
+            "review_id": pending["id"],
+            "after_message_id": ((contract_for(pending).get("evidence") or {}).get("review_summary_quote") or {}).get("message_id")
+                or contract_for(pending).get("assistant_message_id"),
+        }
     if cycle_id:
         # Other chats may be continuing this SAME cycle. They must not
         # keep stale module pointers or advance a completed cycle.
@@ -342,7 +276,7 @@ async def commit_confirmation(db, *, conversation, state, user_id, pending, mess
             await db.execute(update(Conversation).where(Conversation.id.in_(other_ids)).values(revision=Conversation.revision + 1))
     await db.execute(update(rt).where(rt.c.conversation_id == conversation.id).values(
         current_module=next_module, active_goal_id=next_goal, active_cycle_id=next_cycle, flow_status=flow,
-        memory=confirmation_memory(state["memory"]), row_version=state["row_version"] + 1, last_transition_reason="user_confirmed_record"))
+        memory=next_memory, row_version=state["row_version"] + 1, last_transition_reason="user_confirmed_record"))
     await db.execute(insert(schema.tables["ai_decision_logs"]), {"conversation_id": conversation.id,
         "turn_id": str(boundary_message_id or message.id), "goal_id": goal_id, "cycle_id": cycle_id, "module_name": module,
         "decision_type": "user_confirmation", "decision_value": {"record_id": pending["id"],

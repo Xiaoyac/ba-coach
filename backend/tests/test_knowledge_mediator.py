@@ -46,7 +46,9 @@ async def test_empty_evidence_skips_and_explicit_rejection_works(settings,provid
     assert metrics["status"] == "skipped" and not provider.route_calls
     provider.route_result = '{"decision":"no_match","selections":[],"note":"材料不适用。"}'
     chunks, block, metrics = await mediate_knowledge(state={"user_input":"hi"},module="module_1",knowledge=CHUNKS,provider=provider,settings=settings)
-    assert chunks == [] and block and metrics["reason"] == "no_match"
+    assert chunks == [] and block == "" and metrics["reason"] == "no_match"
+    assert metrics["note"] == "材料不适用。"
+    assert metrics["guidance"] == "" and metrics["forwarded_to_reply"] is False
 
 
 async def test_timeout_and_disable(settings,provider):

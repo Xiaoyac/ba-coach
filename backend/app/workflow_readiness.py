@@ -161,8 +161,8 @@ def evaluate_readiness(
                 missing_fields.append("scenario_type")
             if record.get("chain_confirmation_status") != "confirmed" or not record.get("confirmation_message_id"):
                 missing_fields.append("chain_confirmation_status")
-            if record.get("review_decision") not in {1, 2, 3, 4}:
-                missing_fields.append("review_decision")
+            if record.get("execution_result") not in {1, 2, 3, 4}:
+                missing_fields.append("execution_result")
 
     # M2/M3/M4 all use source-validated extraction markers.  The caller can
     # omit this check while constructing a draft, but confirmation paths set

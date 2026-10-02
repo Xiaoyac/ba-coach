@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import BirthdayPicker from "@/components/BirthdayPicker";
 import {
   ACTIVITY_ENVIRONMENT,
   ACTIVITY_INTENSITY,
@@ -144,6 +145,10 @@ export default function ProfileModal({
 
   async function handleSave() {
     if (saving || Object.keys(draft).length === 0) return;
+    if ("birth_date" in draft && !draft.birth_date) {
+      setError("请选择完整的出生年、月、日。");
+      return;
+    }
     if ("tag" in draft && !/^[0-9]{5}$/.test(draft.tag ?? "")) {
       setError("标签必须是五位数字");
       return;
@@ -254,18 +259,10 @@ export default function ProfileModal({
                   对外显示：{profile.display_id ?? "尚未设置标签"}
                 </p>
               </div>
-              <Field label="出生日期">
-                <input
-                  type="date"
-                  autoComplete="bday"
-                  value={(value("birth_date") as string) ?? ""}
-                  onChange={(e) =>
-                    set("birth_date", e.target.value || null)
-                  }
-                  className={inputClass}
-                />
-                <p className="mt-2 text-xs text-ink-faint">{profile.birth_date ? `当前 ${profile.age} 岁，年龄由生日自动计算。` : `尚未填写生日${profile.age != null ? `，旧年龄记录为 ${profile.age} 岁` : ""}。不会推测出生日期。`}</p>
-              </Field>
+              <div className="mb-4">
+                <p className="mb-1.5 text-[0.76rem] text-ink-muted">出生日期</p>
+                <BirthdayPicker value={(value("birth_date") as string) ?? ""} onChange={(next) => set("birth_date", next || null)} disabled={saving} />
+              </div>
               <Field label="居住状况">
                 <Choices
                   options={LIVING_STATUS}
@@ -275,7 +272,7 @@ export default function ProfileModal({
               </Field>
             </Section>
 
-            <Section
+            {profile.can_manage_models && <Section
               title="模型偏好"
               hint="选择接下来由哪个模型回复。这个入口是项目阶段性设置，之后可以直接移除，不影响账号和对话记录。"
             >
@@ -286,7 +283,7 @@ export default function ProfileModal({
                     ["doubao", "豆包 Doubao", "火山方舟"],
                   ] as const
                 ).map(([provider, label, description]) => {
-                  const available = profile.available_providers[provider];
+                  const available = profile.available_providers?.[provider];
                   const selected = value("preferred_provider") === provider;
                   return (
                     <button
@@ -315,12 +312,12 @@ export default function ProfileModal({
                   );
                 })}
               </div>
-              {!profile.available_providers.doubao && (
+              {!profile.available_providers?.doubao && (
                 <p className="mt-2 text-[0.66rem] leading-relaxed text-ink-faint">
                   豆包需要在后端配置 API Key 与模型 ID 后才能启用。
                 </p>
               )}
-            </Section>
+            </Section>}
 
             <Section
               title="安全边界"

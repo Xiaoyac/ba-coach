@@ -88,30 +88,22 @@ async def test_confirmed_continue_preserves_abc_acknowledgement_and_current_plan
     runtime = response.json()["runtime"]
     cycles, reviews = schema.tables["pa_cycles"], schema.tables["module_four_record"]
     review = (await db.execute(select(reviews).where(reviews.c.id == "review-draft"))).mappings().one()
-    successor = (await db.execute(select(cycles).where(cycles.c.id == runtime["active_cycle_id"]))).mappings().one()
+    assert runtime["current_module"] == "module_2" and runtime["active_cycle_id"] is None
     assert review["confirmation_message_id"] == 14
-    assert successor["module_two_record_id"] == "cycle-plan"
-    assert successor["module_three_record_id"] == "cycle-contract"
+    assert await db.scalar(select(cycles.c.status).where(cycles.c.id == "reviewed-cycle")) == "completed"
 
 
 @pytest.mark.asyncio
-async def test_confirmed_adjustment_creates_an_editable_next_plan_without_mutating_source(goal_api):
+async def test_m4_adjustment_intent_does_not_create_next_plan(goal_api):
     client, db, _ = goal_api
     await seed_review(db, decision=3)
-
     response = await client.post("/api/program/chat-a/confirm", json=await confirmation(client))
-
     assert response.status_code == 200, response.text
-    runtime = response.json()["runtime"]
-    cycles, plans = schema.tables["pa_cycles"], schema.tables["module_two_record"]
-    successor = (await db.execute(select(cycles).where(cycles.c.id == runtime["active_cycle_id"]))).mappings().one()
-    source = (await db.execute(select(plans).where(plans.c.id == "cycle-plan"))).mappings().one()
-    draft = (await db.execute(select(plans).where(
-        plans.c.goal_id == "g1", plans.c.record_status == "draft"))).mappings().one()
-    assert successor["module_two_record_id"] is None
-    assert source["record_status"] == "confirmed"
-    assert draft["id"] != source["id"]
-    assert draft["activity_content"] == source["activity_content"]
+    assert response.json()["runtime"]["active_cycle_id"] is None
+    plans = schema.tables["module_two_record"]
+    rows = (await db.execute(select(plans))).mappings().all()
+    assert len(rows) == 1 and rows[0]["id"] == "cycle-plan" and rows[0]["record_status"] == "confirmed"
+
 
 
 @pytest.mark.asyncio
@@ -126,10 +118,10 @@ async def test_m4_persist_then_step_gate_commits_dialogue_evidence(goal_api):
     assert current["runtime"]["active_cycle_id"] != "reviewed-cycle"
     reviews, cycles = schema.tables["module_four_record"], schema.tables["pa_cycles"]
     review = (await db.execute(select(reviews).where(reviews.c.id == record_id))).mappings().one()
-    next_cycle = (await db.execute(select(cycles).where(
-        cycles.c.id == current["runtime"]["active_cycle_id"]))).mappings().one()
+    assert current["runtime"]["current_module"] == "module_2"
+    assert current["runtime"]["active_cycle_id"] is None
     assert review["confirmation_message_id"] == 14
-    assert next_cycle["module_two_record_id"] == "cycle-plan"
+    assert await db.scalar(select(cycles.c.status).where(cycles.c.id == "reviewed-cycle")) == "completed"
 
 
 @pytest.mark.asyncio
@@ -185,7 +177,7 @@ async def test_latest_invalid_m4_extraction_clears_persisted_readiness(goal_api)
 
 
 @pytest.mark.asyncio
-async def test_m4_review_action_requires_real_source_quote(goal_api):
+async def test_m4_ignores_future_action_and_does_not_apply_it(goal_api):
     client, db, _ = goal_api
     await seed_review(db, decision=1)
     details = schema.tables["pa_review_details"]
@@ -193,8 +185,10 @@ async def test_m4_review_action_requires_real_source_quote(goal_api):
         source_quote="伪造的决定"))
     await db.commit()
     response = await client.post("/api/program/chat-a/confirm", json=await confirmation(client))
-    assert response.status_code == 409
-    assert "review_action_missing" in response.json()["detail"]["reason_codes"]
+    assert response.status_code == 200
+    assert response.json()["runtime"]["active_cycle_id"] is None
+    goals = schema.tables["pa_goals"]
+    assert await db.scalar(select(goals.c.status).where(goals.c.id == "g1")) == "active"
 
 
 async def _cycle_messages(db):

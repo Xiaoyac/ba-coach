@@ -379,19 +379,21 @@ async def advance_from_dialogue(db, *, session_id, user_id, assistant_message_id
             accepted = (isinstance(quote, str) and bool(quote) and quote in user.content
                         and consent_is_current(turns, latest_index))
     elif module == "module_4":
-        from .m4_contract import contract_for, repeated_decision_matches
-        evidence = contract_for(pending).get("evidence", {}).get("decision_quote", {})
-        accepted = evidence.get("message_id") == user.id
-        if not accepted and evidence.get("position", -1) < user.position:
-            # The contract keeps the first still-effective decision as the
-            # audit anchor. A later explicit repetition is still a valid
-            # confirmation after a summary/recovery turn; requiring the
-            # original quote to be the immediately preceding user row makes
-            # normal retries stall in M4 with a draft review forever.
-            details = schema.tables["pa_review_details"]
-            action = (await db.execute(select(details.c.action).where(
-                details.c.review_id == pending["id"]))).scalar_one_or_none()
-            accepted = repeated_decision_matches(user.content, action)
+        from .m4_contract import contract_for, missing_fields
+        contract = contract_for(pending)
+        acknowledgement = (contract.get("evidence") or {}).get("confirmation_quote") or {}
+        # The final summary closes the review; future-goal choice belongs to
+        # M2. The confirmed ABC source remains the review's audit anchor.
+        source = (await db.execute(select(ConversationMessage).where(
+            ConversationMessage.id == acknowledgement.get("message_id"),
+            ConversationMessage.conversation_id == conversation.id,
+            ConversationMessage.role == "user"))).scalar_one_or_none()
+        accepted = bool(source and acknowledgement.get("quote")
+            and acknowledgement["quote"] in source.content
+            and contract.get("assistant_message_id") == assistant_message_id
+            and not missing_fields(pending, session_id=session_id, cycle_id=state["active_cycle_id"]))
+        if accepted:
+            user = source
     else:
         previous = memory.get("dialogue_draft", {})
         # Bind this turn to the exact card displayed previously.  The normal

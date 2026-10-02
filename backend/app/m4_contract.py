@@ -10,7 +10,7 @@ from sqlalchemy import select
 from .clinical_fields import Spec
 from .evidence_quotes import literal_span
 
-VERSION = "m4-20260917-v1"
+VERSION = "m4-20261001-attempt-closure"
 STEPS = ("execution_reviewed", "abc_chain_completed", "barriers_identified",
          "coping_strategy_selected", "review_decision_made")
 
@@ -126,13 +126,14 @@ SPEC = Spec("m4_contract", "json", '''当前周期焦点PA的完整证据快照�
 emotion_improved(true/false/null)、emotion_quote（情绪改善/未改善的用户原话），
 pre_action_barrier(true/false/null)、barrier_quote（未开始前有/无障碍的用户原话），
 window_closed(true/false/null)、window_quote（本次执行窗口已经过去的用户原话），
+final_non_execution(true/false/null)、final_non_execution_quote（用户最终明确本轮不执行的原话；犹豫、不想做、讨论困难、稍后再试都不能认定最终不执行），
 summary_quote（教练让用户核对的ABC事件分析完整原文，与ai_abc_chain_summary一致；应在confirmation_quote之前，绝不能用最后复盘收尾替代已核对的ABC），
 chain_status(unconfirmed/confirmed/corrected)、confirmation_quote（该总结之后用户认可/纠正的原话），
 education_quote（ABC确认之后已实际提供的BA教育原文），understanding_quote（之后用户基本理解的原话），
 core_questions_resolved(true仅没有未答核心疑问)，
 difficulty_status(present/none/unknown)、difficulty_quote（用户确认本次困难或无需处理的原话），
 strategy_quote（教育之后用户共同选择原目标应对的原话；需与next_coping_strategy一致），
-decision_quote（用户明确下一步方向的原话，与review_decision及review_followup一致），
+decision_quote（可选，仅记录用户主动表达的下一步意向；M4不要求决定保留/替换目标，也不据此变更目标），
 同一后续决定被重复表达且没有撤回或改变时，decision_quote保留本周期首次仍有效且发生在理解之后的决定，不因后来的重复确认让既有收尾摘要过期。若用户实质改变方向或撤回，必须改用新决定，旧总结不能完成新决定。
 review_followup.source_quote必须来自decision_quote所指的同一条用户发言，action对应同一个决定；不能分别选取不同轮次或已撤回的方向。
 review_summary_quote（教练实际给出的复盘总结原文，review_summary必须为这段原文）。
@@ -204,7 +205,7 @@ async def cycle_messages(db, messages):
 
 
 def normalize(data, messages, *, session_id, cycle_id, assistant_message_id, existing=None,
-              cycle_status=None):
+              cycle_status=None, tool_closing_summary=None):
     raw = data.get("m4_contract")
     raw = raw if isinstance(raw, dict) else {}
     evidence = {}
@@ -242,7 +243,7 @@ def normalize(data, messages, *, session_id, cycle_id, assistant_message_id, exi
 
     for key in ("phase_a_quote", "phase_b_quote", "phase_c_quote", "emotion_quote", "barrier_quote",
                 "window_quote", "confirmation_quote", "understanding_quote", "difficulty_quote",
-                "strategy_quote", "decision_quote"):
+                "strategy_quote", "decision_quote", "final_non_execution_quote"):
         quote(key, "user")
     for key in ("summary_quote", "education_quote", "review_summary_quote"):
         quote(key, "assistant")
@@ -587,7 +588,12 @@ def normalize(data, messages, *, session_id, cycle_id, assistant_message_id, exi
         strategy_ok = True
     if not strategy_ok:
         values["next_coping_strategy"] = None
-    coping_ok = edu_ok and (decision in {2, 3, 4} or no_difficulty or (has_difficulty and strategy_ok))
+    final_non_execution = (not_started and raw.get("final_non_execution") is True
+                           and pos("final_non_execution_quote") >= 0)
+    # Reluctance before trying is not a final outcome. Never create a new
+    # attempt merely because we discussed barriers to this one.
+    attempt_ended = bool(occurred or (not_started and (closed or final_non_execution)))
+    coping_ok = edu_ok and (final_non_execution or decision in {2, 3, 4} or no_difficulty or (has_difficulty and strategy_ok))
     if (prior_decision_reuse and pos("review_summary_quote") < 0
             and isinstance(old_evidence.get("review_summary_quote"), dict)):
         evidence["review_summary_quote"] = dict(old_evidence["review_summary_quote"])
@@ -611,8 +617,22 @@ def normalize(data, messages, *, session_id, cycle_id, assistant_message_id, exi
             and bool(_text(values.get("review_summary")))
             and pos("review_summary_quote") > max(pos("understanding_quote"), pos("decision_quote"))):
         summary_final = True
+    # A native closing operation may publish its own assistant-authored summary.
+    # This is NOT a fabricated conversation/user quote. Only the tool executor
+    # supplies this parameter; every clinical/consent gate above still uses real
+    # messages. The receipt and displayed summary remain separately auditable.
+    if (tool_closing_summary and isinstance(tool_closing_summary, dict)
+            and tool_closing_summary.get("call_id")
+            and _text(tool_closing_summary.get("text"))
+            and chain_ok and edu_ok and coping_ok and attempt_ended):
+        values["review_summary"] = tool_closing_summary["text"]
+        evidence["review_summary_quote"] = {
+            "source": "assistant_tool", "tool_call_id": tool_closing_summary["call_id"],
+            "boundary_message_id": assistant_message_id, "quote": values["review_summary"],
+        }
+        summary_final = True
     gates = [bool(scenario and result), chain_ok, edu_ok, coping_ok,
-             bool(summary_final and decision and pos("decision_quote") >= pos("understanding_quote"))]
+             bool(summary_final and attempt_ended)]
     completed = []
     for key, ok in zip(STEPS, gates):
         if not ok:
@@ -620,7 +640,7 @@ def normalize(data, messages, *, session_id, cycle_id, assistant_message_id, exi
         completed.append(key)
     contract = {"version": VERSION, "session_id": session_id, "cycle_id": cycle_id,
                 "assistant_message_id": assistant_message_id, "facts_hash": facts_hash,
-                "completed_steps": completed, "missing_fields": ["m4_milestone_" + str(i + 1) for i, key in enumerate(STEPS) if key not in completed],
+                "attempt_ended": attempt_ended, "completed_steps": completed, "missing_fields": ["m4_milestone_" + str(i + 1) for i, key in enumerate(STEPS) if key not in completed],
                 "evidence": evidence}
     values["phase_c"] = {**(values["phase_c"] or {}), "schema_version": 1, "_m4_contract": contract}
     return values
@@ -631,6 +651,8 @@ def missing_fields(record, *, session_id=None, cycle_id=None):
     if not contract or (session_id and contract.get("session_id") != session_id) or (cycle_id and contract.get("cycle_id") != cycle_id):
         return ["m4_evidence_refresh"]
     missing = list(contract.get("missing_fields", ["m4_evidence_refresh"]))
+    if contract.get("version") != VERSION or not contract.get("attempt_ended"):
+        missing.append("m4_attempt_closure_refresh")
     if record.get("chain_confirmation_status") != "confirmed" or not record.get("confirmation_message_id"):
         missing.append("chain_confirmation_status")
     if record.get("scenario_type") not in {"A", "B", "C"}:

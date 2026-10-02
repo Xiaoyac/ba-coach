@@ -119,78 +119,50 @@ async def confirmation(client):
 
 
 @pytest.mark.asyncio
-async def test_decision_one_continues_same_goal_plan_and_contract(goal_api):
+async def test_decision_one_closes_attempt_and_defers_goal_choice(goal_api):
     client, db, _ = goal_api
     await seed_review(db, decision=1)
     payload = await confirmation(client)
-
     response = await client.post("/api/program/chat-a/confirm", json=payload)
     assert response.status_code == 200, response.text
-    runtime = response.json()["runtime"]
-    assert runtime["current_module"] == "module_3"
-    assert runtime["flow_status"] == "waiting_execution"
-    assert runtime["active_goal_id"] == "g1"
-    assert runtime["active_cycle_id"] != "reviewed-cycle"
-
-    cycles = schema.tables["pa_cycles"]
-    successor = (await db.execute(select(cycles).where(
-        cycles.c.id == runtime["active_cycle_id"]))).mappings().one()
-    source = (await db.execute(select(cycles).where(cycles.c.id == "reviewed-cycle"))).mappings().one()
-    assert source["status"] == "completed"
-    assert successor["ordinal"] == 2 and successor["status"] == "waiting_execution"
-    assert successor["module_two_record_id"] == "cycle-plan"
-    assert successor["module_three_record_id"] == "cycle-contract"
-    review = (await db.execute(select(schema.tables["module_four_record"]).where(
-        schema.tables["module_four_record"].c.id == "review-draft"))).mappings().one()
-    # The final web click is audit evidence; this remains the prior in-chat ABC acknowledgement.
-    assert review["confirmation_message_id"] == 14
-    assert (await db.execute(select(schema.tables["module_four_record"]).where(
-        schema.tables["module_four_record"].c.cycle_id == successor["id"]))).mappings().one_or_none() is None
-
-
-@pytest.mark.asyncio
-async def test_decision_three_starts_m2_with_a_new_editable_baseline_and_cannot_replay(goal_api):
-    client, db, _ = goal_api
-    await seed_review(db, decision=3)
-    payload = await confirmation(client)
-
-    response = await client.post("/api/program/chat-a/confirm", json=payload)
-    assert response.status_code == 200, response.text
-    runtime = response.json()["runtime"]
-    assert (runtime["current_module"], runtime["flow_status"], runtime["active_goal_id"]) == ("module_2", "active", "g1")
-
-    cycles, plans = schema.tables["pa_cycles"], schema.tables["module_two_record"]
-    successor = (await db.execute(select(cycles).where(cycles.c.id == runtime["active_cycle_id"]))).mappings().one()
-    draft = (await db.execute(select(plans).where(
-        plans.c.goal_id == "g1", plans.c.record_status == "draft"))).mappings().one()
-    assert successor["ordinal"] == 2 and successor["status"] == "planning"
-    assert successor["module_two_record_id"] is None
-    assert draft["id"] != "cycle-plan" and draft["version_no"] == 2
-    assert {key: draft[key] for key in ("activity_content", "schedule_text", "location", "duration_minutes")} == {
-        "activity_content": "晚饭后散步十分钟", "schedule_text": "每天晚饭后",
-        "location": "小区", "duration_minutes": 10,
-    }
+    state = response.json()["runtime"]
+    assert (state["current_module"], state["active_goal_id"], state["active_cycle_id"]) == ("module_2", None, None)
+    cycles, plans, reviews = (schema.tables[n] for n in ("pa_cycles", "module_two_record", "module_four_record"))
+    assert (await db.execute(select(cycles.c.id))).scalars().all() == ["reviewed-cycle"]
+    assert await db.scalar(select(cycles.c.status).where(cycles.c.id == "reviewed-cycle")) == "completed"
+    assert await db.scalar(select(reviews.c.confirmation_message_id).where(reviews.c.id == "review-draft")) == 14
+    assert (await db.execute(select(plans.c.id))).scalars().all() == ["cycle-plan"]
     assert (await client.post("/api/program/chat-a/confirm", json=payload)).status_code == 409
 
 
+
 @pytest.mark.asyncio
-async def test_decision_one_cycle_creation_failure_rolls_back_confirmation(goal_api, monkeypatch):
-    from app.v2_repository import V2Conflict
+async def test_decision_three_returns_to_m2_without_creating_plan_and_cannot_replay(goal_api):
+    client, db, _ = goal_api
+    await seed_review(db, decision=3)
+    payload = await confirmation(client)
+    response = await client.post("/api/program/chat-a/confirm", json=payload)
+    assert response.status_code == 200, response.text
+    state = response.json()["runtime"]
+    assert (state["current_module"], state["active_goal_id"], state["active_cycle_id"]) == ("module_2", None, None)
+    cycles, plans, reviews = (schema.tables[n] for n in ("pa_cycles", "module_two_record", "module_four_record"))
+    assert (await db.execute(select(cycles.c.id))).scalars().all() == ["reviewed-cycle"]
+    assert await db.scalar(select(cycles.c.status).where(cycles.c.id == "reviewed-cycle")) == "completed"
+    assert await db.scalar(select(reviews.c.confirmation_message_id).where(reviews.c.id == "review-draft")) == 14
+    assert (await db.execute(select(plans.c.id))).scalars().all() == ["cycle-plan"]
+    assert (await client.post("/api/program/chat-a/confirm", json=payload)).status_code == 409
+
+
+
+@pytest.mark.asyncio
+async def test_review_closure_does_not_call_cycle_creation(goal_api, monkeypatch):
     client, db, _ = goal_api
     await seed_review(db, decision=1, with_contract=False)
-    payload = await confirmation(client)
-    async def unavailable(*args, **kwargs):
-        raise V2Conflict("simulated cycle creation failure")
-    monkeypatch.setattr("app.v2_repository.start_cycle", unavailable)
-
-    response = await client.post("/api/program/chat-a/confirm", json=payload)
-    assert response.status_code == 409
-    cycles, reviews, runtime = (schema.tables[name] for name in (
-        "pa_cycles", "module_four_record", "conversation_runtime_states"))
-    source = (await db.execute(select(cycles).where(cycles.c.id == "reviewed-cycle"))).mappings().one()
-    review = (await db.execute(select(reviews).where(reviews.c.id == "review-draft"))).mappings().one()
-    state = (await db.execute(select(runtime).where(runtime.c.conversation_id == 1))).mappings().one()
-    assert source["status"] == "waiting_execution"
-    assert review["record_status"] == "draft"
-    assert state["active_cycle_id"] == "reviewed-cycle"
-    assert (await db.execute(select(cycles.c.id).where(cycles.c.goal_id == "g1"))).scalars().all() == ["reviewed-cycle"]
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("M4 must not start the next attempt")
+    monkeypatch.setattr("app.v2_repository.start_cycle", forbidden)
+    response = await client.post("/api/program/chat-a/confirm", json=await confirmation(client))
+    assert response.status_code == 200, response.text
+    cycles = schema.tables["pa_cycles"]
+    assert (await db.execute(select(cycles.c.id))).scalars().all() == ["reviewed-cycle"]
+    assert await db.scalar(select(cycles.c.status).where(cycles.c.id == "reviewed-cycle")) == "completed"

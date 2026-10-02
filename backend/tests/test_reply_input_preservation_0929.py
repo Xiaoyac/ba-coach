@@ -5,6 +5,7 @@ the streaming path used online. No real model or external service is called.
 """
 
 from copy import deepcopy
+from xml.etree import ElementTree as ET
 from dataclasses import replace
 
 import pytest
@@ -91,16 +92,23 @@ async def test_reply_projection_preserves_history_facts_and_admin_policy(
         state, Runtime(context=context), writer=events.append,
     )
 
-    # All 80 prior messages are retained verbatim and in their original order;
-    # only the current input receives the existing data envelope.
+    # Timestamp metadata decorates request copies, never the original body.
     expected = history + [Message(
-        role="user", content=f"<user_message>{current}</user_message>",
+        role="user", content=current,
     )]
     assert len(provider.seen) == 1
-    assert provider.seen[0] == expected
+    assert [(m.role, m.source_content) for m in provider.seen[0]] == [
+        (m.role, m.content) for m in expected
+    ]
+    for actual, original in zip(provider.seen[0], expected):
+        if actual.role == "assistant":
+            assert actual.content == original.content
+        else:
+            assert actual.content.startswith('<message datetime="unknown">')
+            assert ET.fromstring(actual.content).text == original.content
     assert len(provider.seen[0]) == 81
     assert result["telemetry"]["main_input"]["messages"] == [
-        {"role": message.role, "content": message.content} for message in expected
+        {"role": message.role, "content": message.content} for message in provider.seen[0]
     ]
 
     system = as_text(provider.systems[0])
@@ -162,3 +170,42 @@ def test_runtime_projection_keeps_legacy_facts_without_exposing_control_keys():
     ):
         assert hidden not in text
     assert memory == before
+
+
+def test_legacy_policy_adaptation_does_not_rewrite_quoted_memory():
+    from app.context_pipeline import prepare_context
+    from app.prompts import SystemPromptSegment
+
+    markup = "<user_message>用户讨论的标签原文</user_message>"
+    policy = SystemPromptSegment(markup, cacheable=True)
+    memory = SystemPromptSegment(markup, cacheable=False)
+    result = prepare_context(system=[policy, memory], history=[],
+        user_input=markup, max_history_messages=80)
+    assert result.system[0].text == "<message>用户讨论的标签原文</message>"
+    assert result.system[1].text == markup
+    assert policy.text == memory.text == markup
+    assert ET.fromstring(result.messages[-1].content).text == markup
+    assert result.messages[-1].source_content == markup
+
+
+@pytest.mark.parametrize("wrapped", [
+    '<message><datetime>2026-09-30T12:00:00+08:00</datetime><content>你好 &amp; 再聊。</content></message>',
+    '<message datetime="260930-12:00">你好 &amp; 再聊。</message>',
+])
+def test_mixed_legacy_assistant_envelopes_preserve_current_compact_wire_format(wrapped):
+    from app.context_pipeline import prepare_context
+    from app.graph.nodes import VisibleReplyBuffer
+
+    original = Message(role="assistant", content=wrapped)
+    result = prepare_context(system=[], history=[original], user_input=wrapped,
+        max_history_messages=80)
+    assert result.messages[0].content == "你好 & 再聊。"
+    assert original.content == wrapped
+    assert result.messages[-1].content.startswith('<message datetime="unknown">')
+    assert ET.fromstring(result.messages[-1].content).text == wrapped
+    assert result.messages[-1].source_content == wrapped
+    buffer = VisibleReplyBuffer.create()
+    emitted = [part for char in wrapped for part in buffer.push(char)]
+    visible, remaining = buffer.finish()
+    assert visible == "你好 & 再聊。"
+    assert "".join(emitted + remaining) == visible

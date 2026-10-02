@@ -82,7 +82,7 @@ MODULE_TWO: tuple[Spec, ...] = (
     Spec(
         "target_activity_time",
         "datetime",
-        '计划执行时间，ISO 格式 "YYYY-MM-DD HH:MM:SS"；只说了「明天下午」这类模糊时间就给 null',
+        '始终给 null。标准计划时间仅由服务器根据用户 schedule_text 原话及该消息的发送时间计算；不得自行换算日期、补年份或编造时刻。自然语言安排保留在 schedule_text。',
     ),
     Spec("target_activity_location", "varchar", "在哪里做（Where）", 255),
     Spec("target_activity_duration_minutes", "int", "计划时长，单位分钟，整数"),
@@ -146,7 +146,7 @@ MODULE_FOUR: tuple[Spec, ...] = (
     Spec(
         "review_decision",
         "int",
-        "复盘决定：1=继续原目标，2=更换目标，3=调整目标，4=结束目标；无法判断给 null",
+        "可选历史意向：1=继续原目标，2=更换目标，3=调整目标，4=结束目标；未表达给null。M4不要求该字段，正式保留/替换留到下一轮M2决定",
     ),
     Spec("review_summary", "text", "本轮复盘总结"),
 )

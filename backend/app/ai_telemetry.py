@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from decimal import Decimal
 from typing import Any
 
@@ -15,6 +17,18 @@ from .config import get_settings
 from .models import AIExecutionEvent, Conversation
 
 logger = logging.getLogger(__name__)
+
+_turn_scope: ContextVar[tuple[str, int | None] | None] = ContextVar("ai_event_turn", default=None)
+
+
+@asynccontextmanager
+async def request_event_scope(session_id: str, user_message_id: int | None):
+    token = _turn_scope.set((session_id, user_message_id))
+    try:
+        yield
+    finally:
+        _turn_scope.reset(token)
+
 
 
 def _pricing() -> tuple[dict[str, dict[str, float]], str]:
@@ -69,8 +83,21 @@ async def add_ai_event(
                 select(Conversation.id).where(Conversation.session_id == session_id)
             )
         ).scalar_one_or_none()
+    scope = _turn_scope.get()
+    if scope and scope[0] == session_id and scope[1] is not None:
+        event_metadata = {**(event_metadata or {}), "user_message_id": scope[1]}
     usage = usage or {}
     cost, pricing_version = estimate_cost(model_name, usage)
+    cache_metrics = {
+        key: usage[key]
+        for key in ("cache_read_input_tokens", "cache_creation_input_tokens")
+        if type(usage.get(key)) is int and usage[key] >= 0
+    }
+    # Keep provider cache observations in existing JSON without a schema change.
+    # Do not infer zero for absent metrics or mutate metadata reused by callers.
+    metadata = dict(event_metadata) if event_metadata is not None else None
+    if cache_metrics:
+        metadata = {**(metadata or {}), **cache_metrics}
     event = AIExecutionEvent(
         conversation_id=conversation_id,
         assistant_message_id=assistant_message_id,
@@ -89,7 +116,7 @@ async def add_ai_event(
         prompt_version=prompt_version,
         estimated_cost_usd=cost,
         pricing_version=pricing_version,
-        event_metadata=event_metadata,
+        event_metadata=metadata,
     )
     db.add(event)
     return event

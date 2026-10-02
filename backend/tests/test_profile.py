@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
+from test_admin_accounts import admin_headers
 
 
 @pytest.fixture
@@ -115,7 +116,8 @@ def test_registration_fields_are_visible(client: TestClient, register) -> None:
     assert body["current_module"] == "开场"
 
 
-def test_model_preference_defaults_to_deepseek(client: TestClient, headers) -> None:
+def test_model_preference_defaults_to_deepseek(client: TestClient, admin_headers) -> None:
+    headers = admin_headers
     response = client.get("/api/profile", headers=headers)
     assert response.status_code == 200, response.text
     assert response.headers["cache-control"] == "no-store"
@@ -149,7 +151,8 @@ def test_a_partial_edit_leaves_everything_else_alone(
     assert body["physical_condition"] == ["易疲劳"]
 
 
-def test_model_preference_round_trips(client: TestClient, headers) -> None:
+def test_model_preference_round_trips(client: TestClient, admin_headers) -> None:
+    headers = admin_headers
     body = _patch(client, headers, preferred_provider="doubao")
     assert body["preferred_provider"] == "doubao"
     assert _get(client, headers)["preferred_provider"] == "doubao"

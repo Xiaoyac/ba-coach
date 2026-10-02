@@ -186,6 +186,12 @@ async def apply_pre_reply_decision(state, context, decision):
         conversation_id = conversation.id
         module = runtime["current_module"]
         working = {**state, "current_module": module, "active_cycle_id": runtime["active_cycle_id"]}
+        if module == "module_4" and not runtime["active_cycle_id"] and (runtime["memory"] or {}).get("last_reviewed_cycle"):
+            rt = schema.tables["conversation_runtime_states"]
+            await db.execute(update(rt).where(rt.c.conversation_id == conversation.id).values(
+                current_module="module_2", flow_status="active", row_version=rt.c.row_version + 1))
+            await db.commit()
+            module = "module_2"
         # Card acceptance is independently verified even if the Router keeps M2.
         if module == "module_2":
             from .dialogue_confirmation import precommit_user_confirmation

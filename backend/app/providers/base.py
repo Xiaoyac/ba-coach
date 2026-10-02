@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from copy import copy
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from typing import Literal
@@ -38,11 +39,12 @@ class Completion:
 class StreamDelta:
     """One provider stream fragment, classified before graph transport."""
 
-    kind: Literal["reasoning", "content", "usage"]
+    kind: Literal["reasoning", "content", "usage", "tool_calls"]
     text: str = ""
     usage: dict[str, int] = field(default_factory=dict)
     finish_reason: str | None = None
     request_id: str | None = None
+    tool_calls: list[dict] | None = None
 
 
 def as_segments(system: SystemPrompt) -> list[SystemPromptSegment]:
@@ -65,6 +67,24 @@ class LLMProvider(ABC):
     #: Configured model id for the main (non-router) calls. Reported back to
     #: the caller, and used when streaming, where no model id comes back.
     model: str = ""
+    thinking_override: bool | None = None
+    supports_native_tools: bool = False
+
+    async def stream_tools(self, *, system, messages, tools, tool_choice="auto"):
+        """Native provider protocol; never parse pseudo-tools from reply text."""
+        if not self.supports_native_tools:
+            raise ProviderError(f"{self.name} has no configured native tool transport")
+        from .tool_calling import stream_openai_tools
+        async for delta in stream_openai_tools(self, system=system, messages=messages,
+                                              tools=tools, tool_choice=tool_choice):
+            yield delta
+
+    def with_thinking(self, enabled: bool | None) -> "LLMProvider":
+        # Registry clients are shared. Copy only the wrapper; never mutate its
+        # settings or override for another concurrent conversation.
+        scoped = copy(self)
+        scoped.thinking_override = enabled
+        return scoped
 
     @abstractmethod
     async def complete(

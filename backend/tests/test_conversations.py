@@ -9,6 +9,7 @@ Identity comes from a real registered account rather than an invented header:
 """
 
 from __future__ import annotations
+from xml.etree import ElementTree
 
 import pytest
 from fastapi.testclient import TestClient
@@ -55,17 +56,23 @@ def test_create_conversation_persists_opening_and_seeds_agent_history(
     assert detail["title"] == "新对话"
     assert detail["next_module"] is None
     assert isinstance(detail["messages"][0]["id"], int)
+    from datetime import datetime, timedelta
+
+    opening_created_at = detail["messages"][0]["created_at"]
+    assert isinstance(opening_created_at, str)
+    assert datetime.fromisoformat(opening_created_at.replace("Z", "+00:00")).utcoffset() == timedelta(0)
     assert detail["messages"] == [
         {
             "id": detail["messages"][0]["id"],
+            "reply_to_message_id": None,
             "role": "assistant",
             "content": OPENING_MESSAGE_TEXT,
+            "created_at": opening_created_at,
             "reasoning_content": None,
             "model_name": None,
             "routing_reasoning_content": None,
             "router_model_name": None,
             "timing": None,
-            "reply_to_message_id": None,
         }
     ]
 
@@ -75,9 +82,9 @@ def test_create_conversation_persists_opening_and_seeds_agent_history(
         headers=headers,
     )
     assert response.status_code == 200, response.text
-    assert [message.content for message in provider.seen[-1]] == [
+    assert [message.source_content for message in provider.seen[-1]] == [
         OPENING_MESSAGE_TEXT,
-        "<user_message>我叫小雨</user_message>",
+        "我叫小雨",
     ]
 
     refreshed = client.get(
@@ -88,6 +95,7 @@ def test_create_conversation_persists_opening_and_seeds_agent_history(
         "id": detail["messages"][0]["id"],
         "role": "assistant",
         "content": OPENING_MESSAGE_TEXT,
+        "created_at": opening_created_at,
         "reasoning_content": None,
         "model_name": None,
         "routing_reasoning_content": None,
@@ -656,7 +664,7 @@ def test_a_resumed_session_still_carries_its_history(
         "/api/chat", json={"message": "二", "session_id": session_id}, headers=headers
     )
     # The model saw the rehydrated history, not a bare first turn.
-    assert [m.content for m in provider.seen[-1]] == ["一", "saw 1 messages", "<user_message>二</user_message>"]
+    assert [m.source_content for m in provider.seen[-1]] == ["一", "saw 1 messages", "二"]
 
 
 def test_a_resumed_session_keeps_the_router_module(

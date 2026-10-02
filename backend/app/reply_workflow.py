@@ -101,13 +101,14 @@ def workflow_prompt(authority, *, routing_mode="router_code"):
     keys = ("available", "current_module", "flow_status", "goal_selected", "plan_confirmed",
             "recording_status", "recording_decision_scope")
     facts = {key: authority[key] for key in keys if key in authority}
+    if authority.get("current_module") == "module_1":
+        facts.pop("goal_selected", None)
+        facts.pop("plan_confirmed", None)
     prompt = ("# 已提交业务状态\n" + json.dumps(facts, ensure_ascii=False)
-              + "\n字段缺失或尚未保存不代表用户未表达；状态不可用时不能声称已保存或已切换。")
+              + "\n字段缺失或尚未保存不代表用户未表达；这里只说明保存结果，不指定话题、下一问或重复确认。状态不可用时不能声称已保存或已切换。")
     if routing_mode == "router_only":
-        prompt += ("\n本对话采用仅 Router 路由：当前模块已由 Router 选择并提交，按本轮模块提示词回应。"
-                   "上述 flow_status、确认状态、草稿和已记录信息仅用于区分真实保存事实，"
-                   "不构成停留、退回、补齐字段或重复索要确认的指令，也不是继续对话的前提。"
-                   "模块切换本身不表示目标、计划或记录已经保存、确认或执行；不得据此声称业务已完成。")
+        prompt += ("\n当前模块已由 Router 选择并提交，草稿完整性不是继续对话的前提。"
+                   "模块切换本身不表示目标、计划或记录已经保存、确认或执行。")
     return prompt
 
 

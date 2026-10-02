@@ -11,6 +11,7 @@ import openai
 from ..config import Settings
 from ..schemas import Message
 from .deadline import timeout
+from .request_ids import request_id
 from ..generation_policy import main_thinking_options
 from .base import (
     Completion,
@@ -39,6 +40,7 @@ def _api_error_message(exc: openai.APIStatusError) -> str:
 
 
 class DoubaoProvider(LLMProvider):
+    supports_native_tools = True
     name = "doubao"
 
     def __init__(self, settings: Settings) -> None:
@@ -73,7 +75,7 @@ class DoubaoProvider(LLMProvider):
                     model=self.model,
                     max_tokens=self._settings.doubao_max_tokens,
                     messages=self._payload(system, messages),
-                    extra_body=main_thinking_options(self._settings, self.name, messages),
+                    extra_body=main_thinking_options(self._settings, self.name, messages, enabled_override=self.thinking_override),
                 )
         except (TimeoutError, asyncio.TimeoutError, openai.APITimeoutError) as exc:
             raise ProviderError(
@@ -103,7 +105,7 @@ class DoubaoProvider(LLMProvider):
             },
             reasoning_content=getattr(choice.message, "reasoning_content", None) or "",
             finish_reason=choice.finish_reason,
-            request_id=getattr(response, "_request_id", None),
+            request_id=request_id(response),
         )
 
     async def stream(
@@ -121,11 +123,18 @@ class DoubaoProvider(LLMProvider):
                     messages=self._payload(system, messages),
                     stream=True,
                     stream_options={"include_usage": True},
-                    extra_body=main_thinking_options(self._settings, self.name, messages),
+                    extra_body=main_thinking_options(self._settings, self.name, messages, enabled_override=self.thinking_override),
                 )
+                stream_request_id = request_id(stream)
+                if stream_request_id:
+                    yield StreamDelta(kind="usage", request_id=stream_request_id)
                 usage_payload: dict[str, int] = {}
                 finish_reason: str | None = None
                 async for chunk in stream:
+                    chunk_request_id = request_id(chunk)
+                    if chunk_request_id and not stream_request_id:
+                        stream_request_id = chunk_request_id
+                        yield StreamDelta(kind="usage", request_id=stream_request_id)
                     if chunk.usage is not None:
                         usage_payload = {
                             "input_tokens": chunk.usage.prompt_tokens or 0,
@@ -153,7 +162,7 @@ class DoubaoProvider(LLMProvider):
                     kind="usage",
                     usage=usage_payload,
                     finish_reason=finish_reason,
-                    request_id=getattr(stream, "_request_id", None),
+                    request_id=stream_request_id,
                 )
         except (TimeoutError, asyncio.TimeoutError, openai.APITimeoutError) as exc:
             raise ProviderError(
@@ -171,6 +180,8 @@ class DoubaoProvider(LLMProvider):
     async def _router_completion(
         self, *, system: str, user: str, max_tokens: int | None = None
     ) -> Completion:
+        if self.thinking_override is True:
+            return await self.route_with_reasoning(system=system, user=user, max_tokens=max_tokens)
         try:
             timeout_seconds = getattr(
                 self._settings, "router_request_timeout_seconds", 12.0
@@ -199,7 +210,7 @@ class DoubaoProvider(LLMProvider):
                     "reasoning_tokens": 0,
                 },
                 finish_reason=choice.finish_reason,
-                request_id=getattr(response, "_request_id", None),
+                request_id=request_id(response),
             )
         except Exception:  # noqa: BLE001 - routing must never break a turn
             logger.warning("Doubao router call failed", exc_info=True)
@@ -235,12 +246,18 @@ class DoubaoProvider(LLMProvider):
             reasoning_effort = getattr(self._settings, "module_router_reasoning_effort", None)
         if reasoning_effort == "provider_default":
             reasoning_effort = None
-        if reasoning_effort == "disabled":
+        if self.thinking_override is False or (reasoning_effort == "disabled" and self.thinking_override is None):
             # Safety-mode accounts can exhaust the native reasoning quota even
             # when ordinary completion quota remains.  Keep routing available
             # with the same structured JSON call, but honestly expose no
             # reasoning channel instead of failing the whole conversation.
             return await self._router_completion(system=system, user=user, max_tokens=max_tokens)
+        if self.thinking_override is True:
+            if reasoning_effort == "disabled":
+                reasoning_effort = None
+            # Auxiliary JSON/text needs output room in addition to native reasoning.
+            max_tokens = max(max_tokens or 0, self._settings.router_reasoning_max_tokens) + int(
+                getattr(self._settings, "qwen_thinking_budget", 1024))
         try:
             client = self._client.with_options(max_retries=0) if reasoning_effort is not None else self._client
             timeout_seconds = getattr(
@@ -274,7 +291,7 @@ class DoubaoProvider(LLMProvider):
                     ),
                 },
                 finish_reason=choice.finish_reason,
-                request_id=getattr(response, "_request_id", None),
+                request_id=request_id(response),
             )
         except Exception:  # noqa: BLE001 — routing must never break the turn
             logger.warning("Doubao thinking router call failed", exc_info=True)

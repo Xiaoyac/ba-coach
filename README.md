@@ -674,3 +674,12 @@ database or the production retrieval backend.
 - The server environment sets `CORS_ORIGINS=https://bacoach.xyz` and an empty
   `CORS_ORIGIN_REGEX`; ngrok wildcard origins are disabled in production. The
   local `backend/.env` intentionally remains localhost-only for development.
+
+
+### LangChain 与对话时间（2026-09-29）
+
+LangGraph 继续负责业务流程，LangChain Core 的 ChatPromptTemplate 和 trim_messages 负责发送给主回复/危机回复模型的上下文组装与按角色裁剪。模型调用继续使用原有 SDK，系统提示词的缓存标记保持不变。
+
+对话消息保留服务器生成的 UTC 时间，聊天界面显示北京时间。每轮为模型追加不可缓存的当前时间和历史消息时间对照；路由与信息提取也携带时间线，避免跨天后错误理解“今天/昨天”。没有可靠时间的旧记录标记为未知。
+
+部署与测试记录见 [LANGCHAIN_TIME_RELEASE_20260929.md](LANGCHAIN_TIME_RELEASE_20260929.md)。

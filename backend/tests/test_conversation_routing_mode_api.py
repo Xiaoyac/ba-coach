@@ -48,7 +48,7 @@ from httpx import ASGITransport,AsyncClient
 from sqlalchemy import insert,select,update,func
 from sqlalchemy.ext.asyncio import create_async_engine,async_sessionmaker
 from app.database_v2_schema import metadata
-from app.models import AccountSettings,Conversation,ConversationMessage,UserAccount
+from app.models import AccountSettings,Conversation,ConversationMessage,ConversationReplySettings,UserAccount
 from app.db import get_db
 from app.identity import require_subject_id
 from app.routes import conversations,program
@@ -59,7 +59,8 @@ async def main():
     engine=create_async_engine('sqlite+aiosqlite:///:memory:')
     async with engine.begin() as connection:
         await connection.run_sync(metadata.create_all)
-        for model in (Conversation,ConversationMessage,UserAccount,AccountSettings):
+        # Include app-owned reply preferences as production Base.metadata.create_all does.
+        for model in (Conversation,ConversationMessage,UserAccount,AccountSettings,ConversationReplySettings):
             await connection.run_sync(model.__table__.create)
     maker=async_sessionmaker(engine,expire_on_commit=False)
     try:

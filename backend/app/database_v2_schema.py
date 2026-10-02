@@ -181,7 +181,7 @@ module_four_record = table("module_four_record", ident(primary=True),
     *times(), UniqueConstraint("cycle_id"),
     CheckConstraint("execution_result IS NULL OR execution_result BETWEEN 1 AND 4"),
     CheckConstraint("review_decision IS NULL OR review_decision BETWEEN 1 AND 4"),
-    CheckConstraint("record_status != 'confirmed' OR (execution_result IS NOT NULL AND review_decision IS NOT NULL AND confirmation_message_id IS NOT NULL)"))
+    CheckConstraint("record_status != 'confirmed' OR (execution_result IS NOT NULL AND confirmation_message_id IS NOT NULL)"))
 
 ba_memory = table("ba_memory", ident(primary=True), user_key(),
     col("memory_type", String(32), required=True), col("memory_key", String(128), required=True),

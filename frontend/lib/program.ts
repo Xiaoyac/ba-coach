@@ -25,6 +25,9 @@ export type GoalPlan = {
 };
 
 export type ProgramGoal = {
+  card_id?: string;
+  goal_status?: string;
+  execution_outcome?: "completed" | "partial" | "not_started" | null;
   id: string;
   title: string;
   status: string;

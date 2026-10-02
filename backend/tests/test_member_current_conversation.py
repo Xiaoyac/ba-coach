@@ -183,7 +183,7 @@ get_settings.cache_clear()
 from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from app.database_v2_schema import metadata
-from app.models import AccountSettings, Conversation, ConversationMessage, UserAccount
+from app.models import AccountSettings, Conversation, ConversationMessage, ConversationReplySettings, UserAccount
 from app.routes.conversations import current_conversation
 from app.session import InMemorySessionStore
 
@@ -192,7 +192,8 @@ async def main():
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as conn:
         await conn.run_sync(metadata.create_all)
-        for model in (Conversation, ConversationMessage, UserAccount, AccountSettings):
+        # Include app-owned reply preferences as production Base.metadata.create_all does.
+        for model in (Conversation, ConversationMessage, UserAccount, AccountSettings, ConversationReplySettings):
             await conn.run_sync(model.__table__.create)
     try:
         async with maker() as db:

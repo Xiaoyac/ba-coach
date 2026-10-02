@@ -7,11 +7,11 @@ import ArchiveSelect from "@/components/ArchiveSelect";
 import { fetchGoalHistory, goalKindLabel, scheduleKindLabel, eventKindLabel,
   type ProgramGoal, type GoalHistory, type ArchivedPlan, type ArchivedCycle, type ActivityRecord } from "@/lib/program";
 
-type Overview = { enabled: boolean; goals: ProgramGoal[]; activity_records?: ActivityRecord[] };
+type Overview = { enabled: boolean; goals: ProgramGoal[]; pa_cards?: ProgramGoal[]; activity_records?: ActivityRecord[] };
 type Props = { open: boolean; sessionId: string | null; busy?: boolean; refreshKey: number; onClose: () => void; onOpenReminders?: () => void };
 type HistoryTab = "plans" | "cycles" | "activities";
-const states: Record<string, string> = {draft:"待完善",active:"进行中",paused:"已暂停",completed:"已完成",abandoned:"已结束",replaced:"已替换"};
-const cycleStates: Record<string, string> = {planning:"计划中",waiting_execution:"等待执行",reviewing:"复盘中",completed:"本轮已完成",cancelled:"已取消"};
+const states: Record<string, string> = {draft:"待完善",active:"进行中",paused:"已暂停",completed:"本轮已结束",abandoned:"已结束",replaced:"已替换"};
+const cycleStates: Record<string, string> = {planning:"计划中",waiting_execution:"等待执行",reviewing:"复盘中",completed:"本轮已结束",cancelled:"已取消"};
 const planStates: Record<string, string> = {draft:"草稿 · 尚未确认",confirmed:"已确认",superseded:"历史版本"};
 const actions: Record<string, string> = {continue:"继续原计划",adjust:"调整计划",pause:"暂停目标",end:"结束目标",replace_keep:"新目标，保留原目标",replace_pause:"新目标，暂停原目标"};
 const tabs = [{id:"plans",label:"PA 计划卡"},{id:"cycles",label:"执行与复盘"},{id:"activities",label:"活动记录"}] as const;
@@ -72,7 +72,7 @@ export default function GoalOverview({open,sessionId,refreshKey,onClose,onOpenRe
   },[open,sessionId,refreshKey,retry]);
   const visible=useMemo(()=> {
     const query=search.trim().toLowerCase();
-    return (overview?.goals??[]).filter(g=>matches(g,status) && (kind==="all" || kindOf(g)===kind)
+    return (overview?.pa_cards??overview?.goals??[]).filter(g=>matches(g,status) && (kind==="all" || kindOf(g)===kind)
       && `${g.title} ${g.long_term_direction??""} ${g.plan?.activity_content??""}`.toLowerCase().includes(query))
       .sort((a,b)=>{
         if(viewMode === "timeline") {
@@ -91,9 +91,9 @@ export default function GoalOverview({open,sessionId,refreshKey,onClose,onOpenRe
     const button=Array.from(archiveScroll.current?.querySelectorAll<HTMLButtonElement>('button[data-goal-id]')??[]).find(b=>b.dataset.goalId===lastOpened.current);
     button?.focus({preventScroll:true});
   },[selected]);
-  const openGoal=(goal:ProgramGoal)=>{archivePosition.current=archiveScroll.current?.scrollTop??0;lastOpened.current=goal.id;setSelected(goal);};
+  const openGoal=(goal:ProgramGoal)=>{archivePosition.current=archiveScroll.current?.scrollTop??0;lastOpened.current=goal.card_id??goal.id;setSelected(goal);};
   const reset=()=>{setStatus("all");setKind("all");setSearch("");};
-  const goals=overview?.goals??[];
+  const goals=overview?.pa_cards??overview?.goals??[];
   return <dialog ref={dialog} onClose={onClose} aria-labelledby="goal-archive-title" className="goal-archive m-auto h-[min(860px,calc(100dvh-40px))] w-[min(1180px,calc(100vw-48px))] max-w-none overflow-hidden rounded-3xl border-0 bg-sheet p-0 text-ink shadow-2xl backdrop:bg-black/40 max-sm:h-[100dvh] max-sm:max-h-[100dvh] max-sm:w-screen max-sm:rounded-none">
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex shrink-0 items-start justify-between gap-4 px-6 pb-3 pt-5 sm:px-9 sm:pb-5 sm:pt-6">
@@ -102,7 +102,7 @@ export default function GoalOverview({open,sessionId,refreshKey,onClose,onOpenRe
       </header>
       {selected ? <GoalDetails goal={selected} onBack={()=>setSelected(null)} /> : <>
         <div className="shrink-0 px-6 sm:px-9">
-          <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-ink-muted"><span><b className="mr-1.5 text-base font-medium text-ink">{goals.length}</b>个目标</span><span><b className="mr-1.5 text-base font-medium text-ink">{goals.filter(g=>g.status==="active").length}</b>个正在进行</span><span className="hidden sm:ml-auto sm:inline">在对话中制定，在这里回顾 · 不会自动切换当前目标</span></div>
+          <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-ink-muted"><span><b className="mr-1.5 text-base font-medium text-ink">{goals.length}</b>张 PA 卡</span><span><b className="mr-1.5 text-base font-medium text-ink">{goals.filter(g=>g.status==="active").length}</b>个正在进行</span><span className="hidden sm:ml-auto sm:inline">在对话中制定，在这里回顾 · 不会自动切换当前目标</span></div>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div className="flex rounded-xl bg-raised p-1" role="group" aria-label="目标展示方式">
               <button aria-pressed={viewMode==="timeline"} onClick={()=>setViewMode("timeline")} className={`min-h-10 rounded-lg px-4 text-sm ${viewMode==="timeline"?"bg-panel font-medium text-accent-ink shadow-sm":"text-ink-muted"}`}>时间线</button>
@@ -128,13 +128,13 @@ export default function GoalOverview({open,sessionId,refreshKey,onClose,onOpenRe
           {loading?<Empty title="正在整理目标档案…"/>:error?<Empty title="加载未完成" detail={error}><button className="archive-action" onClick={()=>setRetry(n=>n+1)}>重新加载</button></Empty>:!overview?.enabled?<Empty title="目标档案尚未启用" detail="当前环境暂不支持目标历史。"/>:!visible.length?<Empty title={goals.length?"没有找到匹配的目标":"还没有目标，先从聊聊开始"} detail={goals.length?"试试其他关键词，或查看全部状态。":"不用在这里填表。在聊天中和教练决定想尝试的事，目标就会保存到这里。"}>{goals.length>0&&<button className="archive-action" onClick={reset}>清除筛选</button>}</Empty>:viewMode==="timeline"?<>
             <p className="mb-5 text-xs leading-5 text-ink-muted">按设定顺序串起每个目标。点开卡片，回顾计划与每轮执行。</p>
             <ol aria-label="目标设定时间线" className="goal-timeline mx-auto max-w-4xl">
-              {visible.map(goal=><li key={goal.id} className="goal-timeline-entry" data-goal-number={goalNumbers.get(goal.id)??"unknown"}>
+              {visible.map(goal=><li key={goal.card_id??goal.id} className="goal-timeline-entry" data-goal-number={goalNumbers.get(goal.id)??"unknown"}>
                 <div className="goal-timeline-date"><p className="text-sm font-semibold text-accent-ink">{goalNumbers.has(goal.id)?`第 ${goalNumbers.get(goal.id)} 个目标`:"早期档案 · 顺序未知"}</p><p className="mt-1 text-xs leading-5 text-ink-muted">{date(goal.created_at)}</p></div>
                 <span aria-hidden="true" className={`goal-timeline-dot ${goal.status==="active"?"bg-accent":"bg-panel"}`} />
-                <GoalCard goal={goal} timeline current={currentGoal===goal.id} onOpen={()=>openGoal(goal)}/>
+                <GoalCard goal={goal} timeline current={currentGoal===goal.id&&!finished.has(goal.status)} onOpen={()=>openGoal(goal)}/>
               </li>)}
             </ol>
-          </>:<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{visible.map(goal=><GoalCard key={goal.id} goal={goal} current={currentGoal===goal.id} onOpen={()=>openGoal(goal)} />)}</div>}
+          </>:<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{visible.map(goal=><GoalCard key={goal.card_id??goal.id} goal={goal} current={currentGoal===goal.id&&!finished.has(goal.status)} onOpen={()=>openGoal(goal)} />)}</div>}
           {!loading&&!error&&!!overview?.activity_records?.length&&<details className="mt-7 text-sm"><summary className="cursor-pointer py-3 text-ink-muted">未归属目标的近期活动 · {overview.activity_records.length}</summary><p className="mb-3 text-xs text-ink-faint">临时活动与想法不会自动成为目标，也不算完成其他目标。</p><div className="space-y-2">{overview.activity_records.map(record=><div key={record.id} className="flex items-start justify-between gap-4 rounded-xl bg-panel p-3"><span>{record.activity_content}</span><span className="shrink-0 text-xs text-ink-muted">{eventKindLabel[record.event_kind]}</span></div>)}</div></details>}
         </div>
         <footer className="shrink-0 px-6 py-3 text-xs leading-5 text-ink-faint sm:px-9">这里保留现有的计划版本与执行历史。过往的讨论可以在对应的历史对话中查看。</footer>
@@ -145,10 +145,11 @@ export default function GoalOverview({open,sessionId,refreshKey,onClose,onOpenRe
 
 function GoalCard({goal,current,onOpen,timeline=false}:{goal:ProgramGoal;current:boolean;onOpen:()=>void;timeline?:boolean}) {
   const plan=goal.plan;
-  return <button data-goal-id={goal.id} onClick={onOpen} className={`goal-archive-card flex min-w-0 flex-col rounded-2xl bg-panel p-5 text-left shadow-sm transition-shadow hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${timeline?"w-full sm:p-6":"min-h-64"}`}>
+  return <button data-goal-id={goal.card_id??goal.id} onClick={onOpen} className={`goal-archive-card flex min-w-0 flex-col rounded-2xl bg-panel p-5 text-left shadow-sm transition-shadow hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${timeline?"w-full sm:p-6":"min-h-64"}`}>
     <div className="flex items-center justify-between gap-2 text-xs"><span className="text-ink-muted">{goalKindLabel[kindOf(goal)]}</span><span className={`rounded-full px-2.5 py-1 ${goal.status==="active"?"bg-accent-wash text-accent-ink":"bg-raised text-ink-muted"}`}>{states[goal.status]??"其他状态"}</span></div>
     <h3 className="mt-4 break-words text-lg font-semibold leading-7">{goal.title}</h3>
     <p className="mt-2 line-clamp-2 text-sm leading-6 text-ink-muted">{plan?.activity_content??(goal.status==="draft"?"计划仍在讨论中，打开查看草稿。":"打开查看这项行动的完整记录。")}</p>
+    {goal.execution_outcome&&<p className="mt-2 text-sm text-ink-muted">本轮结果 · {{completed:"完成活动",partial:"部分完成",not_started:"未执行"}[goal.execution_outcome]}</p>}
     {goal.long_term_direction&&<p className="mt-2 line-clamp-2 text-xs leading-5 text-ink-faint">方向 · {goal.long_term_direction}</p>}
     <div className={`mt-4 text-xs leading-5 text-ink-muted ${timeline?"grid gap-3 rounded-xl bg-raised/55 p-3 sm:grid-cols-2":"space-y-1"}`}><p>执行安排 · {plan?.schedule_text??"尚未确认"}{plan?.duration_minutes!=null?` · ${plan.duration_minutes} 分钟`:""}</p><p>复盘周期 · {goal.latest_cycle?`第 ${goal.latest_cycle.ordinal} 轮 · ${cycleStates[goal.latest_cycle.status]??"待更新"}`:"尚未开始"}</p></div>
     <div className="mt-auto flex items-center justify-between gap-2 pt-5 text-xs"><span className="text-ink-faint">{current?"当前对话目标":timestamp(goal.updated_at)===null?"历史档案":`${date(goal.updated_at)} 更新`}</span><span className="font-medium text-accent-ink">查看完整卡片 ↗</span></div>
@@ -201,7 +202,7 @@ function PlanCard({plan}:{plan:ArchivedPlan}) {
   </article>;
 }
 function CycleCard({cycle}:{cycle:ArchivedCycle}) {
-  return <article className="rounded-2xl bg-panel p-5 sm:p-6"><div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-semibold">第 {cycle.ordinal} 轮</h4><span className="text-xs text-accent-ink">{cycleStates[cycle.status]??cycle.status}</span></div><p className="mt-2 text-sm text-ink-muted">{cycle.plan_version?`执行第 ${cycle.plan_version} 版计划` : "计划尚未确认"}{cycle.schedule_text?` · ${cycle.schedule_text}`:""}</p>{cycle.activity_content&&<p className="mt-3 text-sm leading-6">{cycle.activity_content}</p>}<dl className="mt-4 grid gap-4 sm:grid-cols-3"><Field label="建立时间" value={date(cycle.created_at)}/><Field label="开始执行" value={date(cycle.started_at)}/><Field label="本轮结束" value={date(cycle.completed_at)}/></dl>{(cycle.review_summary||cycle.review_action)&&<div className="mt-5 rounded-xl bg-raised/65 p-4"><p className="text-xs font-medium text-accent-ink">本轮复盘{cycle.review_status!=="confirmed"?" · 尚未确认":" · 已确认"}</p>{cycle.review_summary&&<p className="mt-2 whitespace-pre-wrap text-sm leading-6">{cycle.review_summary}</p>}{cycle.review_action&&<p className="mt-2 text-xs text-ink-muted">下一步 · {actions[cycle.review_action]??"继续讨论"}</p>}</div>}</article>;
+  return <article className="rounded-2xl bg-panel p-5 sm:p-6"><div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-semibold">第 {cycle.ordinal} 轮</h4><span className="text-xs text-accent-ink">{cycleStates[cycle.status]??cycle.status}</span></div><p className="mt-2 text-sm text-ink-muted">{cycle.plan_version?`执行第 ${cycle.plan_version} 版计划` : "计划尚未确认"}{cycle.schedule_text?` · ${cycle.schedule_text}`:""}</p>{cycle.activity_content&&<p className="mt-3 text-sm leading-6">{cycle.activity_content}</p>}<dl className="mt-4 grid gap-4 sm:grid-cols-3"><Field label="建立时间" value={date(cycle.created_at)}/><Field label="开始执行" value={date(cycle.started_at)}/><Field label="本轮结束" value={date(cycle.completed_at)}/></dl>{(cycle.review_summary||cycle.review_action)&&<div className="mt-5 rounded-xl bg-raised/65 p-4"><p className="text-xs font-medium text-accent-ink">本轮复盘{cycle.review_status!=="confirmed"?" · 尚未确认":" · 已确认"}</p>{cycle.review_summary&&<p className="mt-2 whitespace-pre-wrap text-sm leading-6">{cycle.review_summary}</p>}{cycle.review_action&&<p className="mt-2 text-xs text-ink-muted">当时表达的意向 · {actions[cycle.review_action]??"继续讨论"}</p>}</div>}</article>;
 }
 const nestedNames:Record<string,string>={text:"内容",barrier:"困难",plan:"应对",frequency:"频率",days_per_week:"每周天数",times_per_week:"每周次数",unit:"单位",interval:"间隔",days:"日期",type:"类型"};
 function readable(value:unknown):string {if(value==null||value==="")return "尚未记录";if(Array.isArray(value))return value.length?value.map(readable).join("；"):"尚未记录";if(typeof value==="object")return Object.entries(value).filter(([k])=>k!=="schema_version"&&!k.startsWith("_")).map(([k,v])=>`${nestedNames[k]??k}：${readable(v)}`).join("；");return String(value);}

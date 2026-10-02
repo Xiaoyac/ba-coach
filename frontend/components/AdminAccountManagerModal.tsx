@@ -8,6 +8,7 @@ import {
   type AdminAccountItem,
 } from "@/lib/adminAccounts";
 import { CloseMark, UsersMark } from "@/components/icons";
+import InvitationManager from "@/components/InvitationManager";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
 function formatDate(value: string | null): string {
@@ -28,6 +29,7 @@ export default function AdminAccountManagerModal({
   currentUsername: string;
   onClose: () => void;
 }) {
+  const [tab, setTab] = useState<"accounts" | "invitations">("accounts");
   const [accounts, setAccounts] = useState<AdminAccountItem[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -124,14 +126,14 @@ export default function AdminAccountManagerModal({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h2 id="account-manager-title" className="text-base font-medium text-ink">
-                管理员 · 账号与权限管理
+                账号与权限管理
               </h2>
               <span className="rounded-full bg-accent-wash px-2 py-0.5 text-[0.62rem] tracking-[0.12em] text-accent-ink">
                 ADMIN
               </span>
             </div>
             <p className="mt-1 text-xs leading-relaxed text-ink-faint">
-              管理员可在此查看账号，并为现有用户授予管理员权限。登录账号独立且唯一；公开身份使用昵称与用户自选五位数字标签。
+              管理账号权限，并生成一次性注册邀请码。已有账号的登录方式保持不变。
             </p>
           </div>
           <button
@@ -144,6 +146,13 @@ export default function AdminAccountManagerModal({
           </button>
         </header>
 
+        <div className="flex shrink-0 gap-2 border-b border-line px-5 py-3" aria-label="管理分类">
+          {(["accounts", "invitations"] as const).map((value) => <button key={value} type="button" aria-pressed={tab === value}
+            onClick={() => setTab(value)} className={`min-h-11 rounded-xl px-4 py-2 text-sm ${tab === value ? "bg-accent-wash text-accent-ink" : "text-ink-muted hover:bg-raised"}`}>
+            {value === "accounts" ? "账号管理" : "注册邀请码"}
+          </button>)}
+        </div>
+        {tab === "invitations" ? <div className="zen-scroll min-h-0 flex-1 overflow-y-auto p-4 sm:p-6"><InvitationManager /></div> : <>
         <form
           className="flex shrink-0 gap-2 border-b border-line px-4 py-3 sm:px-6"
           onSubmit={(event) => {
@@ -251,6 +260,7 @@ export default function AdminAccountManagerModal({
         <footer className="shrink-0 border-t border-line px-5 py-3 text-[0.68rem] leading-relaxed text-ink-faint sm:px-6">
           授予管理员会立即生效。删除会永久移除账号及其对话、目标和记录；当前登录账号不能删除。
         </footer>
+        </>}
       </section>
 
       <ConfirmDialog

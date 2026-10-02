@@ -311,6 +311,9 @@ def register(client: TestClient):
         from app.birth_dates import today
         requested_age = profile.pop("age", 28)
         birthday = profile.pop("birth_date", today().replace(year=today().year - requested_age, month=1, day=1).isoformat())
+        from invitation_helpers import issue_test_invitation
+        if "invitation_code" not in profile:
+            profile["invitation_code"] = issue_test_invitation(client)
         response = client.post(
             "/api/auth/register",
             json={

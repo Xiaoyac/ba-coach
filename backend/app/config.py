@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     # Disable for code-only releases that must not create tables or backfill data.
     startup_db_maintenance: bool = True
     database_schema_version: Literal["legacy", "v2"] = "legacy"
+    # Controlled PA-card experiment; independent of intervention and routing modes.
+    pa_card_tools_enabled: bool = False
+    pa_card_tool_timeout_seconds: float = Field(default=90, ge=1, le=300)
+    pa_card_tool_max_rounds: int = Field(default=5, ge=1, le=8)
     # Explicit rollout switch. Catalog performs two grounded router-model
     # decisions and is only constructed when explicitly selected.
     knowledge_retrieval_mode: Literal["p0", "enhanced", "catalog"] = "p0"
@@ -57,6 +61,7 @@ class Settings(BaseSettings):
 
     # Opt-in rollout. New tables are created only by the explicit migration.
     pa_push_enabled: bool = False
+    pa_chat_reminders_enabled: bool = False
     pa_push_vapid_public_key: str | None = None
     pa_push_vapid_private_key_path: str | None = None
     pa_push_vapid_subject: str | None = None
@@ -187,6 +192,21 @@ class Settings(BaseSettings):
     # context anchor is also persisted by the graph for conversations longer
     # than this window.
     max_history_messages: int = 80
+    # K3 experimental context layout. Set false to restore the prior prompt
+    # layout and 80-message window; existing checkpoints then remain unused.
+    main_prefix_cache_enabled: bool = True
+    main_history_token_budget: int = Field(default=24000, ge=4000, le=64000)
+    main_history_retain_tokens: int = Field(default=8000, ge=1000, le=32000)
+    # Compression is a separate workload; never inherit a member/admin's
+    # per-turn thinking override or change the shared Router client settings.
+    main_history_compression_provider: Literal["claude", "deepseek", "doubao"] | None = None
+    main_history_compression_model: str | None = None
+    main_history_compression_effort: Literal["low", "high", "max", "provider_default"] = "low"
+    main_history_compression_max_tokens: int = Field(default=4096, ge=1024, le=16384)
+    main_history_compression_timeout_seconds: float = Field(default=60, ge=1, le=180)
+    # Separate from the reply's history budget: avoid repeatedly summarizing
+    # the same old history merely because the retained reply window is small.
+    main_history_compression_input_tokens: int = Field(default=48000, ge=4000, le=128000)
     session_ttl_seconds: int = 60 * 60 * 6  # 6 hours
     redis_url: str | None = None  # if set, use Redis instead of in-memory
 

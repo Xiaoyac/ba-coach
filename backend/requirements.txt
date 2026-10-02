@@ -5,10 +5,10 @@ email-validator>=2.2.0
 pydantic-settings>=2.6.0
 python-dotenv>=1.0.1
 
-# Workflow orchestration. LangGraph handles the DAG and state only — model
-# calls go through the official SDKs below, not LangChain chat-model wrappers,
-# so prompt-cache breakpoints stay under our control.
+# LangGraph orchestrates the workflow; LangChain assembles and trims context.
+# Official provider SDKs retain native prompt-cache control.
 langgraph>=1.2.0
+langchain-core>=1.6.2,<2
 
 # Persistence for the daily assessment. SQLite by default so the app runs with
 # no external service; DATABASE_URL swaps in Postgres (asyncpg) unchanged.

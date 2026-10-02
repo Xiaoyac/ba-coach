@@ -15,6 +15,12 @@ selected由上下文判断，不要求用户说固定句式；回答某个活动
 已有有效选择在后续讨论细节时继续引用原消息，不因新一轮没有重复活动名而丢失。尚未选定也返回状态，不能要求用户为抽取失败重复表达。
 目标卡不完整时仍保存真实选择和draft；长期方向/core_values不是所有用户的必填条件。不能根据缺少方向把主要目标自动改成次要目标。
 输入未提供消息ID时可省略selection_message_id，但selection_quote必须能唯一定位用户消息；不能自行编号或伪造ID。""")
+CHOICE_SPEC = Spec("core_goal_choice", "json", """M2 对已存核心目标的明确选择；未讨论/尚未决定/已撤回为null。
+对象 {action: keep/replace/additional, goal_id:背景中真实目标ID, message_id:真实用户消息ID, quote:表达该选择的用户连续原话}。
+keep=上一轮复盘已结束后用户决定保持原目标；replace=明确替换指定核心；additional=保留未完成核心并把新活动作为额外次要活动。
+不要把提出新活动/进入M2/暂时不想做解释成替换。用户不记得时应先复述而非推定选择。
+上一轮M4中的意向不是本轮M2决定；须引用进入本轮M2后的用户选择。保留未完成核心的额外活动只写m2_activity_context.secondary_activities，goal_proposal.selection_role=secondary，不改核心计划。
+已有核心且尚未确定keep/replace/additional时仍输出null，不能为填字段发明决定。""")
 M2_CONTEXT_SPEC = Spec("m2_activity_context", "json", """M2当前意愿及次要/临时体验的有源记录快照，未涉及则null。不要把次要或临时体验直接创建为核心目标。
 对象字段：intention(可null，{value:no_intention/intention/action,message_id:真实用户消息ID,quote:当前意愿原话})；
 trial(可null，{state:none/trial_active/trial_completed/trial_continue/trial_upgrade_to_core/trial_retained_secondary,activity_content:活动原文,source_role:trial/secondary,message_id:真实用户消息ID,quote:原话})；
@@ -50,9 +56,9 @@ M2通过自然聊天了解PA、用户希望的改变或意向、选择活动、�
 主要/次要与周期性/一次性是两个维度，不要让用户填分类表或强制做价值观练习。
 不把助手建议、模糊想法、用户已经做过的临时活动自动转成目标。明确选择后才由Agent创建草稿。
 每段聊天只有一个焦点目标；提到其他活动仍可倾听记录，不得偷偷换绑目标。
-新目标请引导用户新建聊天选“讨论新目标”，无需事先输入名称。
+M2允许在同一聊天明确选择保留核心或替换核心；额外活动只记为次要活动。
 M4每次日常反馈可以只记录，不必强迫完整复盘。没做原活动但做了另一件事须分开，不能算原目标完成。
-确认继续原计划会进入同一目标下一周期M4，无需重做M2/M3；调整进入同一目标M2新版本。
+M4结束本轮尝试后进入M2，由用户讨论决定保留、调整或替换；不在M4自动开启下一轮。
 暂停保留目标和历史，不要求新建目标；恢复可在新聊天明确选择暂停目标。更换目标不自动暂停旧目标，需用户明确决定。
 复盘周期结束不等于目标结束。频率、复盘节奏、目标寿命独立。不宣称未经后台确认的保存或切换已成功。
 活动后提醒须由用户在网页“活动后提醒”设置中主动开启并授权；聊天中的口头同意不代替浏览器授权。

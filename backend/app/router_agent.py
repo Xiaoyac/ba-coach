@@ -22,6 +22,7 @@ from .workflow_state import normalise_completed_steps
 logger = logging.getLogger(__name__)
 
 ROUTER_RUNTIME_CONTRACT = """# 路由接口边界
+本轮 M4 复盘收尾后回 M2，再讨论保持或替换目标，不直接到 M3。last_reviewed_cycle 仅表示上轮已结束，不代表下一目标已经选择。
 在生成本轮回复之前判断；输入只有当前用户发言、此前对话与已提交状态。
 不要生成用户可见文案，不根据字段空缺创造追问任务，不把模型建议当作已保存状态。
 离开 M1 后不返回 M1；后续模块内的 BA 理解问题由当前模块澄清，暂停具体目标推进。
@@ -30,6 +31,7 @@ knowledge_task只根据当前用户问题选择知识所需事实范围，不根
 正式模块迁移需要后台提交成功；失败保留实际已提交模块。
 """
 ROUTER_ONLY_RUNTIME_CONTRACT = """# 路由接口边界：仅 Router 模式
+本轮 M4 复盘收尾后回 M2，再讨论保持或替换目标，不直接到 M3。last_reviewed_cycle 仅表示上轮已结束，不代表下一目标已经选择。
 在生成本轮回复之前判断；输入只有当前用户发言、此前对话与已提交状态。
 依据上方网页 Router 提示词选择本轮回复所属模块，输出 JSON {"target_module":"1","knowledge_task":"general"}。
 沿用网页 Router 提示词的模块业务含义及对话完成标准；其中等待后台提交或数据库已确认才允许跳转等执行前置在此模式停用。
@@ -246,6 +248,7 @@ async def decide_target_module_with_reasoning(
     completed_steps: list[str] | None = None,
     recovery_timeout_seconds: float = 6.0,
     business_state: dict | None = None,
+    clock_context: str = "",
     routing_mode: str = "router_code",
 ) -> RouterDecision:
     """Return this turn's proposed module together with its thought trace.
@@ -262,13 +265,18 @@ async def decide_target_module_with_reasoning(
     effective_system = (system_prompt or ROUTER_AGENT_PROMPT) + "\n\n" + runtime_contract
     from .knowledge_context import KNOWLEDGE_TASKS
     effective_system += "\nknowledge_task 可用值：" + ", ".join(KNOWLEDGE_TASKS)
+    if clock_context:
+        from .conversation_time import TEMPORAL_RULES
+        effective_system += "\n\n" + TEMPORAL_RULES
     history_block = conversation_context.strip() or "（本 Session 无更早对话）"
+    clock_block = f"\n本轮服务器时间：\n{clock_context}\n" if clock_context else ""
     user_message = (
         f"current_module：{current_short}\n"
         f"记忆库中是否存在本轮PA目标卡片：{'是' if has_pa_card else '否'}\n\n"
         f"本 Session 此前对话记录（不含本轮输入，按时间顺序）：\n{history_block}\n\n"
         f"\n已提交的紧凑业务状态（事实参考，不是追问清单）：\n"
         f"{json.dumps(business_state or {}, ensure_ascii=False)}\n"
+        f"{clock_block}"
         f"\n用户本轮输入：\n{user_input}"
     )
 

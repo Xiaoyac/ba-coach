@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, PrivateAttr, field_validator, model_validator
 
 Role = Literal["user", "assistant"]
 
@@ -20,6 +20,29 @@ Score10 = Annotated[int, Field(ge=0, le=10)]
 class Message(BaseModel):
     role: Role
     content: str
+    created_at: datetime | None = None
+    # Request-only metadata, never serialized into stored/public messages.
+    # Compute policy must inspect original text, not parse user-supplied tags.
+    _source_content: str | None = PrivateAttr(default=None)
+
+    @property
+    def source_content(self) -> str:
+        return self.content if self._source_content is None else self._source_content
+
+    def for_provider(self, content: str) -> Message:
+        projected = self.model_copy(update={"content": content})
+        projected._source_content = self.source_content
+        return projected
+
+    @field_validator("created_at")
+    @classmethod
+    def utc_timestamp(cls, value: datetime | None) -> datetime | None:
+        # Database timestamps are UTC even when the driver drops tzinfo.
+        if value is not None:
+            return (value.replace(tzinfo=timezone.utc) if value.tzinfo is None
+                    else value.astimezone(timezone.utc))
+        return None
+
     reasoning_content: str | None = None
     model_name: str | None = None
     routing_reasoning_content: str | None = None
@@ -45,6 +68,8 @@ class CancelGenerationRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    user_created_at: datetime | None = None
+    assistant_created_at: datetime | None = None
     session_id: str
     reply: str
     reasoning_content: str = ""
@@ -326,6 +351,19 @@ class RegisterRequest(BaseModel):
     healed injury or a changed preference must not be frozen at signup.
     """
 
+    invitation_code: str = Field(..., min_length=32, max_length=64)
+
+    @field_validator("invitation_code", mode="before")
+    @classmethod
+    def validate_invitation(cls, value):
+        from .invitations import normalize_invitation_code
+        if not isinstance(value, str):
+            raise ValueError("请填写管理员提供的邀请码")
+        value = normalize_invitation_code(value)
+        if len(value) != 32 or any(c not in "0123456789ABCDEF" for c in value):
+            raise ValueError("请填写完整有效的邀请码")
+        return value
+
     username: str = Field(..., min_length=3, max_length=32)
     # Length is the only rule enforced. Composition rules ("one digit, one
     # symbol") measurably push people toward predictable patterns without
@@ -440,6 +478,7 @@ class ProfileOut(BaseModel):
     # "待配置" state instead of allowing a selection that will fail later.
     preferred_provider: ModelProvider = "deepseek"
     available_providers: dict[str, bool] = Field(default_factory=dict)
+    can_manage_models: bool = False
 
     # Read-only, shown for orientation. `current_module` is the programme's
     # own state machine and `risk_level` is a clinical judgement — neither is
@@ -704,10 +743,15 @@ class ConversationMessageDetail(Message):
     timing: MessageTiming | None = None
 
 
+class ConversationThinkingUpdate(BaseModel):
+    enabled: bool = Field(strict=True)
+
+
 class ConversationDetail(ConversationSummary):
     """A conversation's full transcript, for switching into it."""
 
     revision: int = 0
+    thinking_enabled: bool | None = None
     messages: list[ConversationMessageDetail] = Field(default_factory=list)
     # Durable pointer for the next turn. This is deliberately not called
     # `module`: the latest assistant reply may belong to the previous module.

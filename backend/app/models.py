@@ -45,7 +45,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.mysql import LONGTEXT, MEDIUMBLOB
+from sqlalchemy.dialects.mysql import LONGTEXT, MEDIUMBLOB, TEXT as MYSQL_TEXT, VARCHAR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base, UTCDateTime
@@ -188,6 +188,18 @@ class ActivityLog(Base):
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<ActivityLog {self.time_slot!r} {self.activity[:20]!r}>"
+
+
+class RegistrationInvite(Base):
+    """An administrator-issued registration capability; consumption is permanent."""
+    __tablename__ = "registration_invites"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow, nullable=False)
+    created_by_account_id: Mapped[int | None] = mapped_column(ForeignKey("user_accounts.id", ondelete="SET NULL"))
+    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    used_by_account_id: Mapped[int | None] = mapped_column(ForeignKey("user_accounts.id", ondelete="SET NULL"))
 
 
 class UserAccount(Base):
@@ -633,7 +645,10 @@ class Conversation(Base):
     # /conversations/{session_id} lets the subject rename it. `record_turn`
     # only ever sets this when creating the row, so a rename is never
     # overwritten by a later turn.
-    title: Mapped[str] = mapped_column(String(80), nullable=False, default="")
+    title: Mapped[str] = mapped_column(
+        String(80).with_variant(VARCHAR(80, charset="utf8mb4", collation="utf8mb4_general_ci"), "mysql"),
+        nullable=False, default="",
+    )
 
     # Pinned conversations sort above everything else, regardless of recency.
     # Stored as a flag rather than a manual sort order: there is no drag-to-
@@ -679,6 +694,18 @@ class Conversation(Base):
         return f"<Conversation {self.session_id[:8]}… {self.title[:20]!r}>"
 
 
+class ConversationReplySettings(Base):
+    """App-owned per-conversation settings, separate from workflow memory.
+
+    Startup create_all adds this table; no existing table needs alteration.
+    The foreign key also removes the preference when its conversation is deleted.
+    """
+    __tablename__ = "conversation_reply_settings"
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True)
+    thinking_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
 class ConversationMessage(Base):
     """One turn's worth of transcript. Append-only — never trimmed, never edited."""
 
@@ -692,18 +719,21 @@ class ConversationMessage(Base):
     # Display order; see `record_turn` for how it's assigned.
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     role: Mapped[str] = mapped_column(String(16), nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str] = mapped_column(
+        Text().with_variant(MYSQL_TEXT(charset="utf8mb4", collation="utf8mb4_general_ci"), "mysql"),
+        nullable=False,
+    )
     # Optional model thinking, kept separate from the visible answer. LONGTEXT
     # avoids truncating long reasoning traces from thinking-capable models.
     reasoning_content: Mapped[str | None] = mapped_column(
-        Text().with_variant(LONGTEXT(), "mysql"), nullable=True
+        Text().with_variant(LONGTEXT(charset="utf8mb4", collation="utf8mb4_general_ci"), "mysql"), nullable=True
     )
     # Exact model that produced this assistant row. Storing it per message
     # keeps attribution correct after the account changes model preference.
     model_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # Post-hoc Router Agent reasoning is generated after the visible reply.
     routing_reasoning_content: Mapped[str | None] = mapped_column(
-        Text().with_variant(LONGTEXT(), "mysql"), nullable=True
+        Text().with_variant(LONGTEXT(charset="utf8mb4", collation="utf8mb4_general_ci"), "mysql"), nullable=True
     )
     router_model_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
@@ -762,6 +792,18 @@ class ConversationShare(Base):
     __table_args__ = (
         Index("ix_conversation_share_created", "conversation_id", "created_at"),
     )
+
+
+class ConversationContextCheckpoint(Base):
+    """An immutable-until-compaction summary; never a business-state source."""
+    __tablename__ = "conversation_context_checkpoints"
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True)
+    through_message_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    state_baseline: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_general_ci"}
 
 
 class ConversationRuntimeState(Base):

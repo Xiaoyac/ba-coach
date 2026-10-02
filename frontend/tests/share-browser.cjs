@@ -52,23 +52,10 @@ const snapshot = {
       await page.getByText('分享验收对话', { exact: true }).waitFor();
       assert.equal(await page.locator('textarea').count(), 0);
       assert.equal(await page.getByRole('button', { name: '发送', exact: true }).count(), 0);
-      await page.getByRole('button', { name: '调试详情', exact: true }).click();
-      for (const [label, text] of [
-        ['查看回复深度思考', 'SNAPSHOT_REPLY_REASONING'],
-        ['查看路由深度思考', 'SNAPSHOT_ROUTER_REASONING'],
-        ['对话参考 chunk', 'SNAPSHOT_KNOWLEDGE'],
-        ['中介节点使用建议内容', 'SNAPSHOT_MEDIATOR_GUIDANCE'],
-      ]) {
-        await page.getByRole('button', { name: label, exact: true }).click();
-        await page.getByText(text, { exact: true }).first().waitFor({ state: 'visible' });
-      }
-      // This is recorded data, never a new model invocation.
-      const mediator = page.getByText('SNAPSHOT_MEDIATOR_REASONING', { exact: true });
-      if (!(await mediator.isVisible())) {
-        const details = page.locator('details').filter({ has: mediator });
-        if (await details.count()) await details.locator('summary').click();
-      }
-      await mediator.waitFor({ state: 'visible' });
+      // Legacy snapshots may still contain private fields; the public UI must
+      // render only the transcript and never expose debug controls.
+      assert.equal(await page.getByRole('button', { name: '调试详情', exact: true }).count(), 0);
+      assert.doesNotMatch(await page.locator('body').innerText(), /SNAPSHOT_(REPLY_REASONING|ROUTER_REASONING|MEDIATOR_REASONING|MEDIATOR_GUIDANCE|KNOWLEDGE)/);
       assert.equal(await page.evaluate(() => window.shareInjected), undefined);
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'no horizontal page overflow');
       assert.ok(requests.every(r => r.path === `/api/shares/${token}` && r.method === 'GET' && !r.headers.authorization && !r.headers.cookie));
@@ -76,10 +63,40 @@ const snapshot = {
       // Missing old reference data must not fall back to the owner's private route.
       unavailable = true;
       await page.reload();
+      await page.getByText('分享验收对话', { exact: true }).waitFor();
+      assert.equal(await page.getByRole('button', { name: '调试详情', exact: true }).count(), 0);
+      assert.doesNotMatch(await page.locator('body').innerText(), /SNAPSHOT_.*REASONING/);
+      assert.ok(requests.every(r => r.path === `/api/shares/${token}`));
+      // Admin snapshots expose all five panels using frozen data only.
+      unavailable = false;
+      snapshot.snapshot_version = 2;
+      snapshot.messages[1].request_records = { user_sent_at: '2026-09-28T08:00:00Z', assistant_created_at: '2026-09-28T08:00:01Z',
+        requests: [{ stage: 'main_generation', model: 'fixture-reply', request_id: 'SNAPSHOT_REQUEST_ID', duration_ms: 250 }] };
+      await page.reload();
       await page.getByRole('button', { name: '调试详情', exact: true }).click();
+      await page.getByRole('button', { name: '查看回复深度思考', exact: true }).click();
+      await page.getByText('SNAPSHOT_REPLY_REASONING', { exact: true }).waitFor();
+      await page.getByRole('button', { name: '查看路由深度思考', exact: true }).click();
+      await page.getByText('SNAPSHOT_ROUTER_REASONING', { exact: true }).waitFor();
+      await page.getByRole('button', { name: '对话参考 chunk', exact: true }).click();
+      await page.getByText('SNAPSHOT_KNOWLEDGE', { exact: true }).first().waitFor();
+      await page.getByRole('button', { name: '中介节点使用建议内容', exact: true }).click();
+      await page.getByText('SNAPSHOT_MEDIATOR_GUIDANCE', { exact: true }).waitFor();
+      await page.getByRole('button', { name: '请求记录', exact: true }).click();
+      await page.getByText('SNAPSHOT_REQUEST_ID', { exact: true }).waitFor();
+      assert.ok(requests.every(r => r.path === `/api/shares/${token}` && !r.headers.authorization && !r.headers.cookie));
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'admin no horizontal overflow');
+      await page.screenshot({ path: `/tmp/ba-admin-share-${viewport.width}.png`, fullPage: true });
+      unavailable = true;
+      snapshot.messages[1].request_records = null;
+      await page.reload();
+      await page.getByRole('button', { name: '调试详情', exact: true }).click();
+      await page.getByRole('button', { name: '请求记录', exact: true }).click();
+      await page.getByText('本条回复未保存请求记录，分享中无法补填。', { exact: true }).waitFor();
       await page.getByRole('button', { name: '对话参考 chunk', exact: true }).click();
       await page.getByText('本条回复未保存这项详情，分享中无法补填。', { exact: true }).waitFor();
       assert.ok(requests.every(r => r.path === `/api/shares/${token}`));
+      snapshot.snapshot_version = 1;
       invalidated = true;
       await page.reload();
       await page.getByText('分享链接不存在或已失效。', { exact: true }).waitFor();
@@ -149,6 +166,6 @@ const snapshot = {
     assert.equal(await page.evaluate(() => window.shareFixture.creates), 2);
     assert.deepEqual(ownerErrors, []);
     await owner.close();
-    console.log('PASS: desktop/mobile shared UI, all four detail panels, stored mediator reasoning, no private/authenticated requests, missing-data isolation, safe text, invalidated reload; owner create/reject/retry/copy fallback; no history UI or list requests on reopen');
+    console.log('PASS: desktop/mobile member and legacy transcript-only shares, all five admin debug panels, frozen request records, no private/authenticated requests, missing-data isolation, safe text, invalidated reload; owner create/reject/retry/copy fallback; no history UI or list requests on reopen');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

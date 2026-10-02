@@ -35,7 +35,7 @@ def publish(client, headers, session_id):
     return response.json()
 
 
-def test_snapshot_copies_only_saved_panels_and_local_message_ids(
+def test_snapshot_excludes_saved_panels_and_uses_local_message_ids(
     client, auth_headers, db_sessionmaker, provider,
 ):
     # Allocate unrelated private rows first so snapshot IDs cannot accidentally
@@ -88,13 +88,12 @@ def test_snapshot_copies_only_saved_panels_and_local_message_ids(
     message = data["messages"][-1]
     assert message["id"] != assistant_id
     assert all("reply_to_message_id" not in m for m in data["messages"])
-    assert message["reasoning_content"] == "已保存的回复思考"
-    assert message["routing_reasoning_content"] == "已保存的路由思考"
-    assert message["model_name"] == "stub-1" and message["router_model_name"] == "router-test"
-    assert message["timing"]["reply_generation_ms"] == 200
-    assert message["knowledge_references"]["mediator_guidance"] == knowledge["mediator_guidance"]
-    assert message["knowledge_references"]["mediator_reasoning_content"] == knowledge["mediator_reasoning_content"]
-    assert message["knowledge_references"]["provided"][0]["text"] == "行动可以帮助情绪"
+    assert set(message) == {"id", "role", "content", "created_at"}
+    assert message["content"] == private_detail["messages"][-1]["content"]
+    for private in ("已保存的回复思考", "已保存的路由思考", "router-test",
+                    knowledge["mediator_guidance"], knowledge["mediator_reasoning_content"],
+                    "行动可以帮助情绪"):
+        assert private not in response.text
     for secret in (session_id, foreign_session, "FULL_PROMPT_SECRET", "ACCOUNT_MEMORY_SECRET",
                    "OTHER_CONVERSATION_SECRET", "UNRELATED_REFERENCE_METADATA"):
         assert secret not in response.text
@@ -189,9 +188,7 @@ def test_missing_historical_details_are_unavailable_not_regenerated(client, auth
     data = client.get(f"/api/shares/{shared['token']}").json()
     assert len(data["messages"]) == 1
     message = data["messages"][0]
-    assert message["reasoning_content"] is None and message["routing_reasoning_content"] is None
-    assert message["knowledge_references"]["available"] is False
-    assert message["knowledge_references"]["provided"] == []
+    assert set(message) == {"id", "role", "content", "created_at"}
     assert provider.seen == [] and provider.route_calls == []
 
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import BirthdayPicker from "@/components/BirthdayPicker";
 import {
   AuthError,
   login,
@@ -45,6 +46,7 @@ export default function AuthScreen({
   onAuthenticated: (account: Account) => void;
 }) {
   const [mode, setMode] = useState<Mode>("login");
+  const [invitationCode, setInvitationCode] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
@@ -97,6 +99,7 @@ export default function AuthScreen({
         mode === "login"
           ? await login(username, password)
           : await register({
+              invitation_code: invitationCode.trim(),
               username,
               password,
               email,
@@ -236,6 +239,12 @@ export default function AuthScreen({
             </div>
           )}
 
+          {registering && <Field label="邀请码" hint="必填，请向管理员获取；每码仅可注册一次，长期有效">
+            <input required value={invitationCode} onChange={(e) => setInvitationCode(e.target.value)}
+              autoComplete="off" autoCapitalize="characters" spellCheck={false} maxLength={64}
+              placeholder="粘贴管理员提供的邀请码" className={inputClass} />
+          </Field>}
+
           {!forgot && <Field
             label="登录账号"
             hint={registering ? "仅限 3–32 位英文字母和数字，不会显示给其他用户" : undefined}
@@ -317,16 +326,10 @@ export default function AuthScreen({
                 </div>
               </Field>
 
-              <Field label="出生日期" hint="必填，用于计算年龄；当前支持 10–120 岁，不会自动填写">
-                <input
-                  required
-                  type="date"
-                  autoComplete="bday"
-                  value={birthDate}
-                  onChange={(e) => setBirthDate(e.target.value)}
-                  className={inputClass}
-                />
-              </Field>
+              <div className="mb-5">
+                <p className="mb-1.5 text-[0.78rem] font-medium text-ink-muted">出生日期 <span className="text-[0.68rem] text-ink-faint">必填 · 支持 10–120 岁</span></p>
+                <BirthdayPicker value={birthDate} onChange={setBirthDate} disabled={busy} />
+              </div>
 
               <Field label="目前和谁住" optional>
                 <div className="flex flex-wrap gap-1.5">

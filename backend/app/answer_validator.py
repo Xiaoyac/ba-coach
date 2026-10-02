@@ -5,11 +5,14 @@ grounded reflections need different treatment from unqualified declarations.
 No model calls, and no claim that a rules pass proves counselling quality.
 """
 import re
+from collections.abc import Sequence
 from time import perf_counter
 
 from .reasoning import contains_internal_protocol
+from .schemas import Message
+from .turn_continuity import repeats_previous_question, repeats_deferred_schedule
 
-VERSION = "answer-rules-20260924-diagnostics"
+VERSION = "answer-rules-20260930-continuity"
 SAFE_REPLY = "这条回复生成异常，暂未展示。请重试；不需要重新说明已有信息。"
 INTEGRITY_CODES = {
     "empty_reply",
@@ -23,7 +26,7 @@ INTEGRITY_CODES = {
 DIAGNOSTIC_CODES = {
     "panel_confirmation_instruction", "unsupported_behavior_label",
     "m3_analysis_boundary", "premature_plan", "goal_replacement",
-    "completion_claim",
+    "completion_claim", "repeated_previous_question", "repeated_deferred_schedule",
 }
 
 
@@ -66,7 +69,8 @@ def _user_supports(claim: str, current_user: str) -> bool:
 
 
 def validate_answer(*, reply: str, module: str, evidence_ids: list[str],
-                    workflow: dict | None = None, current_user: str = "") -> dict:
+                    workflow: dict | None = None, current_user: str = "",
+                    history: Sequence[Message] = ()) -> dict:
     started = perf_counter()
     findings = []
 
@@ -78,6 +82,10 @@ def validate_answer(*, reply: str, module: str, evidence_ids: list[str],
 
     if not reply.strip():
         flag("empty_reply")
+    if repeats_previous_question(reply, history):
+        flag("repeated_previous_question")
+    if repeats_deferred_schedule(reply, history, current_user):
+        flag("repeated_deferred_schedule")
     if len(reply) > 50000:
         flag("oversized_reply")
     # Provider/tool-call envelopes (for example DeepSeek's literal DSML

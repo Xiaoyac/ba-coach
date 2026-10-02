@@ -12,10 +12,14 @@ Omit `session_id` on the first turn; the server returns the one it minted.
 
 from __future__ import annotations
 
+from ..ai_telemetry import request_event_scope
+
 import json
 import logging
 from uuid import uuid4
 from time import perf_counter
+from datetime import datetime
+from ..conversation_time import utc_now
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -24,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..ai_telemetry import add_ai_event
 from ..config import get_settings
+from ..conversation_thinking import effective_thinking
 from ..conversation_store import finish_turn, save_runtime_state, start_turn
 from ..db import get_db, get_sessionmaker
 from ..graph import (
@@ -76,6 +81,7 @@ async def _persist_user_message(
     subject_id: str | None,
     session_id: str,
     user_text: str,
+    created_at: datetime | None = None,
 ) -> int | None:
     """Best-effort immediate write of the user's message.
 
@@ -93,6 +99,7 @@ async def _persist_user_message(
             subject_id=subject_id,
             session_id=session_id,
             user_text=user_text,
+            created_at=created_at,
         )
     except Exception:  # noqa: BLE001
         await db.rollback()
@@ -113,6 +120,7 @@ async def _persist_assistant_message(
     routing_reasoning_content: str = "",
     router_model_name: str | None = None,
     telemetry: dict | None = None,
+    created_at: datetime | None = None,
 ) -> int | None:
     """Best-effort write of the reply after model generation finishes."""
     if not subject_id or user_message_id is None:
@@ -135,15 +143,18 @@ async def _persist_assistant_message(
             finish_reason=metrics.get("finish_reason"),
             error_code=metrics.get("error_code") or "empty_reply",
             prompt_version=metrics.get("prompt_version"),
+            event_metadata={"user_message_id":user_message_id,"pa_tools":metrics.get("pa_tools"),
+                            "main_input":metrics.get("main_input")},
         )
         await db.commit()
         return None
     try:
-        return await finish_turn(
+        assistant_id = await finish_turn(
             db,
             session_id=session_id,
             user_message_id=user_message_id,
             reply_text=reply_text,
+            created_at=created_at,
             reasoning_content=reasoning_content,
             model_name=model_name,
             provider_name=provider_name,
@@ -151,10 +162,38 @@ async def _persist_assistant_message(
             router_model_name=router_model_name,
             telemetry=telemetry,
         )
+        return assistant_id
     except Exception:  # noqa: BLE001
         await db.rollback()
         logger.exception("failed to persist assistant message for session %s", session_id)
         return None
+
+
+async def _finalize_pa_display(db, *, store, session_id, subject_id, assistant_message_id):
+    # Reply persistence already succeeded. A display-marker failure must not
+    # change that receipt or overwrite tool-committed business state.
+    from ..pa_card_tools import finalize_tool_display
+    from ..v2_workflow import runtime_for
+    try:
+        await finalize_tool_display(db, session_id=session_id, user_id=subject_id,
+                                    assistant_message_id=assistant_message_id)
+        await db.commit()
+        _, fresh = await runtime_for(db, session_id)
+        await store.set_module(session_id, fresh['current_module'])
+        await store.set_memory(session_id, fresh['memory'] or {})
+    except Exception:
+        await db.rollback()
+        logger.exception('failed to finalize PA display for session %s', session_id)
+
+
+async def _apply_conversation_thinking(context, *, session_id, subject_id, state):
+    async with get_sessionmaker()() as preference_db:
+        enabled = await effective_thinking(preference_db, session_id=session_id, subject_id=subject_id)
+    context.provider = context.provider.with_thinking(enabled)
+    context.router_provider = context.router_provider.with_thinking(enabled)
+    if hasattr(context.knowledge_base, "with_thinking"):
+        context.knowledge_base = context.knowledge_base.with_thinking(enabled)
+    state["telemetry"] = {**(state.get("telemetry") or {}), "conversation_thinking_enabled": enabled}
 
 
 async def _resolve_provider(
@@ -242,8 +281,9 @@ async def _resume_or_create(
                     [
                         Message(
                             role=m.role,
+                            created_at=m.created_at,
                             content=normalize_reasoning_channels(
-                                m.content, m.reasoning_content
+                                m.content, m.reasoning_content, unwrap_message=m.role == "assistant"
                             ).reply,
                         )
                         for m in conversation.messages
@@ -261,6 +301,7 @@ async def _initial_state(
     db: AsyncSession,
     *,
     subject_id: str | None,
+    received_at: datetime | None = None,
 ) -> tuple[AgentState, str]:
     """Seed the graph's state and make sure the session exists.
 
@@ -268,6 +309,7 @@ async def _initial_state(
     `extract_memory_node` reads one merged view rather than having to reconcile
     request and session metadata itself.
     """
+    received_at = received_at or utc_now()
     session = await _resume_or_create(request, store, db, subject_id=subject_id)
     if request.metadata:
         session.metadata.update(request.metadata)
@@ -275,6 +317,7 @@ async def _initial_state(
     state: AgentState = {
         "session_id": session.session_id,
         "user_input": request.message,
+        "user_created_at": received_at,
         "metadata": dict(session.metadata),
         "forced_module": _validate_module(request),
         "subject_id": subject_id,
@@ -326,6 +369,7 @@ async def chat(
     subject_id: str | None = Depends(optional_subject_id),
 ) -> ChatResponse:
     request_started = perf_counter()
+    received_at = utc_now()
     settings = get_settings()
     await wait_for_pending_routing(
         request.session_id,
@@ -338,19 +382,21 @@ async def chat(
     )
     provider = await _resolve_provider(request, db, subject_id=subject_id)
     router_prompt = await effective_router_prompt(db)
-    state, session_id = await _initial_state(request, store, db, subject_id=subject_id)
+    state, session_id = await _initial_state(request, store, db, subject_id=subject_id, received_at=received_at)
     user_message_id = await _persist_user_message(
         db,
         subject_id=subject_id,
         session_id=session_id,
         user_text=request.message,
+        created_at=state["user_created_at"],
     )
     state["user_message_id"] = user_message_id
     state["turn_started_monotonic"] = request_started
     context = _context(provider, store, stream=False, router_prompt=router_prompt)
 
     turn_lock = await store.get_turn_lock(session_id)
-    async with turn_lock:
+    async with turn_lock, request_event_scope(session_id, user_message_id):
+        await _apply_conversation_thinking(context, session_id=session_id, subject_id=subject_id, state=state)
         final_state = await get_graph().ainvoke(
             state,
             context=context,
@@ -367,6 +413,7 @@ async def chat(
             session_id=session_id,
             user_message_id=user_message_id,
             reply_text=reply,
+            created_at=final_state.get("assistant_created_at"),
             reasoning_content=reasoning_content,
             model_name=model_name,
             provider_name=final_state.get("provider", provider.name),
@@ -375,13 +422,16 @@ async def chat(
             telemetry=final_state.get("telemetry"),
         )
         live = await store.get(session_id)
-        if subject_id and live is not None:
+        if subject_id and live is not None and not context.pa_tools_started:
             await save_runtime_state(
                 db,
                 session_id=session_id,
                 module=live.module,
                 memory=live.memory,
             )
+        if context.pa_tools_started:
+            await _finalize_pa_display(db, store=store, session_id=session_id, subject_id=subject_id,
+                                       assistant_message_id=assistant_message_id)
         schedule_background_routing(
             final_state,
             context,
@@ -396,6 +446,8 @@ async def chat(
         )
 
     return ChatResponse(
+        user_created_at=state["user_created_at"],
+        assistant_created_at=final_state.get("assistant_created_at"),
         session_id=session_id,
         reply=reply,
         reasoning_content=reasoning_content,
@@ -418,12 +470,13 @@ async def chat_stream(
     db: AsyncSession = Depends(get_db),
     subject_id: str | None = Depends(optional_subject_id),
 ) -> StreamingResponse:
+    received_at = utc_now()
     try:
         control = generations.begin(subject_id, str(request.generation_id or uuid4()))
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
-        response = await control.run(_prepare_chat_stream(request, store, db, subject_id, control))
+        response = await control.run(_prepare_chat_stream(request, store, db, subject_id, control, received_at=received_at))
     except GenerationStopped:
         generations.finish(control)
         async def stopped():
@@ -461,8 +514,10 @@ async def cancel_generation(
 async def _prepare_chat_stream(
     request: ChatRequest, store: SessionStore, db: AsyncSession,
     subject_id: str | None, control: GenerationControl,
+    *, received_at: datetime | None = None,
 ) -> StreamingResponse:
     request_started = perf_counter()
+    received_at = received_at or utc_now()
     settings = get_settings()
     await wait_for_pending_routing(
         request.session_id,
@@ -471,12 +526,13 @@ async def _prepare_chat_stream(
     )
     provider = await _resolve_provider(request, db, subject_id=subject_id)
     router_prompt = await effective_router_prompt(db)
-    state, session_id = await _initial_state(request, store, db, subject_id=subject_id)
+    state, session_id = await _initial_state(request, store, db, subject_id=subject_id, received_at=received_at)
     user_message_id = await _persist_user_message(
         db,
         subject_id=subject_id,
         session_id=session_id,
         user_text=request.message,
+        created_at=state["user_created_at"],
     )
     state["user_message_id"] = user_message_id
     state["turn_started_monotonic"] = request_started
@@ -501,6 +557,7 @@ async def _prepare_chat_stream(
                 "provider": provider.name,
                 "model": provider.model,
                 "user_message_id": user_message_id,
+                "user_created_at": state["user_created_at"].isoformat(),
             },
         )
 
@@ -513,8 +570,9 @@ async def _prepare_chat_stream(
         saw_error = False
         first_visible_at = None
         turn_lock = await store.get_turn_lock(session_id)
-        async with turn_lock:
+        async with turn_lock, request_event_scope(session_id, user_message_id):
             try:
+                await _apply_conversation_thinking(context, session_id=session_id, subject_id=subject_id, state=state)
                 # Ask for the running state as well as custom token events.
                 # LangGraph 1.2.11 can complete a graph while yielding no
                 # custom events in some production runtimes. The final values
@@ -564,7 +622,7 @@ async def _prepare_chat_stream(
             except GenerationStopped:
                 # The user row is already durable. Do not save unvalidated
                 # partial output, advance memory, or start the background router.
-                await store.append(session_id, Message(role="user", content=request.message))
+                await store.append(session_id, Message(role="user", content=request.message, created_at=state["user_created_at"]))
                 yield _sse("cancelled", {"cancelled": True, "session_id": session_id})
                 return
             except Exception as exc:  # noqa: BLE001
@@ -683,6 +741,7 @@ async def _prepare_chat_stream(
                     session_id=session_id,
                     user_message_id=user_message_id,
                     reply_text=final_reply or streamed_reply,
+                    created_at=(final_state or {}).get("assistant_created_at"),
                     reasoning_content=final_reasoning or streamed_reasoning,
                     model_name=final_model,
                     provider_name=(
@@ -698,13 +757,17 @@ async def _prepare_chat_stream(
                     ),
                 )
                 live = await store.get(session_id)
-                if subject_id and live is not None:
+                if subject_id and live is not None and not context.pa_tools_started:
                     await save_runtime_state(
                         final_db,
                         session_id=session_id,
                         module=live.module,
                         memory=live.memory,
                     )
+
+                if context.pa_tools_started:
+                    await _finalize_pa_display(final_db, store=store, session_id=session_id, subject_id=subject_id,
+                                               assistant_message_id=assistant_message_id)
 
             if final_state is not None:
                 schedule_background_routing(

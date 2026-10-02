@@ -1,7 +1,7 @@
 """Source-scoped deletion. Caller owns the transaction and session lock."""
 from sqlalchemy import select, update, delete, or_
 from .database_v2_schema import metadata as schema
-from .models import Conversation, ConversationMessage, AIExecutionEvent, ConversationModuleProgress
+from .models import Conversation, ConversationMessage, AIExecutionEvent, ConversationModuleProgress, ConversationContextCheckpoint
 
 
 async def detach_conversation(db, conversation):
@@ -90,6 +90,7 @@ async def detach_conversation(db, conversation):
                 evidence_status="missing", row_version=state.c.row_version + 1))
     await db.execute(delete(one).where(one.c.user_id == uid, one.c.id.in_(formulations)))
     await db.execute(delete(AIExecutionEvent).where(AIExecutionEvent.conversation_id == cid))
+    await db.execute(delete(ConversationContextCheckpoint).where(ConversationContextCheckpoint.conversation_id == cid))
     await db.execute(delete(ConversationModuleProgress).where(ConversationModuleProgress.conversation_id == cid))
     await db.execute(delete(ConversationMessage).where(ConversationMessage.conversation_id == cid))
     await db.execute(delete(Conversation).where(Conversation.id == cid, Conversation.subject_id == uid))

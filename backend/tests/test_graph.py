@@ -340,7 +340,7 @@ async def test_extract_memory_loads_history_for_later_turns(context, provider) -
     await run({"user_input": "two", "session_id": session_id, "metadata": {}}, context)
 
     # Turn 2's model call sees: user "one", assistant reply, user "two".
-    assert [m.content for m in provider.seen[-1]] == ["one", "saw 1 messages", "<user_message>two</user_message>"]
+    assert [m.source_content for m in provider.seen[-1]] == ["one", "saw 1 messages", "two"]
 
 
 async def test_state_carries_the_documented_fields(context) -> None:
@@ -802,11 +802,13 @@ async def test_memory_is_fed_back_into_the_prompt(context, provider) -> None:
         {"user_input": "再说说", "session_id": first["session_id"], "metadata": {}}, context
     )
     system = as_text(provider.systems[-1])
-    assert "# Recalled Context" in system
-    assert "我该怎么办？" in system  # Early background anchor remains.
+    # The raw history already includes this turn; the remote prompt cleanup
+    # removes only its duplicate anchor, not the conversation itself.
+    assert "我该怎么办？" not in system
+    assert [m.source_content for m in provider.seen[-1]].count("我该怎么办？") == 1
     assert "turn_count" not in system
     assert "last_user_message" not in system
-    assert provider.seen[-1][-1].content == "<user_message>再说说</user_message>"
+    assert provider.seen[-1][-1].source_content == "再说说"
 
 
 async def test_long_user_message_is_truncated_in_memory(context) -> None:

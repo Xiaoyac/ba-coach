@@ -67,7 +67,7 @@ async def get_goal_overview(user_id=Depends(require_subject_id), db=Depends(get_
     plan_ids = [row["plan_id"] for row in rows if row["plan_id"]]
     plan_context = {r["plan_id"]: {k: r[k] for k in ("schedule_kind", "review_cadence")} for r in
         (await db.execute(select(plan_details).where(plan_details.c.plan_id.in_(plan_ids)))).mappings()}
-    return {"enabled": True, "m1_reusable": (await initial_module(db, user_id=user_id)) == "module_2",
+    result = {"enabled": True, "m1_reusable": (await initial_module(db, user_id=user_id)) == "module_2",
         "activity_records": await public_activities(db, user_id),
         "goals": [{**{key: row[key] for key in ("id", "title", "status", "created_at", "updated_at")},
             **details.get(row["id"], {"goal_kind": "unclassified", "long_term_direction": None}),
@@ -76,6 +76,9 @@ async def get_goal_overview(user_id=Depends(require_subject_id), db=Depends(get_
                     if row["plan_id"] else None,
             "latest_cycle": {"ordinal": row["ordinal"], "status": row["cycle_status"]}
                             if row["ordinal"] is not None else None} for row in rows]}
+    from ..pa_lifecycle import read_pa_cards
+    result["pa_cards"] = await read_pa_cards(db, user_id=user_id, goals=result["goals"])
+    return result
 
 
 @router.get("/goals/{goal_id}/history")
@@ -119,8 +122,7 @@ async def get_program(session_id: str, user_id=Depends(require_subject_id), db=D
         missing = list(readiness["missing_fields"])
         if not readiness["extraction_fresh"]:
             missing.append("extraction_refresh")
-        if pending and state["current_module"] == "module_4" and not review_action:
-            missing.append("review_followup")
+
     m1_contract = None
     if state["current_module"] == "module_1":
         from ..m1_contract import missing_m1_fields, contract_for
@@ -181,14 +183,20 @@ async def select_goal(session_id: str, payload: Selection, user_id=Depends(requi
             cycle = (await db.execute(select(cycles).where(cycles.c.goal_id == goal_id,
                 cycles.c.status.in_(["planning", "waiting_execution", "reviewing"])).order_by(cycles.c.ordinal.desc()).limit(1))).mappings().one_or_none()
             if not cycle and goal["status"] == "active" and goal["current_plan_record_id"]:
-                from ..v2_repository import resume_paused_goal
-                resumed = await resume_paused_goal(db, user_id=user_id, goal_id=goal_id,
-                    conversation_id=conversation.id, retained=True)
-                cycle = (await db.execute(select(cycles).where(cycles.c.id == resumed))).mappings().one()
+                # Choosing an ended goal opens M2 discussion, not automatic
+                # execution of the old plan. Its historical card stays closed.
+                from ..pa_lifecycle import keep_reviewed_goal
+                created = await keep_reviewed_goal(db, user_id=user_id, conversation_id=conversation.id,
+                    goal={"id": goal_id, "plan_id": goal["current_plan_record_id"]}, values={})
+                cycle = (await db.execute(select(cycles).where(cycles.c.id == created["cycle_id"]))).mappings().one()
             cycle_id = cycle["id"] if cycle else await start_cycle(db, user_id=user_id, goal_id=goal_id,
                                                                   conversation_id=conversation.id)
+            plans = schema.tables["module_two_record"]
+            plan_confirmed = bool(cycle and await db.scalar(select(plans.c.id).where(
+                plans.c.id == cycle["module_two_record_id"], plans.c.goal_id == goal_id,
+                plans.c.record_status == "confirmed")))
             module = "module_4" if cycle and cycle["status"] in {"waiting_execution", "reviewing"} else (
-                "module_3" if cycle and cycle["module_two_record_id"] else "module_2")
+                "module_3" if plan_confirmed else "module_2")
             await db.execute(update(rt).where(rt.c.conversation_id == conversation.id).values(
                 active_goal_id=goal_id, active_cycle_id=cycle_id, current_module=module,
                 flow_status="waiting_execution" if cycle and cycle["status"] == "waiting_execution" else "active",
@@ -230,7 +238,7 @@ async def confirm_record(session_id: str, payload: Confirmation, user_id=Depends
             content={"module_1": "我已核对网页中的记录，理解 BA 的基本方法，并愿意开始目标设定。",
                      "module_2": "我已核对网页中的活动计划，并确认按照这份计划尝试。",
                      "module_3": "我已核对网页中的记录方式，并同意按这个约定记录和反馈。",
-                     "module_4": "我已核对网页中的复盘记录，并确认其中的下一步决定。"}[module])
+                     "module_4": "我已核对网页中的本轮复盘记录。"}[module])
         db.add(message)
         await db.flush()
         try:

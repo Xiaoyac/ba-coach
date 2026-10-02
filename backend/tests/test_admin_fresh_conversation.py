@@ -44,7 +44,9 @@ def test_admin_explicit_new_chat_starts_m1_and_seeds_real_opening(client, regist
         "session_id": second["session_id"], "message": "你好"})
     assert response.status_code == 200, response.text
     assert response.json()["reply_module"] == "module_1"
-    assert provider.seen[-1][0].content == OPENING_MESSAGE_TEXT
+    opening = provider.seen[-1][0]
+    assert opening.source_content == OPENING_MESSAGE_TEXT
+    assert opening.content == OPENING_MESSAGE_TEXT
 
 
 @pytest.mark.parametrize("completion_source", ["legacy_imported", "user_confirmed"])
@@ -59,7 +61,7 @@ get_settings.cache_clear()
 from sqlalchemy import insert, select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from app.database_v2_schema import metadata
-from app.models import AccountSettings, Conversation, ConversationMessage, UserAccount
+from app.models import AccountSettings, Conversation, ConversationMessage, ConversationReplySettings, UserAccount
 from app.opening import OPENING_MESSAGE_TEXT
 from app.routes.conversations import create_conversation
 from app.session import InMemorySessionStore
@@ -69,7 +71,8 @@ async def main():
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as conn:
         await conn.run_sync(metadata.create_all)
-        for model in (Conversation, ConversationMessage, UserAccount, AccountSettings):
+        # Include app-owned reply preferences as production Base.metadata.create_all does.
+        for model in (Conversation, ConversationMessage, UserAccount, AccountSettings, ConversationReplySettings):
             await conn.run_sync(model.__table__.create)
     try:
         async with maker() as db:
