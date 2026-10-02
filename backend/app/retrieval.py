@@ -598,6 +598,8 @@ class DatabaseKnowledgeBase:
             metrics.update(cache=access, status=result.status,
                            model_calls=0 if reused else result.model_calls,
                            saved_model_calls=result.model_calls if reused else 0)
+            if result.diagnostics:
+                metrics["retriever_details"] = result.diagnostics
             # Includes long-running catalog calls and hits from another worker's
             # old cache. If an import committed during retrieval, withhold this
             # snapshot; the next request will use the new corpus.
@@ -644,6 +646,15 @@ class DatabaseKnowledgeBase:
 
 
 _knowledge_base: KnowledgeBase | None = None
+_hybrid_knowledge_base: KnowledgeBase | None = None
+
+
+def get_hybrid_knowledge_base() -> KnowledgeBase:
+    global _hybrid_knowledge_base
+    if _hybrid_knowledge_base is None:
+        from .hybrid_knowledge_base import HybridDatabaseKnowledgeBase
+        _hybrid_knowledge_base = HybridDatabaseKnowledgeBase()
+    return _hybrid_knowledge_base
 
 
 def get_knowledge_base() -> KnowledgeBase:
@@ -667,11 +678,15 @@ def invalidate_knowledge_cache() -> None:
     """Invalidate the singleton after an administrator replaces a source."""
     if isinstance(_knowledge_base, DatabaseKnowledgeBase):
         _knowledge_base.invalidate()
+    if isinstance(_hybrid_knowledge_base, DatabaseKnowledgeBase):
+        _hybrid_knowledge_base.invalidate()
 
 
 async def warm_knowledge_base() -> int:
     """Best-effort startup warmup for the production database index."""
     knowledge = get_knowledge_base()
+    if get_settings().knowledge_hybrid_preload:
+        await get_hybrid_knowledge_base().warmup()
     if isinstance(knowledge, DatabaseKnowledgeBase):
         return await knowledge.warmup()
     return 0

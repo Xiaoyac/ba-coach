@@ -11,7 +11,7 @@ import hmac
 import json
 import secrets
 from collections import Counter, OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from time import monotonic
 from typing import TYPE_CHECKING, Awaitable, Callable
 
@@ -25,6 +25,7 @@ class SearchResult:
     status: str = "completed"
     cacheable: bool = True
     model_calls: int = 0
+    diagnostics: dict = field(default_factory=dict)
 
 
 @dataclass

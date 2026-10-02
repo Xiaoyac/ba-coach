@@ -198,6 +198,9 @@ async def _apply_conversation_thinking(context, *, session_id, subject_id, state
         from ..conversation_knowledge import mediator_enabled_for_conversation
         context.knowledge_mediator_bypass = not await mediator_enabled_for_conversation(
             preference_db, session_id=session_id, subject_id=subject_id)
+        if context.knowledge_mediator_bypass:
+            from ..retrieval import get_hybrid_knowledge_base
+            context.knowledge_base = get_hybrid_knowledge_base()
         reply_mode = await effective_reply_mode(preference_db, session_id=session_id, subject_id=subject_id)
         if reply_mode == ACK_DEEP:
             requested_effort = await effective_reply_effort(preference_db,
@@ -215,6 +218,7 @@ async def _apply_conversation_thinking(context, *, session_id, subject_id, state
             if requested_effort in context.provider.reply_effort_options() else None)
         context.provider = context.provider.with_deep_reply(effort=applied_effort)
     state["telemetry"] = {**(state.get("telemetry") or {}), "conversation_thinking_enabled": enabled,
+        "knowledge_mode": "astrbot_hybrid" if context.knowledge_mediator_bypass else "legacy_mediator",
         "reply_mode": reply_mode,
         "main_thinking_enabled": True if reply_mode == ACK_DEEP else enabled}
     if reply_mode == ACK_DEEP:

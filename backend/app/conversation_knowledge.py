@@ -1,4 +1,8 @@
-"""Resolve the temporary mediator bypass from current role and ownership."""
+"""Resolve mutually exclusive legacy/hybrid modes from current role/ownership.
+
+The existing durable boolean is retained for API/database compatibility:
+true = legacy retrieval plus mediator; false = hybrid retrieval directly.
+"""
 from sqlalchemy import select
 
 from .models import AccountSettings, Conversation, ConversationKnowledgeSettings, UserAccount

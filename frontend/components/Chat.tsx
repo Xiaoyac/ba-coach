@@ -440,19 +440,20 @@ export default function Chat({
 
       {accountRole === "admin" && onToggleMediator && <div className="shrink-0 border-b border-line px-4 py-2 sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p id="knowledge-mediator-help" className="text-xs leading-5 text-ink-muted">
-            当前对话测试 · 下一轮生效。关闭后保留知识检索，材料直接交给主回复。
-          </p>
-          <button type="button" role="switch" aria-checked={mediatorEnabled} aria-label="知识中介"
-            aria-describedby="knowledge-mediator-help" onClick={onToggleMediator}
+          <label htmlFor="knowledge-retrieval-mode" className="text-sm text-ink">知识检索模式</label>
+          <ArchiveSelect id="knowledge-retrieval-mode" label="知识检索模式"
+            value={mediatorEnabled ? "legacy_mediator" : "astrbot_hybrid"}
+            aria-describedby="knowledge-mediator-help"
+            onChange={value => { if ((value === "legacy_mediator") !== mediatorEnabled) onToggleMediator(); }}
             disabled={busy || loading || replyEffortBusy || mediatorBusy}
-            className={`inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-edge disabled:cursor-not-allowed disabled:opacity-50 ${mediatorEnabled ? "bg-accent-wash text-accent-ink" : "bg-raised text-ink-muted"}`}>
-            <span>知识中介 · {mediatorBusy ? "保存中…" : mediatorEnabled ? "开" : "关（直通检索）"}</span>
-            <span aria-hidden="true" className={`flex h-5 w-9 items-center rounded-full px-0.5 ${mediatorEnabled ? "justify-end bg-accent" : "justify-start bg-ink-faint"}`}>
-              <span className="h-4 w-4 rounded-full bg-panel" />
-            </span>
-          </button>
+            options={[{value: "legacy_mediator", label: "目录检索＋中介"},
+                      {value: "astrbot_hybrid", label: "AstrBot 混合检索"}]}
+            className="min-w-48" />
         </div>
+        <p id="knowledge-mediator-help" className="mt-1 text-xs leading-5 text-ink-muted">
+          {mediatorBusy ? <span role="status">保存中…</span> : "当前对话 · 下一轮生效。"}
+          {mediatorEnabled ? "目录筛选后由中介整理材料。" : "向量与关键词混合检索，材料直接交给主回复。"}
+        </p>
       </div>}
 
       {loading ? (

@@ -31,6 +31,18 @@ class Settings(BaseSettings):
     # Explicit rollout switch. Catalog performs two grounded router-model
     # decisions and is only constructed when explicitly selected.
     knowledge_retrieval_mode: Literal["p0", "enhanced", "catalog"] = "p0"
+    knowledge_hybrid_storage: str = ".rag-local/hybrid"
+    knowledge_hybrid_preload: bool = False
+    knowledge_embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    knowledge_hybrid_dense_weight: float = Field(default=0.9, ge=0, le=1)
+    knowledge_hybrid_min_cosine: float = Field(default=0.5, ge=-1, le=1)
+    knowledge_hybrid_sparse_min_coverage: float = Field(default=0.5, ge=0, le=1)
+    knowledge_hybrid_candidates: int = Field(default=20, ge=1, le=100)
+    knowledge_hybrid_timeout_seconds: float = Field(default=3, ge=0.1, le=15)
+    # Optional dedicated reranker, disabled by default. Never uses a chat model.
+    knowledge_rerank_model: str | None = None
+    knowledge_rerank_url: str | None = None
+    knowledge_rerank_api_key: str | None = None
     # BM25F has its own score scale. Never silently reuse P0 thresholds.
     knowledge_enhanced_min_score: float = Field(default=0.1, ge=0, allow_inf_nan=False)
     knowledge_enhanced_min_coverage: float = Field(default=0.25, ge=0, le=1)

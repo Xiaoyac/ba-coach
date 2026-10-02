@@ -30,6 +30,7 @@ export interface ConversationDetail extends ConversationSummary {
   revision?: number;
   thinking_enabled?: boolean | null;
   knowledge_mediator_enabled?: boolean;
+  knowledge_mode?: "legacy_mediator" | "astrbot_hybrid";
   messages: ChatMessage[];
   next_module: string | null;
   routing_mode?: ConversationRoutingMode;
@@ -50,6 +51,7 @@ export interface KnowledgeReferences {
   available: boolean;
   module: string | null;
   retrieval_outcome: string | null;
+  retrieval_mode?: string | null;
   gate_reason: string | null;
   mediator_status: string | null;
   mediator_reason: string | null;

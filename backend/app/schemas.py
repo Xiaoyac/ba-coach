@@ -770,6 +770,7 @@ class ConversationDetail(ConversationSummary):
     revision: int = 0
     thinking_enabled: bool | None = None
     knowledge_mediator_enabled: bool = True
+    knowledge_mode: Literal["legacy_mediator", "astrbot_hybrid"] = "legacy_mediator"
     reply_mode: Literal["standard", "ack_deep"] = "standard"
     reply_effort: Literal["low", "high", "max"] | None = None
     reply_effort_options: list[Literal["low", "high", "max"]] = Field(default_factory=list)

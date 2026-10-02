@@ -36,11 +36,11 @@ class LocalEmbedder:
     chunking; a long chunk can dilute a short relevant passage.
     """
 
-    def __init__(self, cache_dir: Path, model: str = DEFAULT_MODEL):
+    def __init__(self, cache_dir: Path, model: str = DEFAULT_MODEL, *, local_files_only=False):
         from fastembed import TextEmbedding
         from tokenizers import Tokenizer
 
-        self.model = TextEmbedding(model, cache_dir=str(cache_dir), threads=2)
+        self.model = TextEmbedding(model, cache_dir=str(cache_dir), threads=2, local_files_only=local_files_only)
         description = next(m for m in TextEmbedding.list_supported_models() if m["model"] == model)
         self.dimension = description["dim"]
         tokenizer = self.model.model.tokenizer

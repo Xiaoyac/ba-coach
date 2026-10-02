@@ -18,6 +18,7 @@ class KnowledgeReferences(BaseModel):
     available: bool = False
     module: str | None = None
     retrieval_outcome: str | None = None
+    retrieval_mode: str | None = None
     gate_reason: str | None = None
     mediator_status: str | None = None
     mediator_reason: str | None = None
@@ -43,6 +44,7 @@ def reference_snapshot(*, module, recalled, provided, retrieval, mediator, conte
     return KnowledgeReferences(
         version=4, available=True, module=module,
         retrieval_outcome=retrieval.get("outcome", "disabled"),
+        retrieval_mode=retrieval.get("ranking_mode"),
         gate_reason=(retrieval.get("gate") or {}).get("reason"),
         mediator_status=mediator.get("status"), mediator_reason=mediator.get("reason"),
         mediator_reasoning_content=mediator_reasoning if recalled else None,

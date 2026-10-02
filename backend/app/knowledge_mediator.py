@@ -90,13 +90,10 @@ async def mediate_knowledge(*, state, module, knowledge, provider, settings, pro
     if recording_status is None:
         recording_status = next((f.get("values", {}).get("recording_status")
             for f in bundle.get("facts", []) if f.get("source") == "module_three_record"), None)
-    if ((settings.knowledge_mediator_enabled or bypass) and module == "module_3" and recording_status == "declined"
-            and task not in {"m3_recording_purpose", "m3_recording_concern", "m3_reminder"}):
-        return [], "", {"status":"completed", "reason":"not_needed", "duration_ms":0,
-            "decision":"not_needed", "selections":[], "selected_ids":[], "applications":[],
-            "note":"用户已明确拒绝当前记录安排，本轮没有新的记录问题。", "guidance":"", "cautions":[],
-            "raw_chunk_count":len(knowledge), "candidate_chunk_count":0, "approved_chunk_count":0,
-            "withheld_on_error":False}
+    from .knowledge_policy import declined_recording_result
+    restricted = declined_recording_result(state, module, knowledge)
+    if (settings.knowledge_mediator_enabled or bypass) and restricted is not None:
+        return restricted
     if bypass:
         # Retrieval has already selected these source passages. No extra model,
         # generated guidance, or claim that the mediator approved them.

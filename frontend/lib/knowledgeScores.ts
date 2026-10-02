@@ -3,6 +3,7 @@ import type { ReferenceChunk } from "@/lib/conversations";
 const scoreLabels: Record<string, string> = {
   token_overlap: "词项重合分数", lexical: "词法检索分数", bm25f: "BM25F 排序分数",
   rrf: "RRF 融合分数", cross_encoder: "重排模型分数",
+  relative_score_fusion: "归一化混合检索分数",
 };
 
 export function knowledgeScoreLabel(chunk: ReferenceChunk): string {

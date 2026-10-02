@@ -5,6 +5,7 @@ import { fetchKnowledgeReferences, type KnowledgeReferences } from "@/lib/conver
 import { knowledgeScoreLabel } from "@/lib/knowledgeScores";
 
 const statusLabels: Record<string, string> = {
+  astrbot_hybrid: "AstrBot 混合检索", catalog: "目录检索", hybrid_direct: "混合检索材料直接提供给主回复",
   bypassed: "已绕过中介", admin_direct: "管理员测试：检索材料直通主回复",
   returned: "已召回", empty: "未召回相关片段", skipped: "已跳过", disabled: "未启用",
   completed: "已完成", fallback: "未放行", timeout: "中介超时，片段未放行",
@@ -49,7 +50,6 @@ export default function KnowledgeReferenceDetails({ messageId, pending, view = "
       onClick={() => setRetry(value => value + 1)}>重试加载</button></div>;
   if (!data) return <p role="status">正在加载本轮参考片段…</p>;
   if (!data.available) return <div role="status"><p className="font-mono text-ink">null</p><p className="mt-2">本条回复未记录参考片段（历史回复、开场白或未经过知识检索流程）。不会重新检索补填。</p></div>;
-  if (!data.recalled.length) return <p role="status" className="font-mono text-ink">null</p>;
   if (view === "mediator") return <div className="space-y-3">
     <div className="space-y-1">
       <p className="font-medium text-accent-ink">中介节点使用建议内容</p>
@@ -81,6 +81,7 @@ export default function KnowledgeReferenceDetails({ messageId, pending, view = "
     <div className="space-y-1">
       <p className="font-medium text-accent-ink">本轮召回 {data.recalled.length} 段 · 传给回复模型 {data.provided.length} 段</p>
       <p>模块：{data.module ?? "未记录"} · 检索：{label(data.retrieval_outcome)}</p>
+      {data.retrieval_mode && <p>检索模式：{label(data.retrieval_mode)}</p>}
       {data.gate_reason && <p>意图门控：{label(data.gate_reason)}</p>}
       <p>中介：{label(data.mediator_status)} · {label(data.mediator_reason)}</p>
       {data.context_withheld && <p className="text-accent-ink">安全上下文不可用，本轮片段全部未放行。</p>}

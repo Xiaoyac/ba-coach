@@ -58,6 +58,17 @@ def test_effective_setting_reaches_pipeline_and_ignores_spoofing(client, sandbox
         seen.append(kwargs.get('bypass'))
         return await original(**kwargs)
     monkeypatch.setattr(nodes, 'mediate_knowledge', capture)
+    from app import knowledge_policy, retrieval
+    original_direct = knowledge_policy.direct_hybrid_knowledge
+    def capture_direct(**kwargs):
+        seen.append(True)
+        return original_direct(**kwargs)
+    monkeypatch.setattr(knowledge_policy, 'direct_hybrid_knowledge', capture_direct)
+    class HybridFixture:
+        ranking_mode = 'astrbot_hybrid'
+        async def search(self, **kwargs):
+            return [KnowledgeChunk('hybrid-fixture', '合成资料', 'test')]
+    monkeypatch.setattr(retrieval, 'get_hybrid_knowledge_base', lambda: HybridFixture())
     convo = create(client, sandbox_admin_headers)
     sid = convo['session_id']
     def send(headers, session_id):

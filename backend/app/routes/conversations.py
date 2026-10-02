@@ -158,6 +158,7 @@ def _detail(c: Conversation, *, next_module: str | None = None,
         routing_mode=routing_mode,
         thinking_enabled=thinking_enabled,
         knowledge_mediator_enabled=knowledge_mediator_enabled,
+        knowledge_mode="legacy_mediator" if knowledge_mediator_enabled else "astrbot_hybrid",
         reply_mode=reply_mode,
         reply_effort=reply_effort,
         reply_effort_options=list(reply_effort_options),
@@ -547,7 +548,7 @@ async def update_conversation_mediator(
     await _owned_or_404(db, session_id=session_id, subject_id=caller.subject_id)
     turn_lock = await store.get_turn_lock(session_id)
     if turn_lock.locked():
-        raise HTTPException(status_code=409, detail="回复正在生成，请结束后再切换知识中介。")
+        raise HTTPException(status_code=409, detail="回复正在生成，请结束后再切换知识检索模式。")
     async with turn_lock:
         conversation = (await db.execute(select(Conversation).where(
             Conversation.session_id == session_id, Conversation.subject_id == caller.subject_id)
