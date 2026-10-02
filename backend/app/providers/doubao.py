@@ -12,7 +12,6 @@ from ..config import Settings
 from ..schemas import Message
 from .deadline import timeout
 from .request_ids import request_id
-from ..generation_policy import main_thinking_options
 from .base import (
     Completion,
     LLMProvider,
@@ -67,19 +66,17 @@ class DoubaoProvider(LLMProvider):
         self, *, system: SystemPrompt, messages: list[Message]
     ) -> Completion:
         try:
-            timeout_seconds = getattr(
-                self._settings, "provider_request_timeout_seconds", 60.0
-            )
+            timeout_seconds = self._main_timeout_seconds()
             async with timeout(timeout_seconds):
-                response = await self._client.chat.completions.create(
+                response = await self._main_client().chat.completions.create(
                     model=self.model,
-                    max_tokens=self._settings.doubao_max_tokens,
+                    max_tokens=self._main_max_tokens(),
                     messages=self._payload(system, messages),
-                    extra_body=main_thinking_options(self._settings, self.name, messages, enabled_override=self.thinking_override),
+                    extra_body=self._main_thinking_options(messages),
                 )
         except (TimeoutError, asyncio.TimeoutError, openai.APITimeoutError) as exc:
             raise ProviderError(
-                f"Doubao request timed out after {getattr(self._settings, 'provider_request_timeout_seconds', 60.0):g}s"
+                f"Doubao request timed out after {self._main_timeout_seconds():g}s"
             ) from exc
         except openai.APIStatusError as exc:
             raise ProviderError(_api_error_message(exc)) from exc
@@ -113,17 +110,15 @@ class DoubaoProvider(LLMProvider):
     ) -> AsyncIterator[StreamDelta]:
         stream = None
         try:
-            timeout_seconds = getattr(
-                self._settings, "provider_request_timeout_seconds", 60.0
-            )
+            timeout_seconds = self._main_timeout_seconds()
             async with timeout(timeout_seconds):
-                stream = await self._client.chat.completions.create(
+                stream = await self._main_client().chat.completions.create(
                     model=self.model,
-                    max_tokens=self._settings.doubao_max_tokens,
+                    max_tokens=self._main_max_tokens(),
                     messages=self._payload(system, messages),
                     stream=True,
                     stream_options={"include_usage": True},
-                    extra_body=main_thinking_options(self._settings, self.name, messages, enabled_override=self.thinking_override),
+                    extra_body=self._main_thinking_options(messages),
                 )
                 stream_request_id = request_id(stream)
                 if stream_request_id:
@@ -166,7 +161,7 @@ class DoubaoProvider(LLMProvider):
                 )
         except (TimeoutError, asyncio.TimeoutError, openai.APITimeoutError) as exc:
             raise ProviderError(
-                f"Doubao stream timed out after {getattr(self._settings, 'provider_request_timeout_seconds', 60.0):g}s"
+                f"Doubao stream timed out after {self._main_timeout_seconds():g}s"
             ) from exc
         except openai.APIStatusError as exc:
             raise ProviderError(_api_error_message(exc)) from exc

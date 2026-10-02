@@ -7,8 +7,10 @@ type Option = { value: string; label: string };
 
 /** A themed select-only combobox. The popover stays inside its owning dialog
  * for accessibility/theme inheritance, but uses the top layer to avoid clipping. */
-export default function ArchiveSelect({ label, value, options, onChange, className = "" }: {
+export default function ArchiveSelect({ label, value, options, onChange, className = "", id: triggerId,
+  disabled = false, "aria-describedby": describedBy }: {
   label: string; value: string; options: Option[]; onChange: (value: string) => void; className?: string;
+  id?: string; disabled?: boolean; "aria-describedby"?: string;
 }) {
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);
@@ -18,6 +20,7 @@ export default function ArchiveSelect({ label, value, options, onChange, classNa
   const [position, setPosition] = useState({ left: 0, top: 0, width: 208, maxHeight: 280 });
   const selected = options.findIndex(option => option.value === value);
   const search = useRef({ text: "", time: 0 });
+  const unavailable = disabled || options.length === 0;
 
   function reposition() {
     if (!trigger.current) return;
@@ -45,6 +48,7 @@ export default function ArchiveSelect({ label, value, options, onChange, classNa
   }
 
   function show(index = Math.max(0, selected)) {
+    if (unavailable) return;
     reposition();
     setActive(index);
     search.current = { text: "", time: 0 };
@@ -53,6 +57,7 @@ export default function ArchiveSelect({ label, value, options, onChange, classNa
   }
 
   function choose(index: number) {
+    if (unavailable) { close(); return; }
     if (options[index]) onChange(options[index].value);
     close(true);
   }
@@ -63,6 +68,10 @@ export default function ArchiveSelect({ label, value, options, onChange, classNa
     panel?.addEventListener("beforetoggle", sync);
     return () => panel?.removeEventListener("beforetoggle", sync);
   }, []);
+
+  useEffect(() => {
+    if (unavailable) close();
+  }, [unavailable]);
 
   useEffect(() => {
     if (!open) return;
@@ -86,6 +95,7 @@ export default function ArchiveSelect({ label, value, options, onChange, classNa
   }, [active, open]);
 
   function onKeyDown(event: KeyboardEvent) {
+    if (unavailable) return;
     if (event.key === "Tab") { close(); return; }
     if (event.key === "Escape" && open) {
       event.preventDefault(); event.stopPropagation(); close(true); return;
@@ -106,16 +116,19 @@ export default function ArchiveSelect({ label, value, options, onChange, classNa
   }
 
   return <div className={`relative min-w-0 ${className}`}>
-    <button ref={trigger} type="button" role="combobox" aria-label={label} aria-haspopup="listbox"
-      aria-controls={id} aria-expanded={open} aria-activedescendant={open ? `${id}-${active}` : undefined}
+    <button ref={trigger} id={triggerId} type="button" role="combobox" aria-label={label} aria-haspopup="listbox"
+      disabled={unavailable} aria-describedby={describedBy}
+      aria-controls={id} aria-expanded={open && !unavailable}
+      aria-activedescendant={open && !unavailable && options[active] ? `${id}-${active}` : undefined}
       onKeyDown={onKeyDown} onClick={() => open ? close() : show()}
-      className={`flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border bg-raised px-3 py-2.5 text-left text-sm text-ink transition-colors hover:border-accent-edge focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${open ? "border-accent-edge" : "border-line"}`}>
+      className={`flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border bg-raised px-3 py-2.5 text-left text-sm text-ink transition-colors enabled:hover:border-accent-edge focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50 ${open ? "border-accent-edge" : "border-line"}`}>
       <span className="truncate">{options[selected]?.label ?? "请选择"}</span>
       <ChevronDownMark aria-hidden className={`size-3.5 shrink-0 text-accent-ink transition-transform motion-reduce:transition-none ${open ? "rotate-180" : ""}`} />
     </button>
     <div ref={menu} id={id} popover="auto" role="listbox" aria-label={label} onKeyDown={onKeyDown}
       style={position} className="zen-scroll fixed m-0 overflow-y-auto overscroll-contain rounded-2xl border border-accent-edge bg-sheet p-1.5 text-ink shadow-xl">
       {options.map((option, index) => <button key={option.value} id={`${id}-${index}`} type="button"
+        disabled={unavailable}
         role="option" aria-selected={value === option.value} tabIndex={-1} data-option-index={index} data-value={option.value}
         onMouseDown={event => event.preventDefault()} onPointerMove={() => setActive(index)} onClick={() => choose(index)}
         className={`flex min-h-11 w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition-colors ${active === index ? "bg-accent-wash text-accent-ink" : "text-ink-muted hover:bg-raised"} ${value === option.value ? "font-medium" : ""}`}>

@@ -276,16 +276,16 @@ async def test_m2_requires_same_plan_current_evidence_and_real_consent(goal_api,
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('decision,expected', [(1,'module_3'),(3,'module_2')])
+@pytest.mark.parametrize('decision,expected', [(1,'module_2'),(3,'module_2')])
 async def test_m4_decision_advances_without_web_confirm(goal_api,decision,expected):
     _,db,_=goal_api
     await seed_review(db,decision=decision)
     message_count = (await db.execute(select(func.count()).select_from(ConversationMessage))).scalar_one()
     target,cycle=await record_steps(db,session_id='chat-a',user_id='a',module='module_4',requested_target='module_4',steps=list(MODULE_STEP_KEYS['module_4']),assistant_message_id=20)
-    assert target==expected and cycle!='reviewed-cycle'
+    assert target==expected and cycle is None
     logs=schema.tables['ai_decision_logs']
     log=(await db.execute(select(logs).where(logs.c.decision_type=='user_confirmation'))).mappings().one()
-    assert log['evidence_message_ids']==[18] and log['decision_value']['source']=='dialogue'
+    assert log['evidence_message_ids']==[14] and log['decision_value']['source']=='dialogue'
     assert (await db.execute(select(func.count()).select_from(ConversationMessage))).scalar_one()==message_count
 
 

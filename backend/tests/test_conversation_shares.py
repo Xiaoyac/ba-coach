@@ -88,7 +88,7 @@ def test_snapshot_excludes_saved_panels_and_uses_local_message_ids(
     message = data["messages"][-1]
     assert message["id"] != assistant_id
     assert all("reply_to_message_id" not in m for m in data["messages"])
-    assert set(message) == {"id", "role", "content", "created_at"}
+    assert set(message) == {"id", "role", "content", "created_at", "reply_status"}
     assert message["content"] == private_detail["messages"][-1]["content"]
     for private in ("已保存的回复思考", "已保存的路由思考", "router-test",
                     knowledge["mediator_guidance"], knowledge["mediator_reasoning_content"],
@@ -188,7 +188,7 @@ def test_missing_historical_details_are_unavailable_not_regenerated(client, auth
     data = client.get(f"/api/shares/{shared['token']}").json()
     assert len(data["messages"]) == 1
     message = data["messages"][0]
-    assert set(message) == {"id", "role", "content", "created_at"}
+    assert set(message) == {"id", "role", "content", "created_at", "reply_status"}
     assert provider.seen == [] and provider.route_calls == []
 
 

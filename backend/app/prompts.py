@@ -87,7 +87,7 @@ def _session_context(metadata: dict[str, str] | None) -> str:
 # Keep them in runtime memory for routing/extraction, never in reply context.
 _INTERNAL_MEMORY_KEYS = frozenset({
     "last_user_message", "last_module", "turn_count", "fresh_m1",
-    "routing_mode", "sandbox_mode", "sandbox_start_module", "dialogue_draft",
+    "routing_mode", "sandbox_mode", "sandbox_start_module", "dialogue_draft", "m3_dialogue_progress",
     "module_extraction_freshness", "current_transition_evidence",
     "current_module", "next_module", "phase", "current_phase", "current_step",
     "module_steps",

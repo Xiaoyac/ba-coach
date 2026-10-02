@@ -74,6 +74,8 @@ async def main():
         # Include app-owned reply preferences as production Base.metadata.create_all does.
         for model in (Conversation, ConversationMessage, UserAccount, AccountSettings, ConversationReplySettings):
             await conn.run_sync(model.__table__.create)
+        from app.db import Base
+        await conn.run_sync(Base.metadata.create_all)
     try:
         async with maker() as db:
             for account_id, role in ((1, 'admin'), (2, 'user')):

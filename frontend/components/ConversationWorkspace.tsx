@@ -11,13 +11,17 @@ import {
   getCurrentConversation,
   isMissing,
   listConversations,
+  replyModeLabels,
   routingModeLabels,
   setConversationThinking,
+  setConversationReplyEffort,
   subscribeConversation,
   updateConversation,
   type ConversationDetail,
   type ConversationSummary,
   type ConversationRoutingMode,
+  type ConversationReplyMode,
+  type ConversationReplyEffort,
 } from "@/lib/conversations";
 import Chat from "@/components/Chat";
 import ConversationShareModal from "@/components/ConversationShareModal";
@@ -62,6 +66,8 @@ type ConversationTurn = {
   routing: Partial<RoutingMeta>;
   error: string | null;
   notice: string | null;
+  replyWaiting: boolean;
+  replyWaitPhase: "awaiting" | "waiting" | "closed";
 };
 
 /**
@@ -101,9 +107,19 @@ export default function ConversationWorkspace({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [conversationRoutingMode, setConversationRoutingMode] = useState<ConversationRoutingMode>("router_code");
+  const [conversationReplyMode, setConversationReplyMode] = useState<ConversationReplyMode>("standard");
+  const [replyWaiting, setReplyWaiting] = useState(false);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [thinkingSaving, setThinkingSaving] = useState(false);
   const thinkingSaveRef = useRef(false);
+  const [replyEffort, setReplyEffort] = useState<ConversationReplyEffort>("low");
+  const [replyEffortOptions, setReplyEffortOptions] = useState<ConversationReplyEffort[] | null>(null);
+  const [replyEffortSavingSessions, setReplyEffortSavingSessions] = useState<string[]>([]);
+  const replyEffortSaveRef = useRef(new Set<string>());
+  const replySettingsBySession = useRef(new Map<string, {
+    revision: number; effort: ConversationReplyEffort; options: ConversationReplyEffort[] | null;
+  }>());
+  const replyEffortSaving = Boolean(sessionId && replyEffortSavingSessions.includes(sessionId));
   const [modeChooserOpen, setModeChooserOpen] = useState(false);
   const [modeChooserBusy, setModeChooserBusy] = useState(false);
   const [modeChooserError, setModeChooserError] = useState<string | null>(null);
@@ -194,15 +210,31 @@ export default function ConversationWorkspace({
     setRouting(turn.routing);
     setError(turn.error);
     setGenerationNotice(turn.notice);
+    setReplyWaiting(turn.replyWaiting);
     setStopping(turn.stopRequested);
     busyRef.current = true;
     setBusy(true);
   }
 
+  const syncReplySettings = useCallback((detail: ConversationDetail) => {
+    const known = replySettingsBySession.current.get(detail.session_id);
+    const revision = detail.revision ?? 0;
+    const settings = known && known.revision > revision ? known : {
+      revision, effort: detail.reply_effort ?? "low", options: detail.reply_effort_options ?? null,
+    };
+    replySettingsBySession.current.set(detail.session_id, settings);
+    if (activeSessionIdRef.current === detail.session_id) {
+      setReplyEffort(settings.effort);
+      setReplyEffortOptions(settings.options);
+    }
+  }, []);
+
   function showConversation(detail: ConversationDetail) {
     activeSessionIdRef.current = detail.session_id;
     setSessionId(detail.session_id);
     setConversationRoutingMode(detail.routing_mode ?? "router_code");
+    setConversationReplyMode(detail.reply_mode ?? "standard");
+    syncReplySettings(detail);
     if ((detail.revision ?? 0) >= (appliedRevisions.current.get(detail.session_id) ?? -1)) {
       setThinkingEnabled(detail.thinking_enabled ?? false);
     }
@@ -215,12 +247,14 @@ export default function ConversationWorkspace({
     setBusy(false);
     setStopping(false);
     setGenerationNotice(null);
+    setReplyWaiting(false);
     setMessages(detail.messages);
     setRouting(detail.next_module ? { next_module: detail.next_module, routing_pending: false, routed_by: "stored_state" } : {});
   }
 
   const applyRemoteSnapshot = useCallback((detail: ConversationDetail) => {
     if (!mountedRef.current) return;
+    syncReplySettings(detail);
     setConversations((prev) =>
       sortConversations(
         prev.map((entry) =>
@@ -241,6 +275,7 @@ export default function ConversationWorkspace({
     // but never attach its module state or messages to the active chat.
     if (activeSessionIdRef.current !== detail.session_id) return;
     setConversationRoutingMode(detail.routing_mode ?? "router_code");
+    setConversationReplyMode(detail.reply_mode ?? "standard");
     if ((detail.revision ?? 0) >= (appliedRevisions.current.get(detail.session_id) ?? -1)) {
       setThinkingEnabled(detail.thinking_enabled ?? false);
     }
@@ -258,6 +293,7 @@ export default function ConversationWorkspace({
       running.messages = detail.messages;
       running.error = null;
       running.notice = null;
+      running.replyWaiting = false;
       if (detail.next_module) {
         running.routing = {
           ...running.routing,
@@ -275,6 +311,7 @@ export default function ConversationWorkspace({
       setBusy(false);
       setStopping(false);
       setGenerationNotice(null);
+      setReplyWaiting(false);
       void refreshConversations();
       return;
     }
@@ -298,6 +335,7 @@ export default function ConversationWorkspace({
     if (floor !== undefined && detail.messages.length < floor) return;
     appliedRevisions.current.set(detail.session_id, revision);
     pendingFloors.current.delete(detail.session_id);
+    setReplyWaiting(false);
     setMessages((prev) => {
       const same =
         prev.length === detail.messages.length &&
@@ -331,7 +369,7 @@ export default function ConversationWorkspace({
       setStopping(false);
       setGenerationNotice(null);
     }
-  }, []);
+  }, [syncReplySettings]);
 
   async function refreshConversations(): Promise<ConversationSummary[] | null> {
     try {
@@ -348,7 +386,16 @@ export default function ConversationWorkspace({
     }
   }
 
-  async function beginConversation(mode?: ConversationRoutingMode): Promise<ConversationDetail | null> {
+  function clearReplyWaiting() {
+    const activeTurn = activeSessionIdRef.current ? turns.current.get(activeSessionIdRef.current) : undefined;
+    if (activeTurn) {
+      activeTurn.replyWaiting = false;
+      activeTurn.replyWaitPhase = "closed";
+    }
+    setReplyWaiting(false);
+  }
+
+  async function beginConversation(mode?: ConversationRoutingMode, replyMode: ConversationReplyMode = "standard", effort?: ConversationReplyEffort): Promise<ConversationDetail | null> {
     if (isAdmin && mode === undefined) {
       setModeChooserError(null);
       setModeChooserOpen(true);
@@ -360,6 +407,7 @@ export default function ConversationWorkspace({
     // cannot start two administrative POSTs with different mode selections.
     if (isAdmin && creatingConversationRef.current) return null;
     const generation = ++viewGenerationRef.current;
+    clearReplyWaiting();
     activeSessionIdRef.current = null;
     setSessionId(null);
     setMessages([]);
@@ -375,7 +423,7 @@ export default function ConversationWorkspace({
       // while it is in flight so one visible draft cannot create two rows.
       const request =
         creatingConversationRef.current ??
-        (creatingConversationRef.current = isAdmin ? createConversation(mode!) : getCurrentConversation());
+        (creatingConversationRef.current = isAdmin ? createConversation(mode!, replyMode, effort) : getCurrentConversation());
       const detail = await request;
       if (generation !== viewGenerationRef.current) return null;
       showConversation(detail);
@@ -426,6 +474,7 @@ export default function ConversationWorkspace({
     pendingFloors.current.delete(targetSessionId);
     deletedTurn?.controller.abort();
     if (targetSessionId === activeSessionIdRef.current) {
+      clearReplyWaiting();
       setError("这条对话已经不存在了，已从列表中移除。");
       activeSessionIdRef.current = null;
       setMessages([]);
@@ -452,6 +501,7 @@ export default function ConversationWorkspace({
 
   async function loadConversation(targetSessionId: string) {
     const generation = ++viewGenerationRef.current;
+    clearReplyWaiting();
     activeSessionIdRef.current = targetSessionId;
     setSessionId(targetSessionId);
     const running = turns.current.get(targetSessionId);
@@ -616,6 +666,8 @@ export default function ConversationWorkspace({
     const turn = sourceId ? turns.current.get(sourceId) : undefined;
     if (!turn || turn.stopRequested) return;
     turn.stopRequested = true;
+    turn.replyWaiting = false;
+    turn.replyWaitPhase = "closed";
     turn.notice = "正在停止生成…";
     publishTurn(turn);
     try {
@@ -640,7 +692,7 @@ export default function ConversationWorkspace({
 
   async function handleThinkingToggle() {
     const target = activeSessionIdRef.current;
-    if (!isAdmin || !target || loadingConversation || turns.current.has(target) || thinkingSaveRef.current) return;
+    if (!isAdmin || !target || loadingConversation || turns.current.has(target) || thinkingSaveRef.current || replyEffortSaveRef.current.has(target)) return;
     thinkingSaveRef.current = true;
     setThinkingSaving(true);
     try {
@@ -654,9 +706,30 @@ export default function ConversationWorkspace({
     }
   }
 
+  async function handleReplyEffortChange(effort: ConversationReplyEffort) {
+    const target = activeSessionIdRef.current;
+    if (!isAdmin || !target || loadingConversation || conversationReplyMode !== "ack_deep"
+      || !replyEffortOptions?.includes(effort) || effort === replyEffort || turns.current.has(target)
+      || thinkingSaveRef.current || replyEffortSaveRef.current.has(target)) return;
+    replyEffortSaveRef.current.add(target);
+    setReplyEffortSavingSessions(previous => [...previous, target]);
+    setError(null);
+    try {
+      const detail = await setConversationReplyEffort(target, effort);
+      if (activeSessionIdRef.current === target) applyRemoteSnapshot(detail);
+      else syncReplySettings(detail);
+    } catch (err) {
+      if (activeSessionIdRef.current === target) setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      replyEffortSaveRef.current.delete(target);
+      if (mountedRef.current) setReplyEffortSavingSessions(previous => previous.filter(id => id !== target));
+    }
+  }
+
   async function handleSend(text: string) {
     if (thinkingSaveRef.current) return;
     const sourceId = activeSessionIdRef.current;
+    if (sourceId && replyEffortSaveRef.current.has(sourceId)) return;
     if (!sourceId || sourceId !== sessionId || loadingConversation || turns.current.has(sourceId)) return;
     const controller = new AbortController();
     const baseline = messages.length;
@@ -667,7 +740,7 @@ export default function ConversationWorkspace({
         role: "assistant", content: "", reasoning_content: "", model_name: null,
         routing_reasoning_content: "", router_model_name: null,
       }],
-      routing: { ...routing }, error: null, notice: null,
+      routing: { ...routing }, error: null, notice: null, replyWaiting: false, replyWaitPhase: "awaiting",
     };
     turns.current.set(sourceId, turn);
     pendingFloors.current.set(sourceId, baseline + 2);
@@ -706,12 +779,32 @@ export default function ConversationWorkspace({
       } catch { /* The next bounded poll retries. */ }
       finally { window.clearTimeout(readTimeout); checking = false; }
     }, 5000);
-    const deadline = window.setTimeout(() => controller.abort(), 180000);
+    // The experiment's main request can itself use 180 seconds; leave room
+    // for the unchanged risk, routing and retrieval stages ahead of it.
+    const deadline = window.setTimeout(() => controller.abort(), conversationReplyMode === "ack_deep" ? 240000 : 180000);
     try {
       await streamChat(
         { message: text, session_id: sourceId, generation_id: turn.id },
         {
-          onCancelled: () => { turn.cancelled = true; },
+          onReplyWait: value => {
+            if (!isAdmin || conversationReplyMode !== "ack_deep" || !ownsTask() || activeSessionIdRef.current !== sourceId
+              || value.generation_id !== turn.id || turn.replyWaitPhase === "closed") return;
+            if (value.waiting && !turn.messages.at(-1)?.content.trim()) return;
+            turn.replyWaiting = value.waiting;
+            turn.replyWaitPhase = value.waiting ? "waiting" : "closed";
+            publishTurn(turn);
+          },
+          onDone: () => {
+            if (!ownsTask()) return;
+            turn.replyWaiting = false;
+            turn.replyWaitPhase = "closed";
+            publishTurn(turn);
+          },
+          onCancelled: () => {
+            turn.cancelled = true;
+            turn.replyWaiting = false;
+            turn.replyWaitPhase = "closed";
+          },
           onMeta: (meta) => {
             if (!ownsTask() || (meta.session_id && meta.session_id !== sourceId)) return;
             if (Number.isSafeInteger(meta.user_message_id) && meta.user_message_id! > 0) {
@@ -728,7 +821,13 @@ export default function ConversationWorkspace({
             if (meta.model) updateAssistant(message => ({ ...message, model_name: meta.model }));
             else publishTurn(turn);
           },
-          onDelta: delta => updateAssistant(message => ({ ...message, content: message.content + delta })),
+          onDelta: delta => {
+            if (delta.trim() && turn.replyWaitPhase === "waiting") {
+              turn.replyWaiting = false;
+              turn.replyWaitPhase = "closed";
+            }
+            updateAssistant(message => ({ ...message, content: message.content + delta }));
+          },
           onReasoningDelta: delta => updateAssistant(message => ({
             ...message, reasoning_content: (message.reasoning_content ?? "") + delta,
           })),
@@ -737,6 +836,8 @@ export default function ConversationWorkspace({
           })),
           onError: detail => {
             if (!ownsTask()) return;
+            turn.replyWaiting = false;
+            turn.replyWaitPhase = "closed";
             turn.error = detail;
             publishTurn(turn);
           },
@@ -745,11 +846,17 @@ export default function ConversationWorkspace({
       );
     } catch (err) {
       if (!recovered && !turn.cancelled && ownsTask()) {
+        turn.replyWaiting = false;
+        turn.replyWaitPhase = "closed";
         turn.error = controller.signal.aborted
           ? "等待回复超时，已停止转圈并继续同步记录。请稍后查看，避免重复发送。"
           : err instanceof Error ? err.message : String(err);
+        publishTurn(turn);
       }
     } finally {
+      turn.replyWaiting = false;
+      turn.replyWaitPhase = "closed";
+      if (ownsTask() && activeSessionIdRef.current === sourceId) setReplyWaiting(false);
       window.clearInterval(recovery);
       window.clearTimeout(deadline);
       recoveryRequest.current?.abort();
@@ -760,8 +867,9 @@ export default function ConversationWorkspace({
         pendingFloors.current.delete(sourceId);
         turn.error = null;
         turn.routing = { ...turn.routing, routing_pending: false };
-        turn.notice = "已停止生成，未完成的回复未保存。你可以继续发送消息。";
-        if (turn.messages.at(-1)?.role === "assistant") turn.messages = turn.messages.slice(0, -1);
+        const partialReply = conversationReplyMode === "ack_deep" && Boolean(turn.messages.at(-1)?.content.trim());
+        turn.notice = partialReply ? "已停止生成，已显示的内容会保留。你可以继续发送消息。" : "已停止生成，未完成的回复未保存。你可以继续发送消息。";
+        if (turn.messages.at(-1)?.role === "assistant" && !partialReply) turn.messages = turn.messages.slice(0, -1);
       }
       let detail: ConversationDetail | null = recoveredDetail;
       if (!detail) {
@@ -796,6 +904,7 @@ export default function ConversationWorkspace({
         busyRef.current = false;
         setBusy(false);
         setStopping(false);
+        setReplyWaiting(false);
         if (!turn.cancelled) setGenerationNotice(null);
       }
       if (detail && activeSessionIdRef.current === sourceId) applyRemoteSnapshot(detail);
@@ -809,12 +918,12 @@ export default function ConversationWorkspace({
     await beginConversation();
   }
 
-  async function handleModeChoice(mode: ConversationRoutingMode) {
+  async function handleModeChoice(mode: ConversationRoutingMode, replyMode: ConversationReplyMode, effort?: ConversationReplyEffort) {
     if (!isAdmin || creatingConversationRef.current) return;
     setModeChooserBusy(true);
     setModeChooserError(null);
     try {
-      const detail = await beginConversation(mode);
+      const detail = await beginConversation(mode, replyMode, effort);
       if (!mountedRef.current) return;
       if (detail) setModeChooserOpen(false);
       else setModeChooserError("新对话未能创建，请稍后重试。你的历史对话仍会保留。");
@@ -1002,18 +1111,25 @@ export default function ConversationWorkspace({
             over from whatever was being typed in the previous conversation. */}
         {isAdmin && !sessionId && !loadingConversation ? <section className="workspace-card flex h-full w-full flex-col items-center justify-center px-6 text-center">
           <h1 className="text-lg font-semibold">开始一段新对话</h1>
-          <p className="mt-3 max-w-sm text-sm leading-6 text-ink-muted">先选择这段对话的模块跳转方式，再从模块一开始。目前还没有创建新对话。</p>
+          <p className="mt-3 max-w-sm text-sm leading-6 text-ink-muted">先选择这段对话的模块跳转方式和回复模式，再从模块一开始。目前还没有创建新对话。</p>
           {error && <p role="alert" className="mt-3 max-w-sm text-sm text-alert-ink">{error}</p>}
           <button type="button" onClick={handleNew} className="mt-6 min-h-11 rounded-xl bg-accent px-5 text-sm text-on-accent">选择对话模式</button>
           <div className="mt-3 flex gap-3"><button type="button" onClick={() => { if (desktopLayout) setSidebarCollapsed(false); else setSidebarOpen(true); }} className="min-h-11 px-2 text-sm text-ink-muted">查看对话历史</button><button type="button" onClick={onLogout} className="min-h-11 px-2 text-sm text-ink-muted">退出登录</button></div>
         </section> : <Chat
           key={sessionId ?? "draft"}
+          sessionId={sessionId ?? undefined}
           messages={messages}
           routing={routing}
-          headerContent={isAdmin ? <><h1 className="truncate text-[0.92rem] font-semibold tracking-[0.02em] text-ink">对话</h1>{sessionId && !loadingConversation && <p aria-label="当前对话模式" title="本段对话创建时选定，不能在对话中切换" className="mt-0.5 text-xs leading-4 text-accent-ink">{routingModeLabels[conversationRoutingMode]}</p>}</> : undefined}
+          headerContent={isAdmin ? <><h1 className="truncate text-[0.92rem] font-semibold tracking-[0.02em] text-ink">对话</h1>{sessionId && !loadingConversation && <div className="mt-0.5 flex flex-wrap gap-x-2 text-xs leading-4 text-accent-ink" title="本段对话创建时选定，不能在对话中切换"><p aria-label="当前对话模式">{routingModeLabels[conversationRoutingMode]}</p><p aria-label="当前回复模式">{replyModeLabels[conversationReplyMode]}</p></div>}</> : undefined}
           busy={busy}
+          replyWaiting={replyWaiting}
+          replyMode={conversationReplyMode}
           thinkingEnabled={thinkingEnabled}
           thinkingBusy={thinkingSaving}
+          replyEffort={replyEffort}
+          replyEffortOptions={replyEffortOptions ?? []}
+          replyEffortBusy={replyEffortSaving}
+          onReplyEffortChange={isAdmin && sessionId && conversationReplyMode === "ack_deep" && replyEffortOptions?.length ? handleReplyEffortChange : undefined}
           onToggleThinking={isAdmin && sessionId ? handleThinkingToggle : undefined}
           generationStartedAt={sessionId ? turns.current.get(sessionId)?.startedAt : undefined}
           loading={loadingConversation}
@@ -1045,7 +1161,7 @@ export default function ConversationWorkspace({
         </div>
       </div>
 
-      {isAdmin && modeChooserOpen && <ConversationModeModal busy={modeChooserBusy} error={modeChooserError}
+      {isAdmin && modeChooserOpen && <ConversationModeModal busy={modeChooserBusy} error={modeChooserError} replyEffortOptions={replyEffortOptions}
         onChoose={handleModeChoice} onClose={() => { if (!creatingConversationRef.current) setModeChooserOpen(false); }} />}
 
       {isAdmin && <GoalOverview open={goalsOpen} sessionId={sessionId} busy={busy || loadingConversation}

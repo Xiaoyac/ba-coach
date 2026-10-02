@@ -12,28 +12,31 @@ function inline(text: string): ReactNode[] {
   });
 }
 
-export default function MessageMarkdown({ text }: { text: string }) {
+export default function MessageMarkdown({ text, trailing }: { text: string; trailing?: ReactNode }) {
   const blocks: ReactNode[] = [];
   const lines = text.replace(/\r\n/g, "\n").split("\n");
+  let lastContentLine = lines.length - 1;
+  while (lastContentLine >= 0 && !lines[lastContentLine].trim()) lastContentLine--;
+  const suffix = (index: number) => index === lastContentLine ? trailing : null;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (/^\s*```/.test(line)) {
       const code: string[] = [];
       while (++i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i]);
-      blocks.push(<pre key={i} className="my-2 overflow-x-auto rounded-xl bg-raised p-3 text-xs"><code>{code.join("\n")}</code></pre>);
+      blocks.push(<Fragment key={i}><pre className="my-2 overflow-x-auto rounded-xl bg-raised p-3 text-xs"><code>{code.join("\n")}</code></pre>{i >= lastContentLine ? trailing : null}</Fragment>);
     } else if (/^\s*#{1,6}\s+/.test(line)) {
-      blocks.push(<div role="heading" aria-level={Math.min(line.trimStart().match(/^#+/)![0].length, 6)} key={i} className="mt-3 mb-1 font-semibold">{inline(line.replace(/^\s*#{1,6}\s+/, ""))}</div>);
+      blocks.push(<div role="heading" aria-level={Math.min(line.trimStart().match(/^#+/)![0].length, 6)} key={i} className="mt-3 mb-1 font-semibold">{inline(line.replace(/^\s*#{1,6}\s+/, ""))}{suffix(i)}</div>);
     } else if (/^\s*([-*+] |\d+[.)] )/.test(line)) {
       const ordered = /^\s*\d/.test(line);
       const items: ReactNode[] = [];
       const pattern = ordered ? /^\s*\d+[.)]\s+/ : /^\s*[-*+]\s+/;
-      do { items.push(<li key={i}>{inline(lines[i].replace(pattern, ""))}</li>); i++; } while (i < lines.length && pattern.test(lines[i]));
+      do { items.push(<li key={i}>{inline(lines[i].replace(pattern, ""))}{suffix(i)}</li>); i++; } while (i < lines.length && pattern.test(lines[i]));
       i--;
       blocks.push(ordered ? <ol key={i} className="my-2 list-decimal space-y-1 pl-5">{items}</ol> : <ul key={i} className="my-2 list-disc space-y-1 pl-5">{items}</ul>);
     } else if (/^\s*>\s?/.test(line)) {
-      blocks.push(<blockquote key={i} className="my-2 border-l-2 border-accent-edge pl-3 text-ink-muted">{inline(line.replace(/^\s*>\s?/, ""))}</blockquote>);
+      blocks.push(<blockquote key={i} className="my-2 border-l-2 border-accent-edge pl-3 text-ink-muted">{inline(line.replace(/^\s*>\s?/, ""))}{suffix(i)}</blockquote>);
     } else if (line.trim()) {
-      blocks.push(<p key={i} className="my-1 whitespace-pre-wrap">{inline(line)}</p>);
+      blocks.push(<p key={i} className="my-1 whitespace-pre-wrap">{inline(line)}{suffix(i)}</p>);
     } else blocks.push(<div key={i} className="h-2" />);
   }
   return <div className="whitespace-normal break-words">{blocks}</div>;

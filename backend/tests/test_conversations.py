@@ -65,6 +65,7 @@ def test_create_conversation_persists_opening_and_seeds_agent_history(
         {
             "id": detail["messages"][0]["id"],
             "reply_to_message_id": None,
+            "reply_status": None,
             "role": "assistant",
             "content": OPENING_MESSAGE_TEXT,
             "created_at": opening_created_at,
@@ -102,6 +103,7 @@ def test_create_conversation_persists_opening_and_seeds_agent_history(
         "router_model_name": None,
         "timing": None,
         "reply_to_message_id": None,
+            "reply_status": None,
     }
     assert len(refreshed["messages"]) == 3
 

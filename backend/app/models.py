@@ -706,6 +706,40 @@ class ConversationReplySettings(Base):
     thinking_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
+class ConversationResponseMode(Base):
+    """Owned, creation-time response experiment; separate from workflow memory."""
+
+    __tablename__ = "conversation_response_modes"
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True)
+    mode: Mapped[str] = mapped_column(String(24), nullable=False, default="standard")
+
+
+class ConversationReplyEffort(Base):
+    """Admin main-reply compute preference, never intervention/workflow memory."""
+
+    __tablename__ = "conversation_reply_efforts"
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True)
+    effort: Mapped[str] = mapped_column(String(8), nullable=False, default="low")
+    __table_args__ = (CheckConstraint("effort IN ('low', 'high', 'max')",
+                                     name="ck_conversation_reply_effort"),)
+
+
+class MessageFeedback(Base):
+    """The conversation owner's current vote; excluded from model context and shares."""
+
+    __tablename__ = "message_feedback"
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("conversation_messages.id", ondelete="CASCADE"), primary_key=True
+    )
+    rating: Mapped[str] = mapped_column(String(4), nullable=False)
+    reasons: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    comment: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=_utcnow)
+    __table_args__ = (CheckConstraint("rating IN ('up', 'down')", name="ck_message_feedback_rating"),)
+
+
 class ConversationMessage(Base):
     """One turn's worth of transcript. Append-only — never trimmed, never edited."""
 

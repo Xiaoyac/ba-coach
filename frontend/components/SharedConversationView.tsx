@@ -72,7 +72,7 @@ export default function SharedConversationView({ token }: { token: string }) {
         <section aria-label="分享的对话消息" className="space-y-5 sm:space-y-6">
           {snapshot.messages.map((message, index) => <MessageRow
             key={message.id ?? index}
-            message={snapshot.snapshot_version === 2 ? message : { id: message.id, role: message.role, content: message.content, created_at: message.created_at }}
+            message={snapshot.snapshot_version === 2 ? message : { id: message.id, role: message.role, content: message.content, created_at: message.created_at, reply_status: message.reply_status }}
             pending={false}
             routingPending={false}
             animate={false}

@@ -26,6 +26,8 @@ async def goal_api(monkeypatch):
         await connection.run_sync(schema.create_all)
         for model in (Conversation, ConversationMessage):
             await connection.run_sync(model.__table__.create)
+        from app.db import Base
+        await connection.run_sync(Base.metadata.create_all)
     async with async_sessionmaker(engine, expire_on_commit=False)() as db:
         await db.execute(insert(schema.tables["user_profile"]), [{"uuid": "a"}, {"uuid": "b"}])
         await db.execute(insert(Conversation), [

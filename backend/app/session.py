@@ -80,6 +80,10 @@ class SessionStore(ABC):
     async def get_turn_lock(self, session_id: str) -> asyncio.Lock:
         """Return the lock that serialises model turns for one conversation."""
 
+    async def replace_last_reply(self, session_id: str, *, expected: Message, content: str) -> bool:
+        """Align a completed reply with transport composition under the turn lock."""
+        raise NotImplementedError
+
 
 class InMemorySessionStore(SessionStore):
     """Process-local store with TTL expiry and history trimming."""
@@ -189,6 +193,19 @@ class InMemorySessionStore(SessionStore):
             session = self._sessions.get(session_id)
             if session is not None:
                 session.module = module
+
+    async def replace_last_reply(self, session_id: str, *, expected: Message, content: str) -> bool:
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if not session or not session.messages:
+                return False
+            latest = session.messages[-1]
+            if (latest.role != "assistant" or latest.content != expected.content
+                    or latest.created_at != expected.created_at):
+                return False
+            session.messages[-1] = latest.model_copy(update={"content": content})
+            session.updated_at = time.time()
+            return True
 
     async def set_memory(self, session_id: str, memory: dict[str, str]) -> None:
         async with self._lock:

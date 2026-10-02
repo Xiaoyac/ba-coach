@@ -26,7 +26,8 @@ IGNORED_KNOWLEDGE_SOURCE_NAMES = frozenset(
     {"BA-chapters-1-6.md", "BA-chapters-7-9.md"}
 )
 
-_HEADING = re.compile(r"^\s*\\?#{1,6}\s+(.+?)\s*$")
+_HEADING = re.compile(r"^\s*\\?(#{1,6})\s+(.+?)\s*$")
+_CHUNKER_VERSION = "markdown-hierarchy-v2"
 
 
 @dataclass(frozen=True)
@@ -103,7 +104,9 @@ def chunk_markdown(
 ) -> list[ParsedKnowledgeChunk]:
     """Split normal or Coze-escaped Markdown headings into prompt-sized chunks."""
     sections: list[tuple[str, str]] = []
+    headings: list[tuple[int, str]] = []
     heading = ""
+    fence = None
     lines: list[str] = []
 
     def flush() -> None:
@@ -112,10 +115,26 @@ def chunk_markdown(
             sections.append((heading, body))
 
     for raw_line in markdown.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        fence_match = re.match(r"^\s{0,3}(`{3,}|~{3,})(.*)$", raw_line)
+        if fence_match:
+            marker, suffix = fence_match.groups()
+            if fence is None:
+                fence = marker
+            elif marker[0] == fence[0] and len(marker) >= len(fence) and not suffix.strip():
+                fence = None
+            lines.append(raw_line)
+            continue
+        if fence is not None:
+            lines.append(raw_line)
+            continue
         match = _HEADING.match(raw_line)
         if match:
             flush()
-            heading = match.group(1).strip()
+            level = len(match.group(1))
+            title = re.sub(r"\s+#+\s*$", "", match.group(2)).strip()
+            headings = [(depth, text) for depth, text in headings if depth < level]
+            headings.append((level, title))
+            heading = " > ".join(text for _, text in headings)
             lines = []
         else:
             lines.append(raw_line)
@@ -126,7 +145,7 @@ def chunk_markdown(
         for piece in _split_body(body, max_chars=max_chars, overlap=overlap):
             content = f"# {section_heading}\n\n{piece}" if section_heading else piece
             chunks.append(
-                ParsedKnowledgeChunk(heading=section_heading, content=content.strip())
+                ParsedKnowledgeChunk(heading=section_heading[:512], content=content.strip())
             )
     return chunks
 
@@ -151,7 +170,8 @@ async def import_knowledge_source(
         raise ValueError("knowledge source contains no readable text")
 
     normalized = markdown.replace("\r\n", "\n").replace("\r", "\n").strip()
-    content_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    # A changed chunking algorithm must rebuild indexes even for identical text.
+    content_hash = hashlib.sha256((_CHUNKER_VERSION + "\n" + normalized).encode("utf-8")).hexdigest()
     source = (
         await db.execute(
             select(KnowledgeSourceRecord)

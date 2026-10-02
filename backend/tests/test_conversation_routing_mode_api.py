@@ -18,9 +18,9 @@ def test_member_cannot_create_router_only_or_supply_arbitrary_mode(client, auth_
         assert client.post('/api/conversations', headers=auth_headers, json=body).status_code == 422
     assert client.get('/api/conversations', headers=auth_headers).json() == []
     default = client.post('/api/conversations', headers=auth_headers)
-    assert default.status_code == 201 and default.json()['routing_mode'] == 'router_code'
+    assert default.status_code == 201 and default.json()['routing_mode'] == 'router_only'
     explicit = client.post('/api/conversations', headers=auth_headers, json={'routing_mode':'router_code'})
-    assert explicit.status_code == 201 and explicit.json()['routing_mode'] == 'router_code'
+    assert explicit.status_code == 201 and explicit.json()['routing_mode'] == 'router_only'
 
 
 def test_unsupported_legacy_database_does_not_pretend_to_enable_experiment(client, register, db_sessionmaker):
@@ -48,7 +48,7 @@ from httpx import ASGITransport,AsyncClient
 from sqlalchemy import insert,select,update,func
 from sqlalchemy.ext.asyncio import create_async_engine,async_sessionmaker
 from app.database_v2_schema import metadata
-from app.models import AccountSettings,Conversation,ConversationMessage,ConversationReplySettings,UserAccount
+from app.models import AccountSettings,Conversation,ConversationMessage,ConversationReplySettings,ConversationResponseMode,ConversationReplyEffort,UserAccount
 from app.db import get_db
 from app.identity import require_subject_id
 from app.routes import conversations,program
@@ -60,8 +60,10 @@ async def main():
     async with engine.begin() as connection:
         await connection.run_sync(metadata.create_all)
         # Include app-owned reply preferences as production Base.metadata.create_all does.
-        for model in (Conversation,ConversationMessage,UserAccount,AccountSettings,ConversationReplySettings):
+        for model in (Conversation,ConversationMessage,UserAccount,AccountSettings,ConversationReplySettings,ConversationResponseMode,ConversationReplyEffort):
             await connection.run_sync(model.__table__.create)
+        from app.db import Base
+        await connection.run_sync(Base.metadata.create_all)
     maker=async_sessionmaker(engine,expire_on_commit=False)
     try:
         async with maker() as db:
@@ -117,9 +119,9 @@ async def main():
                 actor[0]='admin'
                 await db.execute(update(AccountSettings).where(AccountSettings.account_id==1).values(role='user'))
                 await db.commit()
-                # Retained marker does not retain elevated permission after demotion.
+                # Demoted account adopts the member router-only policy.
                 after=await client.get('/api/conversations/'+sid)
-                assert after.status_code==200 and after.json()['routing_mode']=='router_code'
+                assert after.status_code==200 and after.json()['routing_mode']=='router_only'
     finally:
         await engine.dispose()
 asyncio.run(main())

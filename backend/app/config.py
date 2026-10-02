@@ -160,6 +160,9 @@ class Settings(BaseSettings):
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "qwen3.8-flash"
+    # Reuse the unchanged system prefix; all prompt text/order remains intact.
+    # Applies only to qualified Qwen models on the official DashScope endpoint.
+    qwen_prompt_cache_enabled: bool = True
     deepseek_max_tokens: int = 4000
     qwen_thinking_budget: int = Field(default=1024, ge=128, le=8000)
     deepseek_reasoning_effort: Literal["low", "medium", "high", "provider_default"] = "provider_default"

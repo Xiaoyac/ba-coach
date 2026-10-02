@@ -19,20 +19,23 @@ async def effective_routing_mode(db, *, conversation, state, user_id, lock=False
     """Call with an owned conversation and its freshly read runtime memory.
 
     Neither request metadata nor an in-memory routing flag grants permission.
-    The current persisted administrator role must still authorize this mode.
+    Members use the server's router-only policy; admins retain their saved mode.
     """
     if (conversation is None or conversation.subject_id != user_id or not isinstance(state, Mapping)
             or state.get("conversation_id", conversation.id) != conversation.id):
         return ROUTER_CODE
     memory = state.get("memory") or {}
-    if configured_routing_mode(memory) != ROUTER_ONLY or memory.get("sandbox_mode") == "true":
+    if memory.get("sandbox_mode") is True or str(memory.get("sandbox_mode")).lower() == "true":
         return ROUTER_CODE
     from .models import AccountSettings, UserAccount
     query = select(AccountSettings.role).join(UserAccount, UserAccount.id == AccountSettings.account_id).where(
         UserAccount.profile_uuid == user_id)
     if lock:
         query = query.with_for_update()
-    return ROUTER_ONLY if await db.scalar(query) == "admin" else ROUTER_CODE
+    role = await db.scalar(query)
+    if role == "user":
+        return ROUTER_ONLY
+    return ROUTER_ONLY if role == "admin" and configured_routing_mode(memory) == ROUTER_ONLY else ROUTER_CODE
 
 
 async def apply_router_only_decision(state, context, decision):

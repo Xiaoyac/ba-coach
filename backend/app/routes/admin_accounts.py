@@ -22,6 +22,7 @@ from ..models import (
     ConversationMessage,
     ConversationModuleProgress,
     ConversationRuntimeState,
+    ConversationReplyEffort,
     ProfileExtension,
     UserAccount,
 )
@@ -155,6 +156,8 @@ async def _purge_account_business_data(db: AsyncSession, *, profile_uuid: str) -
             telemetry_filters.append(AIExecutionEvent.conversation_id.in_(conversation_ids))
         await db.execute(delete(AIExecutionEvent).where(or_(*telemetry_filters)))
         if conversation_ids:
+            await db.execute(delete(ConversationReplyEffort).where(
+                ConversationReplyEffort.conversation_id.in_(conversation_ids)))
             await db.execute(delete(ConversationModuleProgress).where(
                 ConversationModuleProgress.conversation_id.in_(conversation_ids)))
             await db.execute(delete(ConversationRuntimeState).where(
@@ -218,6 +221,8 @@ async def _purge_account_business_data(db: AsyncSession, *, profile_uuid: str) -
         telemetry_filters.append(AIExecutionEvent.session_id.in_([row.session_id for row in conversations]))
     await db.execute(delete(AIExecutionEvent).where(or_(*telemetry_filters)))
     if conversation_ids:
+        await db.execute(delete(ConversationReplyEffort).where(
+            ConversationReplyEffort.conversation_id.in_(conversation_ids)))
         await db.execute(delete(ConversationModuleProgress).where(
             ConversationModuleProgress.conversation_id.in_(conversation_ids)))
         await db.execute(delete(ConversationRuntimeState).where(

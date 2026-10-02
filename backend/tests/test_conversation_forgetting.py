@@ -24,6 +24,8 @@ async def deletion_db():
         # Match the app-owned tables touched by the real conversation-delete endpoint.
         for model in (Conversation, ConversationMessage, AIExecutionEvent, ConversationModuleProgress, ConversationReplySettings, ConversationContextCheckpoint):
             await conn.run_sync(model.__table__.create)
+        from app.db import Base
+        await conn.run_sync(Base.metadata.create_all)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         await db.execute(insert(schema.tables["user_profile"]), [{"uuid":"a"},{"uuid":"b"}])

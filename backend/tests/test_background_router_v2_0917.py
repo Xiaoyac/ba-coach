@@ -35,6 +35,8 @@ async def main():
             await conn.run_sync(metadata.create_all)
             for model in (Conversation, ConversationMessage, AIExecutionEvent, InteractionStatus):
                 await conn.run_sync(model.__table__.create)
+            from app.db import Base
+            await conn.run_sync(Base.metadata.create_all)
         runtime = metadata.tables['conversation_runtime_states']
         async with maker() as db:
             await db.execute(insert(metadata.tables['user_profile']), {'uuid':'synthetic'})

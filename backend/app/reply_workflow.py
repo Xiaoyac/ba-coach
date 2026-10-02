@@ -79,11 +79,16 @@ async def read_reply_workflow(maker, user_id, session_id):
         summary_fields = ("activity_content", "schedule_text", "location", "duration_minutes", "frequency_rule",
                           "potential_barriers", "barrier_coping_plan", "negotiated_record_plan")
         recording = {}
+        dialogue_progress = ""
         if runtime['current_module'] == 'module_3':
             from .knowledge_context import read_recording_state
+            from .dialogue_progress_store import read_m3_progress
             recording = await read_recording_state(db, user_id, runtime)
+            dialogue_progress = await read_m3_progress(db, conversation=conversation, state=runtime,
+                latest_user_message_id=latest.id if latest and latest.role == 'user' else None)
         return {"available": True, "current_module": runtime['current_module'],
                 **recording,
+                "dialogue_progress_context": dialogue_progress,
                 "flow_status": runtime['flow_status'], "row_version": runtime['row_version'],
                 "goal_selected": goal_selected, "plan_confirmed": status == 'confirmed',
                 "goal_creation": goal_creation,
@@ -107,8 +112,12 @@ def workflow_prompt(authority, *, routing_mode="router_code"):
     prompt = ("# 已提交业务状态\n" + json.dumps(facts, ensure_ascii=False)
               + "\n字段缺失或尚未保存不代表用户未表达；这里只说明保存结果，不指定话题、下一问或重复确认。状态不可用时不能声称已保存或已切换。")
     if routing_mode == "router_only":
-        prompt += ("\n当前模块已由 Router 选择并提交，草稿完整性不是继续对话的前提。"
-                   "模块切换本身不表示目标、计划或记录已经保存、确认或执行。")
+        prompt += ("\n本对话采用仅 Router 路由：当前模块已由 Router 选择并提交，按本轮模块提示词回应。"
+                   "上述 flow_status、确认状态、草稿和已记录信息仅用于区分真实保存事实，"
+                   "不构成停留、退回、补齐字段或重复索要确认的指令，也不是继续对话的前提。"
+                   "模块切换本身不表示目标、计划或记录已经保存、确认或执行；不得据此声称业务已完成。")
+    if authority.get("current_module") == "module_3" and authority.get("dialogue_progress_context"):
+        prompt += "\n\n" + authority["dialogue_progress_context"]
     return prompt
 
 

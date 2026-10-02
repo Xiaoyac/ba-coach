@@ -40,7 +40,7 @@ def test_markdown_chunker_accepts_normal_and_coze_escaped_headings() -> None:
         "# 第一章\n\n行为激活内容。\n\n\\## 第二节\n\n活动监测内容。",
         max_chars=50,
     )
-    assert [chunk.heading for chunk in chunks] == ["第一章", "第二节"]
+    assert [chunk.heading for chunk in chunks] == ["第一章", "第一章 > 第二节"]
     assert chunks[0].content.startswith("# 第一章")
     assert "活动监测" in chunks[1].content
 

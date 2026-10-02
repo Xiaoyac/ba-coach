@@ -78,13 +78,72 @@ class LLMProvider(ABC):
         async for delta in stream_openai_tools(self, system=system, messages=messages,
                                               tools=tools, tool_choice=tool_choice):
             yield delta
+    deep_reply_enabled: bool = False
+    reply_effort: str | None = None
 
     def with_thinking(self, enabled: bool | None) -> "LLMProvider":
         # Registry clients are shared. Copy only the wrapper; never mutate its
         # settings or override for another concurrent conversation.
         scoped = copy(self)
         scoped.thinking_override = enabled
+        scoped.deep_reply_enabled = False
+        scoped.reply_effort = None
         return scoped
+
+    def reply_effort_options(self) -> tuple[str, ...]:
+        from ..generation_policy import reply_effort_options
+        return (reply_effort_options(self._settings, self.name, model=self.model)
+                if hasattr(self, "_settings") else ())
+
+    def with_deep_reply(self, effort: str | None = None) -> "LLMProvider":
+        """Increase only this wrapper's main-reply compute, not its auxiliaries."""
+        if effort is not None and effort not in self.reply_effort_options():
+            raise ValueError("Unsupported main reply effort for this model/channel")
+        scoped = copy(self)
+        scoped.deep_reply_enabled = True
+        scoped.reply_effort = effort
+        return scoped
+
+    def deep_reply_policy(self) -> dict:
+        """Requested wire configuration for experiment diagnostics, not a claim
+        that the upstream actually spent its entire budget on reasoning.
+        """
+        if not self.deep_reply_enabled:
+            return {}
+        result = {"enabled": True, "model": self.model}
+        if self.reply_effort is not None:
+            result["reply_effort"] = self.reply_effort
+        if hasattr(self, "_settings"):
+            from ..generation_policy import deep_reply_thinking_options
+            result.update(
+                max_tokens=self._main_max_tokens(),
+                timeout_seconds=self._main_timeout_seconds(),
+                thinking_options=deep_reply_thinking_options(self._settings, self.name,
+                    model=self.model, effort=self.reply_effort),
+            )
+        return result
+
+    def _main_max_tokens(self) -> int:
+        configured = getattr(self._settings, f"{self.name}_max_tokens")
+        return max(configured, 16384) if self.deep_reply_enabled else configured
+
+    def _main_timeout_seconds(self) -> float:
+        configured = getattr(self._settings, "provider_request_timeout_seconds", 60.0)
+        return max(configured, 180.0) if self.deep_reply_enabled else configured
+
+    def _main_client(self):
+        # Raising only the outer deadline would leave the SDK's shorter read
+        # timeout in force. with_options shares transport without mutating it.
+        return (self._client.with_options(timeout=self._main_timeout_seconds(), max_retries=0)
+                if self.deep_reply_enabled else self._client)
+
+    def _main_thinking_options(self, messages) -> dict:
+        from ..generation_policy import deep_reply_thinking_options, main_thinking_options
+        if self.deep_reply_enabled:
+            return deep_reply_thinking_options(self._settings, self.name,
+                model=self.model, effort=self.reply_effort)
+        return main_thinking_options(self._settings, self.name, messages,
+                                     enabled_override=self.thinking_override)
 
     @abstractmethod
     async def complete(

@@ -182,6 +182,13 @@ def test_duplicate_legacy_slots_never_attach_pre_reply_events(client, auth_heade
 
 def test_public_shares_omit_request_details_in_new_and_old_snapshots(client, auth_headers, db_sessionmaker):
     chat = seed(client, auth_headers, db_sessionmaker, turns=1)
+    async def make_member():
+        async with db_sessionmaker() as db:
+            account = await db.scalar(select(UserAccount).where(UserAccount.profile_uuid == chat['owner']))
+            settings = await db.get(AccountSettings, account.id)
+            settings.role = 'user'
+            await db.commit()
+    run(make_member())
     response = client.post(f"/api/conversations/{chat['sid']}/shares", headers=auth_headers)
     assert response.status_code == 201
     shared = response.json()
@@ -199,7 +206,7 @@ def test_public_shares_omit_request_details_in_new_and_old_snapshots(client, aut
             run(add_legacy_debug_payload())
         published = client.get(f"/api/shares/{shared['token']}")
         assert published.status_code == 200
-        assert all(set(message) == {"id", "role", "content", "created_at"}
+        assert all(set(message) == {"id", "role", "content", "created_at", "reply_status"}
                    for message in published.json()["messages"])
         assert "PRIVATE_ID" not in published.text
 

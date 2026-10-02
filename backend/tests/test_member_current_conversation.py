@@ -183,7 +183,7 @@ get_settings.cache_clear()
 from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from app.database_v2_schema import metadata
-from app.models import AccountSettings, Conversation, ConversationMessage, ConversationReplySettings, UserAccount
+from app.models import AccountSettings, Conversation, ConversationMessage, ConversationReplySettings, ConversationResponseMode, ConversationReplyEffort, UserAccount
 from app.routes.conversations import current_conversation
 from app.session import InMemorySessionStore
 
@@ -193,18 +193,22 @@ async def main():
     async with engine.begin() as conn:
         await conn.run_sync(metadata.create_all)
         # Include app-owned reply preferences as production Base.metadata.create_all does.
-        for model in (Conversation, ConversationMessage, UserAccount, AccountSettings, ConversationReplySettings):
+        for model in (Conversation, ConversationMessage, UserAccount, AccountSettings, ConversationReplySettings, ConversationResponseMode, ConversationReplyEffort):
             await conn.run_sync(model.__table__.create)
+        from app.db import Base
+        await conn.run_sync(Base.metadata.create_all)
     try:
         async with maker() as db:
             await db.execute(insert(metadata.tables['user_profile']), {'uuid': 'member'})
             await db.execute(insert(UserAccount), {
                 'id': 1, 'username': 'member', 'password_hash': 'unused', 'profile_uuid': 'member'})
+            await db.execute(insert(AccountSettings), {'account_id': 1, 'role': 'user'})
             await db.commit()
             caller = SimpleNamespace(subject_id='member', account=SimpleNamespace(id=1))
             store = InMemorySessionStore(ttl_seconds=60, max_messages=40)
             first = await current_conversation(caller=caller, db=db, store=store)
             assert first.next_module == 'module_1'
+            assert (first.reply_mode, first.routing_mode, first.reply_effort) == ('ack_deep', 'router_only', 'low')
             assert len(first.messages) == 1
             runtime = metadata.tables['conversation_runtime_states']
             await db.execute(update(runtime).values(current_module='module_4',
@@ -213,6 +217,7 @@ async def main():
             resumed = await current_conversation(caller=caller, db=db, store=store)
             assert resumed.session_id == first.session_id
             assert resumed.next_module == 'module_4'
+            assert (resumed.reply_mode, resumed.routing_mode, resumed.reply_effort) == ('ack_deep', 'router_only', 'low')
             assert resumed.messages == first.messages
             assert (await db.execute(select(runtime.c.memory))).scalar_one() == {'progress_marker': 'preserve'}
     finally:

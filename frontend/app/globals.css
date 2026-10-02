@@ -1,5 +1,26 @@
 @import "tailwindcss";
 
+.reply-vote-button {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; flex-shrink: 0; border-radius: 12px;
+  color: var(--color-ink-muted); border: 1px solid transparent;
+  transition: color 180ms ease, background-color 180ms ease, transform 180ms ease;
+}
+.reply-vote-button:hover { background: var(--color-accent-wash); color: var(--color-accent-ink); }
+.reply-vote-button:active:not(:disabled) { transform: translateY(1px); }
+.reply-vote-button.is-selected { background: var(--color-accent-wash); color: var(--color-accent-ink); border-color: var(--color-accent-edge); }
+.reply-vote-button:disabled { opacity: .45; cursor: wait; }
+.reply-vote-button:focus-visible, .reply-feedback-reason:focus-visible {
+  outline: 2px solid var(--color-accent-edge); outline-offset: 3px;
+}
+.reply-feedback-reveal { display: grid; grid-template-rows: 0fr; visibility: hidden; transition: grid-template-rows 240ms ease, visibility 240ms; }
+.reply-feedback-reveal.is-open { grid-template-rows: 1fr; visibility: visible; }
+.reply-feedback-panel { margin-top: 6px; padding: 12px 16px 16px; border: 1px solid var(--color-line); border-radius: 16px; background: var(--color-panel); }
+.reply-feedback-reason { min-height: 36px; padding: 6px 12px; border: 1px solid var(--color-line); border-radius: 10px; color: var(--color-ink-muted); font-size: 12px; transition: background-color 180ms ease, border-color 180ms ease; }
+.reply-feedback-reason:hover, .reply-feedback-reason.is-selected { color: var(--color-accent-ink); background: var(--color-accent-wash); border-color: var(--color-accent-edge); }
+@media (pointer: coarse) { .reply-vote-button { width: 44px; height: 44px; } .reply-feedback-reason { min-height: 44px; } }
+@media (prefers-reduced-motion: reduce) { .reply-vote-button, .reply-feedback-reveal, .reply-feedback-reason { transition: none; } }
+
 /*
  * Two themes, one contract.
  *

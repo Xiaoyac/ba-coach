@@ -33,6 +33,7 @@ from .routes import (
     profile_router,
 )
 from .schemas import HealthResponse
+from .routes.message_feedback import router as message_feedback_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -122,6 +123,7 @@ def create_app() -> FastAPI:
     from .routes.shares import router as shares_router
     app.include_router(shares_router, prefix=settings.api_prefix)
     app.include_router(issue_reports_router, prefix=settings.api_prefix)
+    app.include_router(message_feedback_router, prefix=settings.api_prefix)
     app.include_router(profile_router, prefix=settings.api_prefix)
     from .routes.program import router as program_router
     app.include_router(program_router, prefix=settings.api_prefix)

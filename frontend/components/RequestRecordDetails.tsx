@@ -5,6 +5,7 @@ import type { ChatMessage, MessageRequests, ModelRequestInfo } from "@/lib/api";
 import { fetchMessageRequests } from "@/lib/conversations";
 
 const stages: Record<string, string> = {
+  context_compaction: "历史压缩与核对",
   pa_tool_continuation: "PA 工具调用后续回复",
   main_generation: "主回复", main_generation_recovery: "主回复重试",
   module_router: "模块路由", module_router_original: "Router 首次判断",

@@ -14,7 +14,7 @@ from test_turn_confirmation_0924 import setup_turn
 async def add_shared_chats(db, *, role="admin"):
     connection = await db.connection()
     for model in (UserAccount, AccountSettings):
-        await connection.run_sync(lambda conn, table=model.__table__: table.create(conn))
+        await connection.run_sync(lambda conn, table=model.__table__: table.create(conn, checkfirst=True))
     await db.execute(insert(UserAccount), {"id": 1, "username": "shared-admin", "password_hash": "unused", "profile_uuid": "a"})
     await db.execute(insert(AccountSettings), {"account_id": 1, "role": role})
     await db.execute(insert(Conversation), {"id": 4, "session_id": "normal-peer", "subject_id": "a", "revision": 8})
@@ -70,7 +70,7 @@ async def test_shared_cycle_only_updates_normal_owned_chats(goal_api, scenario, 
 
 
 @pytest.mark.parametrize("scenario,target", [("confirm", "module_3"), ("execution", "module_4")])
-async def test_revoked_admin_cannot_keep_router_only_exception(goal_api, scenario, target):
+async def test_demoted_admin_uses_member_router_only_policy(goal_api, scenario, target):
     _, db, _ = goal_api
     state, context = await setup_turn(db,
         "确认，就按这个计划试试。" if scenario == "confirm" else "刚才散步完成了。",
@@ -80,6 +80,5 @@ async def test_revoked_admin_cannot_keep_router_only_exception(goal_api, scenari
     await db.commit()
     await apply_pre_reply_decision(state, context, SimpleNamespace(target_module=target))
     after = await snapshots(db)
-    assert after[2]["current_module"] == target and after[2]["flow_status"] == "active"
-    assert after[2]["row_version"] == before[2]["row_version"] + 1
+    assert after[2] == before[2]  # Business confirmation cannot reroute a member peer.
     assert after[3] == before[3]

@@ -5,11 +5,13 @@ import type { ChatMessage } from "@/lib/api";
 import type { KnowledgeReferenceSource } from "@/components/KnowledgeReferenceDetails";
 import MessageMarkdown from "@/components/MessageMarkdown";
 import ReasoningDetails from "@/components/ReasoningDetails";
+import ReplyFeedback from "@/components/MessageFeedback";
 import { CheckMark, CopyMark, EnsoMark, UserMark } from "@/components/icons";
 
 export default function MessageRow({
   message,
   pending,
+  replyWaiting = false,
   generationStartedAt,
   routingPending,
   animate,
@@ -18,6 +20,7 @@ export default function MessageRow({
 }: {
   message: ChatMessage;
   pending: boolean;
+  replyWaiting?: boolean;
   generationStartedAt?: number;
   routingPending: boolean;
   /** Only the newly submitted turn floats in; loaded history stays still. */
@@ -97,7 +100,8 @@ export default function MessageRow({
               : "rounded-2xl rounded-tl-md bg-agent-bubble text-ink depth-bubble"
           }`}
         >
-          {message.role === "assistant" ? <MessageMarkdown text={message.content} /> : message.content}
+          {message.role === "assistant" ? <MessageMarkdown text={message.content}
+            trailing={pending && replyWaiting ? <ReplyContinuationWait /> : undefined} /> : message.content}
           {!isUser && showDiagnostics && (
             <ReasoningDetails message={message} replyPending={pending && !routingPending} routingPending={routingPending} knowledgeSource={knowledgeSource} />
           )}
@@ -107,10 +111,21 @@ export default function MessageRow({
           className={`mt-1 block px-1 text-[11px] text-ink-faint ${isUser ? "text-right" : ""}`}>
           {timeLabel} · 北京时间
         </time>}
-        {!isUser && pending && !routingPending && <TypingDots startedAt={generationStartedAt} hasReasoning={Boolean(reasoning)} hasContent={Boolean(message.content)} />}
+        {!isUser && message.reply_status === "interrupted" && <p data-reply-interrupted
+          className="mt-1 px-1 text-xs leading-5 text-ink-muted">回复已中止，已显示内容已保存。</p>}
+        {!isUser && pending && !routingPending && !replyWaiting && <TypingDots startedAt={generationStartedAt} hasReasoning={Boolean(reasoning)} hasContent={Boolean(message.content)} />}
         {!isUser && !message.content && showDiagnostics && <ReasoningDetails message={message} replyPending={pending && !routingPending} routingPending={routingPending} knowledgeSource={knowledgeSource} />}
+        {!isUser && message.content && <ReplyFeedback key={message.id} messageId={message.id} pending={pending}
+          leadingAction={<>
+            <button type="button" onClick={handleCopy} className="reply-vote-button"
+              aria-label={copyState === "copied" ? "已复制消息" : "复制消息"}
+              title={copyState === "error" ? "复制失败，请重试" : copyState === "copied" ? "已复制" : "复制"}>
+              {copyState === "copied" ? <CheckMark className="h-4 w-4" /> : <CopyMark className="h-4 w-4" />}
+            </button>
+            <span className="sr-only" role="status">{copyState === "copied" ? "消息已复制" : copyState === "error" ? "复制失败，请重试" : ""}</span>
+          </>} />}
         </div>
-        {message.content && (
+        {isUser && message.content && (
           <>
             <button
               type="button"
@@ -139,6 +154,16 @@ export default function MessageRow({
       </div>
     </div>
   );
+}
+
+function ReplyContinuationWait() {
+  return <span role="status" aria-label="正在生成深度回复" data-reply-wait
+    className="ml-1.5 inline-flex h-4 items-center gap-1 align-baseline text-accent-ink">
+    <span className="sr-only">正在生成深度回复</span>
+    {[0, 1, 2].map(index => <span key={index} aria-hidden="true"
+      className="zen-breathe inline-block h-1 w-1 rounded-full bg-current"
+      style={{ animationDelay: `${index * 0.18}s` }} />)}
+  </span>;
 }
 
 function Avatar({ isUser }: { isUser: boolean }) {

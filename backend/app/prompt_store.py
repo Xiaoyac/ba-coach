@@ -27,6 +27,9 @@ class PromptDefinition:
             return ROUTER_AGENT_PROMPT
         if self.key == "knowledge_mediator":
             return MEDIATOR_PROMPT
+        if self.key == "reply_lead":
+            from .provisional_reply import DEFAULT_LEAD_PROMPT
+            return DEFAULT_LEAD_PROMPT
         return MODULE_PROMPTS[self.key]
 
 
@@ -42,6 +45,7 @@ PROMPT_DEFINITIONS: tuple[PromptDefinition, ...] = (
         "判断下一模块；服务器会另行追加不可覆盖的跨轮判定与防循环规则",
     ),
     PromptDefinition("knowledge_mediator", "知识使用中介 LLM", "检索后指导各模块使用知识；保存后新回合生效，接口与安全约束由服务器追加"),
+    PromptDefinition("reply_lead", "快速接话 Agent", "仅用于管理员并行实验：根据本提示词、当前对话历史与本轮用户发言自然接话，不读取模块、Router 或知识库；与深度回复同时运行"),
 )
 PROMPT_DEFINITION_BY_KEY = {item.key: item for item in PROMPT_DEFINITIONS}
 
@@ -91,3 +95,10 @@ async def effective_router_prompt(db: AsyncSession) -> str:
 async def effective_mediator_prompt(db: AsyncSession) -> str:
     row = (await db.execute(select(PromptOverride).where(PromptOverride.prompt_key == "knowledge_mediator"))).scalar_one_or_none()
     return row.content if row else MEDIATOR_PROMPT
+
+
+async def effective_reply_lead_prompt(db: AsyncSession) -> str:
+    """Independent conversational style for the parallel lead only."""
+    row = (await db.execute(select(PromptOverride).where(
+        PromptOverride.prompt_key == "reply_lead"))).scalar_one_or_none()
+    return row.content if row else PROMPT_DEFINITION_BY_KEY["reply_lead"].default_content

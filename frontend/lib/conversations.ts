@@ -16,12 +16,25 @@ export const routingModeLabels: Record<ConversationRoutingMode, string> = {
   router_only: "仅 Router",
 };
 
+export type ConversationReplyMode = "standard" | "ack_deep";
+export type ConversationReplyEffort = "low" | "high" | "max";
+export const replyEffortLabels: Record<ConversationReplyEffort, string> = {
+  low: "低（更快）", high: "高（更充分）", max: "最高（更慢）",
+};
+export const replyModeLabels: Record<ConversationReplyMode, string> = {
+  standard: "现有回复",
+  ack_deep: "自然接话＋深度回复（并行实验）",
+};
+
 export interface ConversationDetail extends ConversationSummary {
   revision?: number;
   thinking_enabled?: boolean | null;
   messages: ChatMessage[];
   next_module: string | null;
   routing_mode?: ConversationRoutingMode;
+  reply_mode?: ConversationReplyMode;
+  reply_effort?: ConversationReplyEffort | null;
+  reply_effort_options?: ConversationReplyEffort[];
 }
 
 export interface ReferenceChunk {
@@ -97,6 +110,13 @@ export async function setConversationThinking(sessionId: string, enabled: boolea
   return parse(res, "保存深度思考设置");
 }
 
+export async function setConversationReplyEffort(sessionId: string, effort: ConversationReplyEffort): Promise<ConversationDetail> {
+  const res = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}/reply-effort`, {
+    method: "PATCH", headers: apiHeaders({ json: true }), body: JSON.stringify({ effort }),
+  });
+  return parse(res, "保存主回复思考强度");
+}
+
 export async function listConversations(
   signal?: AbortSignal,
 ): Promise<ConversationSummary[]> {
@@ -110,12 +130,15 @@ export async function listConversations(
 /** Create the durable opening turn and receive its server-owned session id. */
 export async function createConversation(
   routingMode: ConversationRoutingMode,
+  replyMode: ConversationReplyMode = "standard",
+  replyEffort?: ConversationReplyEffort,
   signal?: AbortSignal,
 ): Promise<ConversationDetail> {
   const res = await fetch(`${API_BASE}/api/conversations`, {
     method: "POST",
     headers: apiHeaders({ json: true }),
-    body: JSON.stringify({ routing_mode: routingMode }),
+    body: JSON.stringify({ routing_mode: routingMode, reply_mode: replyMode,
+      ...(replyMode === "ack_deep" && replyEffort ? { reply_effort: replyEffort } : {}) }),
     signal,
   });
   return parse(res, "Starting a conversation");

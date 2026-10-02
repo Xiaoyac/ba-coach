@@ -19,7 +19,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .ai_telemetry import add_ai_event
-from .models import Conversation, ConversationMessage, ConversationRuntimeState
+from .models import (Conversation, ConversationMessage, ConversationRuntimeState,
+                     ConversationResponseMode, ConversationReplyEffort)
 from .opening import OPENING_MESSAGE_TEXT
 from .reasoning import normalize_reasoning_channels
 from .workflow_state import record_interaction_turn
@@ -63,6 +64,8 @@ async def load_reply_history(db: AsyncSession, *, subject_id: str, session_id: s
 async def create_conversation_with_opening(
     db: AsyncSession, *, subject_id: str, session_id: str, start_from_m1: bool = False,
     routing_mode: str = "router_code",
+    reply_mode: str = "standard",
+    reply_effort: str = "low",
 ) -> Conversation:
     """Create a durable conversation whose first turn is the BA opening.
 
@@ -95,9 +98,16 @@ async def create_conversation_with_opening(
         ConversationRuntimeState(
             conversation_id=conversation.id,
             module=initial,
-            memory={"fresh_m1": True, "routing_mode": routing_mode} if start_from_m1 else {},
+            memory={"fresh_m1": True, "routing_mode": routing_mode} if start_from_m1 else {"routing_mode": routing_mode},
         )
     )
+    if reply_mode != "standard":
+        if reply_mode != "ack_deep":
+            raise ValueError("Unsupported conversation reply mode")
+        db.add(ConversationResponseMode(conversation_id=conversation.id, mode=reply_mode))
+        if reply_effort not in {"low", "high", "max"}:
+            raise ValueError("Unsupported conversation reply effort")
+        db.add(ConversationReplyEffort(conversation_id=conversation.id, effort=reply_effort))
     await db.commit()
     await db.refresh(conversation, attribute_names=["messages"])
     return conversation
@@ -381,7 +391,8 @@ async def finish_turn(
             "reply_recovery": metrics.get("reply_recovery"),
             **{key: metrics.get(key) for key in ("main_input", "reply_trace", "prompt_sources", "history_source", "history_messages",
                 "execution_timeline", "time_to_first_visible_content_ms", "first_visible_measurement",
-                "router_pre_reply", "context_pipeline", "conversation_thinking_enabled", "pa_tools")},
+                "router_pre_reply", "context_pipeline", "conversation_thinking_enabled",
+                "pa_tools", "context_epoch", "reply_mode", "main_thinking_enabled", "deep_reply_policy", "reply_lead", "reply_held")},
             # Permission-controlled execution trace; never include this in
             # ordinary user-visible chat content.
             "answer_validator": metrics.get("answer_validator"),

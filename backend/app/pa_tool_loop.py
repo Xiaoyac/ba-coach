@@ -39,6 +39,9 @@ class PAToolReply:
         decision_mode=any(t['function']['name']=='continue_pa_conversation' for t in self.executor.definitions)
         query_allowed=True
         stop=False
+        last_call=None
+        same_call_streak=0
+        force_final=False
         for round_no in range(self.max_rounds+1):
             started=perf_counter();text=[];thinking=[];calls=[];finish=None;rid=None;usage={}
             # Last call may only explain actual results. Never fabricate a tool
@@ -46,6 +49,7 @@ class PAToolReply:
             choice='none' if round_no==self.max_rounds else 'auto'
             if not decision_mode and round_no>0 and any(t['function']['name']=='continue_pa_conversation' for t in self.executor.definitions):choice='none'
             if decision_mode and choice!='none':choice='required'
+            if force_final:choice='none'
             if round_no==0 and any(t['function']['name']=='get_pa_card' for t in self.executor.definitions):
                 choice={'type':'function','function':{'name':'get_pa_card'}}
             request={'round':round_no,'system':as_text(system),'input_messages':list(history),'tool_choice':choice,
@@ -86,7 +90,24 @@ class PAToolReply:
             # Sequential database actions prevent two mutations from validating
             # the same stale version. The second gets a conflict and must reread.
             for call in calls:
-                result=await self.executor.execute(call)
+                function=call['function']
+                try:
+                    args=json.dumps(json.loads(function['arguments']),ensure_ascii=False,sort_keys=True,separators=(',',':'))
+                except (ValueError,TypeError):
+                    args=str(function.get('arguments'))
+                signature=(function['name'],args)
+                same_call_streak=same_call_streak+1 if signature==last_call else 1
+                last_call=signature
+                if force_final or same_call_streak>=3:
+                    # Do not repeat a mutation just to obtain another model response.
+                    result={'status':'blocked','reason':'repeated_identical_call_limit',
+                            'guidance':'同一工具和参数已重复调用。停止执行，依据已有实际结果回复，说明未完成事项。'}
+                    force_final=True
+                    self.telemetry['pa_tools']['repetition_blocked']=True
+                else:
+                    result=await self.executor.execute(call)
+                    if same_call_streak==2:
+                        result={**result,'loop_notice':'已连续重复相同调用；如状态没有改变，请使用已有结果，避免继续重复。'}
                 history.append({'role':'tool','tool_call_id':call['id'],'content':json.dumps(result,ensure_ascii=False)})
                 status=result.get('status')
                 if call['function']['name']=='get_pa_card' and status=='ok':query_allowed=False

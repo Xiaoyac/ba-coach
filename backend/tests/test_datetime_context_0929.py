@@ -40,7 +40,10 @@ def test_request_dates_are_inline_while_stored_content_and_roles_stay_untouched(
     before = deepcopy(history)
     result = prepare(history)
     # The provider wire payload is inspected, not only a private raw-text copy.
-    payload = DeepSeekProvider.__new__(DeepSeekProvider)._payload(result.system, result.messages)
+    provider = DeepSeekProvider.__new__(DeepSeekProvider)
+    provider._settings = Settings()
+    provider.model = "test-model"
+    payload = provider._payload(result.system, result.messages)
     assert [m["role"] for m in payload] == ["system", "user", "assistant", "user", "user"]
     assert payload[1]["content"] == '<message datetime="260928-23:59">今天先做5分钟</message>'
     assert payload[2]["content"] == "好的"

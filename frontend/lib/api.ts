@@ -44,6 +44,7 @@ export interface ChatMessage {
   role: Role;
   created_at?: string | null;
   content: string;
+  reply_status?: "interrupted" | null;
   /** Provider-supplied thinking, disclosed separately from the final answer. */
   reasoning_content?: string | null;
   model_name?: string | null;
@@ -118,6 +119,8 @@ export interface RoutingMeta {
 }
 
 export interface StreamHandlers {
+  /** Pause between the visible opening and its continuation in one reply. */
+  onReplyWait?: (value: { waiting: boolean; generation_id: string }) => void;
   onCancelled?: () => void;
   /**
    * Fired one or more times before the deltas start. The stream emits meta in
@@ -184,7 +187,15 @@ export async function streamChat(
 
       const payload = JSON.parse(dataLines.join("\n"));
       switch (event) {
+        case "reply_wait":
+          if (typeof payload.waiting === "boolean" && typeof payload.generation_id === "string") {
+            handlers.onReplyWait?.(payload);
+          }
+          break;
         case "done":
+          handlers.onMeta?.(payload as Partial<RoutingMeta>);
+          handlers.onDone?.();
+          break;
         case "meta":
           handlers.onMeta?.(payload as Partial<RoutingMeta>);
           break;
@@ -237,9 +248,10 @@ export async function cancelGeneration(generationId: string): Promise<{ status: 
   return res.json();
 }
 
-/** Timing can arrive after identical streamed text; don't drop that enrichment. */
+/** Timing/status can arrive after identical streamed text; keep that enrichment. */
 export function sameMessageTiming(a: ChatMessage, b: ChatMessage): boolean {
   return (a.id ?? null) === (b.id ?? null)
+    && (a.reply_status ?? null) === (b.reply_status ?? null)
     && (a.timing?.reply_thinking_ms ?? null) === (b.timing?.reply_thinking_ms ?? null)
     && (a.timing?.reply_generation_ms ?? null) === (b.timing?.reply_generation_ms ?? null)
     && (a.timing?.router_processing_ms ?? null) === (b.timing?.router_processing_ms ?? null);

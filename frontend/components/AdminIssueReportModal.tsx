@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import AdminMessageFeedback from "@/components/AdminMessageFeedback";
 import { CameraMark, CheckMark, CloseMark, ReportMark } from "@/components/icons";
 import {
   fetchAdminIssueReports,
@@ -20,6 +21,7 @@ function formatDate(value: string): string {
 }
 
 export default function AdminIssueReportModal({ onClose }: { onClose: () => void }) {
+  const [view, setView] = useState<"issues" | "replies">("issues");
   const [filter, setFilter] = useState<"open" | "resolved" | "all">("open");
   const [reports, setReports] = useState<AdminIssueReportItem[]>([]);
   const [selected, setSelected] = useState<AdminIssueReportItem | null>(null);
@@ -136,7 +138,7 @@ export default function AdminIssueReportModal({ onClose }: { onClose: () => void
               </span>
             </div>
             <p className="mt-1 text-xs leading-relaxed text-ink-faint">
-              查看用户说明、自动截图与提交时的页面环境。截图可能包含对话内容，请仅用于排查。
+              {view === "replies" ? "查看用户对 AI 回复的评价与补充说明，定位需要改进的回复。" : "查看用户说明、自动截图与提交时的页面环境。截图可能包含对话内容，请仅用于排查。"}
             </p>
           </div>
           <button
@@ -149,6 +151,14 @@ export default function AdminIssueReportModal({ onClose }: { onClose: () => void
           </button>
         </header>
 
+        <div className="flex shrink-0 gap-2 border-b border-line px-5 py-3 sm:px-6" aria-label="反馈类型">
+          {(["issues", "replies"] as const).map(value => <button key={value} type="button"
+            aria-pressed={view === value} onClick={() => setView(value)}
+            className={`reply-feedback-reason ${view === value ? "is-selected" : ""}`}>
+            {value === "issues" ? "产品问题" : "回复评价"}
+          </button>)}
+        </div>
+        {view === "replies" ? <AdminMessageFeedback /> : <>
         <div className="flex shrink-0 gap-1.5 border-b border-line px-4 py-3 sm:px-6">
           {(["open", "resolved", "all"] as const).map((value) => (
             <button
@@ -281,6 +291,7 @@ export default function AdminIssueReportModal({ onClose }: { onClose: () => void
           </div>
         </div>
 
+        </>}
         <footer className="flex shrink-0 items-center gap-2 border-t border-line px-5 py-3 text-[0.68rem] leading-relaxed text-ink-faint sm:px-6">
           <CheckMark className="h-3.5 w-3.5" />
           反馈与截图仅供管理员排查产品问题。

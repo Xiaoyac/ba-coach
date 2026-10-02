@@ -16,7 +16,7 @@ export interface SharedConversation {
   snapshot_version: number;
   title: string;
   created_at: string;
-  messages: (ChatMessage & { id: number; knowledge_references?: KnowledgeReferences | null })[];
+  messages: (ChatMessage & { id: number; knowledge_references?: KnowledgeReferences | null; reply_status?: "interrupted" | null })[];
 }
 
 export class ShareRequestError extends Error {

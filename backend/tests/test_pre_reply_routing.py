@@ -118,6 +118,8 @@ async def routing_database(context):
         await conn.run_sync(schema.create_all)
         for model in (Conversation,ConversationMessage,AIExecutionEvent):
             await conn.run_sync(model.__table__.create)
+        from app.db import Base
+        await conn.run_sync(Base.metadata.create_all)
     async with maker() as db:
         await db.execute(insert(schema.tables['user_profile']),[{'uuid':'a'},{'uuid':'b'}])
         await db.execute(insert(Conversation),{'id':1,'session_id':'s','subject_id':'a'})

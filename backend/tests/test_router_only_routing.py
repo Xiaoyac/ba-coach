@@ -4,7 +4,7 @@ import json
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import insert, select, update, func
+from sqlalchemy import delete, insert, select, update, func
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.database_v2_schema import metadata as schema
@@ -82,7 +82,7 @@ async def test_mode_comes_from_owned_memory_and_current_admin_role(router_only_d
         assert await effective_routing_mode(db, conversation=admin,
             state={"memory": {}}, user_id="a") == ROUTER_CODE
         assert await effective_routing_mode(db, conversation=member,
-            state={"memory": {"routing_mode": ROUTER_ONLY}}, user_id="b") == ROUTER_CODE
+            state={"memory": {"routing_mode": ROUTER_ONLY}}, user_id="b") == ROUTER_ONLY
         assert await effective_routing_mode(db, conversation=admin,
             state={"memory": {"routing_mode": ROUTER_ONLY}}, user_id="b") == ROUTER_CODE
     # Request/state-injected values cannot override the durable preference.
@@ -135,7 +135,7 @@ async def test_router_only_ignores_forced_request_module(router_only_db, provide
     assert len(provider.route_calls) == 1
 
 
-@pytest.mark.parametrize("mutation", ["version", "new_user", "other_user", "role_revoked", "mode_changed", "goal_binding"])
+@pytest.mark.parametrize("mutation", ["version", "new_user", "other_user", "account_removed", "mode_changed", "goal_binding"])
 async def test_router_only_stale_or_unauthorized_proposal_cannot_commit(router_only_db, mutation):
     ctx, maker = router_only_db
     prepared = {**current_turn(), **await load_routing_snapshot(current_turn(), ctx)}
@@ -148,8 +148,8 @@ async def test_router_only_stale_or_unauthorized_proposal_cannot_commit(router_o
                 "position": 2, "role": "user", "content": "更新的输入"})
         elif mutation == "other_user":
             prepared["subject_id"] = "b"
-        elif mutation == "role_revoked":
-            await db.execute(update(AccountSettings).where(AccountSettings.account_id == 1).values(role="user"))
+        elif mutation == "account_removed":
+            await db.execute(delete(AccountSettings).where(AccountSettings.account_id == 1))
         elif mutation == "mode_changed":
             await db.execute(update(rt).where(rt.c.conversation_id == 1).values(memory={"routing_mode": ROUTER_CODE}))
         else:

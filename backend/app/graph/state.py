@@ -9,7 +9,7 @@ LangGraph injects it via `Runtime[GraphContext]`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, TypedDict
 
@@ -159,3 +159,7 @@ class GraphContext:
     generation: GenerationControl | None = None
     # Set before any native write so interrupted streams cannot persist a stale graph cache.
     pa_tools_started: bool = False
+    # Server-owned transport metadata, never model instructions or business state.
+    generation_id: str | None = None
+    reply_progress: dict[str, Any] = field(default_factory=dict)
+    reply_lead_prompt: str | None = None

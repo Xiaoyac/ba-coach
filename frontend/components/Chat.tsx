@@ -2,7 +2,10 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ChatMessage, RoutingMeta } from "@/lib/api";
+import { replyEffortLabels, type ConversationReplyEffort, type ConversationReplyMode } from "@/lib/conversations";
 import MessageRow from "@/components/MessageRow";
+import ArchiveSelect from "@/components/ArchiveSelect";
+import { MessageFeedbackProvider } from "@/components/MessageFeedback";
 import ThemeToggle from "@/components/ThemeToggle";
 import {
   ArrowUpMark,
@@ -37,6 +40,7 @@ function formatModuleLabel(module: string): string {
 }
 
 export default function Chat({
+  sessionId,
   messages,
   routing,
   busy,
@@ -52,6 +56,12 @@ export default function Chat({
   onToggleThinking,
   thinkingEnabled = true,
   thinkingBusy = false,
+  replyMode = "standard",
+  replyEffort = "low",
+  replyEffortOptions = [],
+  replyEffortBusy = false,
+  onReplyEffortChange,
+  replyWaiting = false,
   headerContent,
   sidebarExpanded = true,
   onOpenAssessment,
@@ -71,6 +81,7 @@ export default function Chat({
   onReportIssue,
   reportPreparing = false,
 }: {
+  sessionId?: string;
   messages: ChatMessage[];
   routing: Partial<RoutingMeta>;
   busy: boolean;
@@ -87,6 +98,12 @@ export default function Chat({
   onToggleThinking?: () => void;
   thinkingEnabled?: boolean;
   thinkingBusy?: boolean;
+  replyMode?: ConversationReplyMode;
+  replyEffort?: ConversationReplyEffort;
+  replyEffortOptions?: ConversationReplyEffort[];
+  replyEffortBusy?: boolean;
+  onReplyEffortChange?: (effort: ConversationReplyEffort) => void;
+  replyWaiting?: boolean;
   headerContent?: React.ReactNode;
   sidebarExpanded?: boolean;
   /** Opens the daily record on demand — nothing here waits on it. */
@@ -129,7 +146,7 @@ export default function Chat({
     const el = logRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages]);
+  }, [messages, replyWaiting]);
 
   // Close the account menu on any outside click. Registered only while it is
   // open, so the app isn't carrying a document-level listener for a popup that
@@ -164,12 +181,12 @@ export default function Chat({
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const text = input.trim();
-    if (!text || busy || loading || thinkingBusy) return;
+    if (!text || busy || loading || thinkingBusy || replyEffortBusy) return;
     setInput("");
     onSend(text);
   }
 
-  const canSend = input.trim().length > 0 && !busy && !loading && !thinkingBusy;
+  const canSend = input.trim().length > 0 && !busy && !loading && !thinkingBusy && !replyEffortBusy;
   const replyModule = routing.reply_module;
   const nextModule = routing.next_module;
   const displayedModule = nextModule ?? replyModule;
@@ -405,17 +422,33 @@ export default function Chat({
           </div>
         </div>
       </header>
-      {accountRole === "admin" && onToggleThinking && <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-4 py-2 sm:px-6">
-        <p className="text-xs leading-5 text-ink-muted">当前对话 · 全流程生效</p>
-        <button type="button" role="switch" aria-checked={thinkingEnabled} aria-label="深度思考"
-          onClick={onToggleThinking} disabled={busy || loading || thinkingBusy}
-          title={busy ? "回复结束后可切换" : "统一控制当前对话的回复、路由、知识筛选与信息提取的深度思考"}
+      {accountRole === "admin" && onToggleThinking && <div className="shrink-0 border-b border-line px-4 py-2 sm:px-6">
+        <div className="flex items-center justify-between gap-3">
+        <p className="text-xs leading-5 text-ink-muted">{replyMode === "ack_deep" ? "深度回复固定开启；此开关只影响辅助流程" : "当前对话 · 全流程生效"}</p>
+        <button type="button" role="switch" aria-checked={thinkingEnabled} aria-label={replyMode === "ack_deep" ? "辅助流程思考" : "深度思考"}
+          onClick={onToggleThinking} disabled={busy || loading || thinkingBusy || replyEffortBusy}
+          title={busy ? "回复结束后可切换" : replyMode === "ack_deep" ? "控制路由、知识筛选与信息提取的深度思考；自然接话和深度回复并行生成" : "统一控制当前对话的回复、路由、知识筛选与信息提取的深度思考"}
           className={`inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-edge disabled:cursor-not-allowed disabled:opacity-50 ${thinkingEnabled ? "bg-accent-wash text-accent-ink" : "bg-raised text-ink-muted"}`}>
-          <span>深度思考 · {thinkingBusy ? "保存中…" : thinkingEnabled ? "开" : "关"}</span>
+          <span>{replyMode === "ack_deep" ? "辅助流程思考" : "深度思考"} · {thinkingBusy ? "保存中…" : thinkingEnabled ? "开" : "关"}</span>
           <span aria-hidden="true" className={`flex h-5 w-9 items-center rounded-full px-0.5 ${thinkingEnabled ? "justify-end bg-accent" : "justify-start bg-ink-faint"}`}>
             <span className="h-4 w-4 rounded-full bg-panel" />
           </span>
         </button>
+        </div>
+        {replyMode === "ack_deep" && onReplyEffortChange && replyEffortOptions.length > 0 && <div className="mt-2 border-t border-line pt-2">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+            <label htmlFor="conversation-reply-effort" className="text-sm text-ink">主回复思考强度</label>
+            <ArchiveSelect key={sessionId} id="conversation-reply-effort" label="主回复思考强度" value={replyEffort}
+              disabled={busy || loading || thinkingBusy || replyEffortBusy}
+              aria-describedby="conversation-reply-effort-help"
+              onChange={value => onReplyEffortChange(value as ConversationReplyEffort)}
+              options={replyEffortOptions.map(effort => ({ value: effort, label: replyEffortLabels[effort] }))}
+              className="min-w-40" />
+          </div>
+          <p id="conversation-reply-effort-help" className="mt-1 text-xs leading-5 text-ink-muted">
+            {replyEffortBusy ? <span role="status">保存中…</span> : "保存后从下一轮主回复生效。"} 控制思考强度，不是秒数或字数上限。
+          </p>
+        </div>}
       </div>}
 
       {loading ? (
@@ -445,6 +478,7 @@ export default function Chat({
               </p>
             </div>
           )}
+          <MessageFeedbackProvider key={sessionId} sessionId={sessionId}>
           {messages.map((m, i) => {
             const pending = busy && i === messages.length - 1;
             // A turn that failed before its first delta leaves an empty
@@ -461,6 +495,7 @@ export default function Chat({
                 key={i}
                 message={m}
                 pending={pending}
+                replyWaiting={pending && replyWaiting}
                 generationStartedAt={pending ? generationStartedAt : undefined}
                 routingPending={i === messages.length - 1 && routing.routing_pending === true}
                 animate={busy && i >= messages.length - 2}
@@ -468,6 +503,7 @@ export default function Chat({
               />
             );
           })}
+          </MessageFeedbackProvider>
         </div>
       )}
 

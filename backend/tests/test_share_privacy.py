@@ -62,7 +62,7 @@ def test_new_and_existing_shares_publish_only_transcript(client, request, owner,
         assert snapshot["title"] == "散步计划"
         assert [m["id"] for m in snapshot["messages"]] == [1, 2]
         assert [m["content"] for m in snapshot["messages"]] == ["今天想散步", "可以先走五分钟。"]
-        assert all(set(m) == {"id", "role", "content", "created_at"} for m in snapshot["messages"])
+        assert all(set(m) == {"id", "role", "content", "created_at", "reply_status"} for m in snapshot["messages"])
         assert "SECRET" not in str(snapshot)
     public = client.get(f"/api/shares/{token}")
     assert public.headers["cache-control"] == "private, no-store"

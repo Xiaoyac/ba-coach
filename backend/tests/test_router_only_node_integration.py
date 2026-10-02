@@ -136,7 +136,7 @@ from conftest import StubProvider
 
 async def main():
     module, stored_mode, role = sys.argv[1:]
-    only = stored_mode == 'router_only' and role == 'admin'
+    only = role == 'user' or stored_mode == 'router_only'
     engine = create_async_engine('sqlite+aiosqlite:///:memory:')
     maker = async_sessionmaker(engine, expire_on_commit=False)
     try:
@@ -144,6 +144,8 @@ async def main():
             await conn.run_sync(metadata.create_all)
             for model in (Conversation, ConversationMessage, AIExecutionEvent, UserAccount, AccountSettings):
                 await conn.run_sync(model.__table__.create)
+            from app.db import Base
+            await conn.run_sync(Base.metadata.create_all)
         rt = metadata.tables['conversation_runtime_states']
         memory = {'routing_mode': stored_mode, 'freshness_marker': 'durable-only'}
         async with maker() as db:
@@ -194,7 +196,9 @@ async def main():
                 assert record['record_status'] == 'draft'
             events = (await db.execute(select(AIExecutionEvent).where(AIExecutionEvent.stage == 'post_reply_persistence'))).scalars().all()
             assert len(events) == 1 and events[0].error_code is None
-            assert events[0].event_metadata['database_write']['status'] == 'completed'
+            assert events[0].event_metadata['database_write']['status'] == ('completed' if module == 'module_1' else 'skipped')
+            if module != 'module_1':
+                assert events[0].event_metadata['database_write']['reason_code'] == 'no_extracted_data'
             assert (await db.get(Conversation, 1)).revision == 3
         cached = await store.get('single')
         assert cached.module == module and cached.memory == memory

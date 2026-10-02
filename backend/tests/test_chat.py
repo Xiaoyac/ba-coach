@@ -321,11 +321,11 @@ def test_stream_reply_is_persisted(client: TestClient, provider) -> None:
 
 
 def test_stream_reasoning_is_separate_and_persisted(
-    client: TestClient, auth_headers, provider
+    client: TestClient, admin_headers, provider
 ) -> None:
     provider.reasoning_result = "这是模型的深度思考。"
     with client.stream(
-        "POST", "/api/chat/stream", json={"message": "hi"}, headers=auth_headers
+        "POST", "/api/chat/stream", json={"message": "hi"}, headers=admin_headers
     ) as response:
         events = sse_events("".join(response.iter_text()))
 
@@ -338,7 +338,7 @@ def test_stream_reasoning_is_separate_and_persisted(
 
     session_id = events[0][1]["session_id"]
     detail = client.get(
-        f"/api/conversations/{session_id}", headers=auth_headers
+        f"/api/conversations/{session_id}", headers=admin_headers
     ).json()
     assistant = detail["messages"][-1]
     assert assistant["content"] == "hello"
@@ -347,7 +347,7 @@ def test_stream_reasoning_is_separate_and_persisted(
 
 
 def test_stream_repairs_provider_thinking_tags_before_any_user_visible_delta(
-    client: TestClient, auth_headers, provider, monkeypatch
+    client: TestClient, admin_headers, provider, monkeypatch
 ) -> None:
     async def malformed_stream(**_kwargs):
         yield StreamDelta(kind="content", text="<thi")
@@ -360,7 +360,7 @@ def test_stream_repairs_provider_thinking_tags_before_any_user_visible_delta(
 
     monkeypatch.setattr(provider, "stream", malformed_stream)
     with client.stream(
-        "POST", "/api/chat/stream", json={"message": "hi"}, headers=auth_headers
+        "POST", "/api/chat/stream", json={"message": "hi"}, headers=admin_headers
     ) as response:
         events = sse_events("".join(response.iter_text()))
 
@@ -375,19 +375,19 @@ def test_stream_repairs_provider_thinking_tags_before_any_user_visible_delta(
 
     session_id = events[0][1]["session_id"]
     detail = client.get(
-        f"/api/conversations/{session_id}", headers=auth_headers
+        f"/api/conversations/{session_id}", headers=admin_headers
     ).json()
     assert detail["messages"][-1]["content"] == visible
     assert detail["messages"][-1]["reasoning_content"] == reasoning
 
 
 def test_stream_routes_before_visible_reply_and_persists_decision(
-    client: TestClient, auth_headers, provider
+    client: TestClient, admin_headers, provider
 ) -> None:
     provider.route_result = '{"target_module":"1"}'
     provider.route_reasoning_result = "退出条件尚未满足，因此不跳转。"
     with client.stream(
-        "POST", "/api/chat/stream", json={"message": "hi"}, headers=auth_headers
+        "POST", "/api/chat/stream", json={"message": "hi"}, headers=admin_headers
     ) as response:
         events = sse_events("".join(response.iter_text()))
 
@@ -399,7 +399,7 @@ def test_stream_routes_before_visible_reply_and_persists_decision(
     assistant = None
     for _ in range(50):
         detail = client.get(
-            f"/api/conversations/{session_id}", headers=auth_headers
+            f"/api/conversations/{session_id}", headers=admin_headers
         ).json()
         assistant = detail["messages"][-1]
         if assistant["routing_reasoning_content"]:

@@ -84,7 +84,7 @@ def test_admin_share_freezes_all_panels_without_live_access(client, admin_header
     assert member.status_code == 201
     public = client.get(f"/api/shares/{member.json()['token']}").json()
     assert public["snapshot_version"] == 1
-    assert all(set(row) == {"id", "role", "content", "created_at"} for row in public["messages"])
+    assert all(set(row) == {"id", "role", "content", "created_at", "reply_status"} for row in public["messages"])
 
     # Historical rich v1 snapshots must not silently acquire debug visibility.
     async def legacy():
@@ -96,4 +96,4 @@ def test_admin_share_freezes_all_panels_without_live_access(client, admin_header
             await db.commit()
     client.portal.call(legacy)
     old = client.get(path).json()
-    assert all(set(row) == {"id", "role", "content", "created_at"} for row in old["messages"])
+    assert all(set(row) == {"id", "role", "content", "created_at", "reply_status"} for row in old["messages"])

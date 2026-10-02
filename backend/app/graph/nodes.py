@@ -746,6 +746,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
                     duration_ms=call["duration_ms"], finish_reason=call["finish_reason"],
                     error_code=call.get("error_code"),
                     event_metadata={"deferred": epoch.metrics.get("compaction_deferred", False),
+                                    "kind": call.get("kind", "summary"),
                                     "input_estimated_tokens": call["input_estimated_tokens"]})
         system = build_system_segments(
             module_name,
@@ -825,6 +826,9 @@ def make_module_node(module_name: str, config: ModuleConfig):
             user_created_at=state.get("user_created_at"),
             prefix_cache=cache_layout, history_summary=history_summary)
         system, messages = prepared.system, prepared.messages
+        if context.stream and (state.get("telemetry") or {}).get("reply_mode") == "ack_deep":
+            from ..provisional_reply import parallel_reply_system
+            system = parallel_reply_system(system)
         telemetry["prompt_version"] = hashlib.sha256(
             as_text(system).encode("utf-8")
         ).hexdigest()[:16]
@@ -836,6 +840,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
             from ..providers.prompt_cache import ordered_messages
             telemetry["main_input"]["wire_messages"] = ordered_messages(system,
                 [{"role": m.role, "content": m.content} for m in messages])
+        context.reply_progress = {"telemetry": telemetry}
 
         update: dict = {
             "retrieved_knowledge": guided_knowledge,
@@ -1024,7 +1029,10 @@ def make_module_node(module_name: str, config: ModuleConfig):
             recovered, recovery = await recover_empty_reply(
                 provider=context.provider, system=system, messages=messages,
                 elapsed_seconds=perf_counter() - generation_started,
-                total_timeout_seconds=context.settings.provider_request_timeout_seconds,
+                total_timeout_seconds=(context.provider._main_timeout_seconds()
+                    if getattr(context.provider, "deep_reply_enabled", False)
+                    and hasattr(context.provider, "_settings")
+                    else context.settings.provider_request_timeout_seconds),
                 finish_reason=telemetry.get("finish_reason"), usage=update.get("usage", {}),
                 invalid_protocol=invalid_protocol)
             recovery["original_request_id"] = telemetry.get("provider_request_id")
@@ -1847,6 +1855,14 @@ async def _run_background_routing(
                 mode = await effective_routing_mode(db, conversation=conversation,
                     state=persisted, user_id=subject_id)
                 diagnostics = {}
+                if current == "module_3":
+                    from ..dialogue_progress_store import save_m3_progress
+                    diagnostics["dialogue_progress"] = await save_m3_progress(db,
+                        conversation=conversation, state=persisted, data=data,
+                        messages=messages, assistant_message_id=assistant_message_id)
+                    # record_steps must see the current memory/version, including
+                    # these facts; evidence storage does not confirm any record.
+                    _, persisted = await runtime_for(db, session_id)
                 if current == "module_2" and data:
                     # Trials and secondary activities are useful even when a
                     # formal goal/cycle already exists; they never create one.
@@ -1882,9 +1898,13 @@ async def _run_background_routing(
                         diagnostics=diagnostics, allow_transition=False)
                 _, durable = await runtime_for(db, session_id)
                 published_memory = durable["memory"] or {}
-                telemetry["database_write"] = {"status": "completed", "record_id": record_id,
+                from ..persistence_diagnostics import describe_record_write
+                write_result = await describe_record_write(db, module=current, data=data,
+                    record_id=record_id, state=durable)
+                telemetry["database_write"] = {**write_result,
                     "module": durable["current_module"], "diagnostics": diagnostics}
-                record_span(telemetry, "database_write", write_started, origin=origin, after_display=True)
+                record_span(telemetry, "database_write", write_started, origin=origin,
+                    status=write_result["status"], after_display=True)
                 # Separate audit event, not a fictitious second Router call.
                 # Leave the assistant's pre-reply routing trace untouched.
                 await add_ai_event(db, stage="post_reply_persistence", session_id=session_id,

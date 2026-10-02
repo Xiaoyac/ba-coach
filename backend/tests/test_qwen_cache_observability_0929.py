@@ -75,7 +75,7 @@ async def test_every_provider_path_preserves_only_reported_cache_counts(path, de
         result = await method(system="stable system", messages=[Message(role="user", content="question")])
     assert result.usage == {
         "input_tokens": 4096, "output_tokens": 32,
-        "reasoning_tokens": 0 if path in ("recovery", "router") else 8,
+        "reasoning_tokens": 0 if path == "recovery" else 8,
         **expected,
     }
     assert result.request_id == "cache-test-request"
@@ -110,7 +110,7 @@ async def test_event_merges_only_cache_metrics_without_mutating_callers(usage, e
     event = await add_ai_event(db, stage="main_generation", session_id=None, subject_id=None,
                                provider="deepseek", model_name="qwen3.8-flash", usage=usage,
                                event_metadata=metadata)
-    assert event.event_metadata == {**metadata, **expected}
+    assert event.event_metadata == {**metadata, **expected, **({"cache_usage": expected} if expected else {})}
     assert event.event_metadata is not metadata
     assert set(metadata) == {"main_input", "custom"}
     assert "input_tokens" not in event.event_metadata
@@ -124,7 +124,7 @@ async def test_event_without_metadata_does_not_fabricate_missing_cache_values(us
     event = await add_ai_event(SimpleNamespace(add=Mock()), stage="main_generation",
                                session_id=None, subject_id=None, provider="deepseek",
                                model_name="qwen3.8-flash", usage=usage)
-    assert event.event_metadata == expected
+    assert event.event_metadata == ({**expected, "cache_usage": expected} if expected else expected)
 
 
 async def test_cache_counts_round_trip_through_existing_event_json(db_sessionmaker):
@@ -139,4 +139,4 @@ async def test_cache_counts_round_trip_through_existing_event_json(db_sessionmak
         saved = (await db.execute(select(AIExecutionEvent).where(AIExecutionEvent.id == event_id))).scalar_one()
         assert saved.input_tokens == 4096
         assert saved.event_metadata == {"context_pipeline": {"engine": "langchain"},
-                                        "cache_read_input_tokens": 2048}
+                                        "cache_read_input_tokens": 2048, "cache_usage": {"cache_read_input_tokens": 2048}}
