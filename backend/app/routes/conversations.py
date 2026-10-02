@@ -383,6 +383,27 @@ async def message_knowledge_references(
     return KnowledgeReferences.model_validate(snapshot) if snapshot else KnowledgeReferences()
 
 
+@router.get("/{session_id}/context")
+async def get_context_usage(
+    session_id: str, response: Response,
+    subject_id: str = Depends(require_subject_id),
+    db: AsyncSession = Depends(get_db),
+):
+    from ..config import get_settings
+    from ..context_usage import history_usage
+    from ..generation_policy import is_ark_kimi
+    from ..models import UserAccount
+    conversation = await _owned_or_404(db, session_id=session_id, subject_id=subject_id)
+    settings = get_settings()
+    selected = await db.scalar(select(AccountSettings.preferred_provider).join(
+        UserAccount, UserAccount.id == AccountSettings.account_id).where(UserAccount.profile_uuid == subject_id))
+    selected = selected or settings.default_provider
+    epoch_enabled = settings.main_prefix_cache_enabled and selected == "deepseek" and is_ark_kimi(
+        settings, selected, model=str(getattr(settings, f"{selected}_model", "")))
+    response.headers["Cache-Control"] = "private, no-store"
+    return await history_usage(db, conversation.id, settings=settings, epoch_enabled=epoch_enabled)
+
+
 @router.get("/{session_id}/revision", response_model=dict[str, int])
 async def get_conversation_revision(
     session_id: str,

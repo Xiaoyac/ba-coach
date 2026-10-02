@@ -6,6 +6,7 @@ import { replyEffortLabels, type ConversationReplyEffort, type ConversationReply
 import MessageRow from "@/components/MessageRow";
 import ArchiveSelect from "@/components/ArchiveSelect";
 import { MessageFeedbackProvider } from "@/components/MessageFeedback";
+import ContextUsageRing from "@/components/ContextUsageRing";
 import ThemeToggle from "@/components/ThemeToggle";
 import {
   ArrowUpMark,
@@ -584,9 +585,15 @@ export default function Chat({
 
         {generationNotice && <p role="status" className="mt-2 text-center text-xs leading-relaxed text-ink-muted">{generationNotice}</p>}
 
-        <p className="mt-1.5 text-center text-[0.68rem] leading-relaxed text-ink-faint">
-          内容由 AI 生成，仅供参考，不能替代专业建议。
-        </p>
+        <div className="mt-1.5 flex items-center gap-2">
+          <span className="w-8 shrink-0" aria-hidden="true" />
+          <p className="flex-1 text-center text-[0.68rem] leading-relaxed text-ink-faint">
+            内容由 AI 生成，仅供参考，不能替代专业建议。
+          </p>
+          <ContextUsageRing key={sessionId ?? "new"} sessionId={sessionId} busy={busy || loading}
+            version={`${messages.length}:${messages.at(-1)?.id ?? ""}:${messages.at(-1)?.content.length ?? 0}`}
+            draft={input} />
+        </div>
       </div>
     </div>
   );

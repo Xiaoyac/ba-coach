@@ -272,3 +272,20 @@ export async function fetchMessageRequests(messageId: number, signal?: AbortSign
   });
   return parse(response, "加载请求记录");
 }
+
+export interface ContextUsage {
+  estimated_tokens: number;
+  token_budget: number | null;
+  retained_messages: number;
+  summarized_messages: number;
+  total_messages: number;
+  message_budget: number | null;
+  mode: "compression" | "window";
+}
+
+export async function fetchContextUsage(sessionId: string, signal?: AbortSignal): Promise<ContextUsage> {
+  const response = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}/context`, {
+    headers: apiHeaders(), signal, cache: "no-store",
+  });
+  return parse(response, "读取上下文用量");
+}
