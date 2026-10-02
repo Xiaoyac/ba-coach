@@ -163,3 +163,5 @@ class GraphContext:
     generation_id: str | None = None
     reply_progress: dict[str, Any] = field(default_factory=dict)
     reply_lead_prompt: str | None = None
+    # Authorized from an owned admin preference each turn, never client metadata.
+    knowledge_mediator_bypass: bool = False

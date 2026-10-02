@@ -195,6 +195,9 @@ async def _apply_conversation_thinking(context, *, session_id, subject_id, state
     requested_effort = None
     async with get_sessionmaker()() as preference_db:
         enabled = await effective_thinking(preference_db, session_id=session_id, subject_id=subject_id)
+        from ..conversation_knowledge import mediator_enabled_for_conversation
+        context.knowledge_mediator_bypass = not await mediator_enabled_for_conversation(
+            preference_db, session_id=session_id, subject_id=subject_id)
         reply_mode = await effective_reply_mode(preference_db, session_id=session_id, subject_id=subject_id)
         if reply_mode == ACK_DEEP:
             requested_effort = await effective_reply_effort(preference_db,

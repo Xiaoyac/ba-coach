@@ -29,6 +29,7 @@ export const replyModeLabels: Record<ConversationReplyMode, string> = {
 export interface ConversationDetail extends ConversationSummary {
   revision?: number;
   thinking_enabled?: boolean | null;
+  knowledge_mediator_enabled?: boolean;
   messages: ChatMessage[];
   next_module: string | null;
   routing_mode?: ConversationRoutingMode;
@@ -103,11 +104,11 @@ async function parse<T>(res: Response, what: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function setConversationThinking(sessionId: string, enabled: boolean): Promise<ConversationDetail> {
-  const res = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}/thinking`, {
+export async function setConversationMediator(sessionId: string, enabled: boolean): Promise<ConversationDetail> {
+  const res = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}/knowledge-mediator`, {
     method: "PATCH", headers: apiHeaders({ json: true }), body: JSON.stringify({ enabled }),
   });
-  return parse(res, "保存深度思考设置");
+  return parse(res, "保存知识中介设置");
 }
 
 export async function setConversationReplyEffort(sessionId: string, effort: ConversationReplyEffort): Promise<ConversationDetail> {

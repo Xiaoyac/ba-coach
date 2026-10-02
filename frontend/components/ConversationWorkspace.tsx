@@ -13,7 +13,7 @@ import {
   listConversations,
   replyModeLabels,
   routingModeLabels,
-  setConversationThinking,
+  setConversationMediator,
   setConversationReplyEffort,
   subscribeConversation,
   updateConversation,
@@ -109,15 +109,16 @@ export default function ConversationWorkspace({
   const [conversationRoutingMode, setConversationRoutingMode] = useState<ConversationRoutingMode>("router_code");
   const [conversationReplyMode, setConversationReplyMode] = useState<ConversationReplyMode>("standard");
   const [replyWaiting, setReplyWaiting] = useState(false);
-  const [thinkingEnabled, setThinkingEnabled] = useState(false);
-  const [thinkingSaving, setThinkingSaving] = useState(false);
-  const thinkingSaveRef = useRef(false);
+  const [mediatorEnabled, setMediatorEnabled] = useState(true);
+  const [mediatorSavingSessions, setMediatorSavingSessions] = useState<string[]>([]);
+  const mediatorSaveRef = useRef(new Set<string>());
+  const mediatorSaving = Boolean(sessionId && mediatorSavingSessions.includes(sessionId));
   const [replyEffort, setReplyEffort] = useState<ConversationReplyEffort>("low");
   const [replyEffortOptions, setReplyEffortOptions] = useState<ConversationReplyEffort[] | null>(null);
   const [replyEffortSavingSessions, setReplyEffortSavingSessions] = useState<string[]>([]);
   const replyEffortSaveRef = useRef(new Set<string>());
   const replySettingsBySession = useRef(new Map<string, {
-    revision: number; effort: ConversationReplyEffort; options: ConversationReplyEffort[] | null;
+    revision: number; effort: ConversationReplyEffort; options: ConversationReplyEffort[] | null; mediatorEnabled: boolean;
   }>());
   const replyEffortSaving = Boolean(sessionId && replyEffortSavingSessions.includes(sessionId));
   const [modeChooserOpen, setModeChooserOpen] = useState(false);
@@ -221,10 +222,12 @@ export default function ConversationWorkspace({
     const revision = detail.revision ?? 0;
     const settings = known && known.revision > revision ? known : {
       revision, effort: detail.reply_effort ?? "low", options: detail.reply_effort_options ?? null,
+      mediatorEnabled: detail.knowledge_mediator_enabled ?? true,
     };
     replySettingsBySession.current.set(detail.session_id, settings);
     if (activeSessionIdRef.current === detail.session_id) {
       setReplyEffort(settings.effort);
+      setMediatorEnabled(settings.mediatorEnabled);
       setReplyEffortOptions(settings.options);
     }
   }, []);
@@ -235,9 +238,6 @@ export default function ConversationWorkspace({
     setConversationRoutingMode(detail.routing_mode ?? "router_code");
     setConversationReplyMode(detail.reply_mode ?? "standard");
     syncReplySettings(detail);
-    if ((detail.revision ?? 0) >= (appliedRevisions.current.get(detail.session_id) ?? -1)) {
-      setThinkingEnabled(detail.thinking_enabled ?? false);
-    }
     const turn = turns.current.get(detail.session_id);
     if (turn) {
       publishTurn(turn);
@@ -276,9 +276,6 @@ export default function ConversationWorkspace({
     if (activeSessionIdRef.current !== detail.session_id) return;
     setConversationRoutingMode(detail.routing_mode ?? "router_code");
     setConversationReplyMode(detail.reply_mode ?? "standard");
-    if ((detail.revision ?? 0) >= (appliedRevisions.current.get(detail.session_id) ?? -1)) {
-      setThinkingEnabled(detail.thinking_enabled ?? false);
-    }
 
     // Some mobile/proxy connections keep the POST body open after the server
     // has committed the assistant row and the client never receives the SSE
@@ -690,19 +687,22 @@ export default function ConversationWorkspace({
     }
   }
 
-  async function handleThinkingToggle() {
+  async function handleMediatorToggle() {
     const target = activeSessionIdRef.current;
-    if (!isAdmin || !target || loadingConversation || turns.current.has(target) || thinkingSaveRef.current || replyEffortSaveRef.current.has(target)) return;
-    thinkingSaveRef.current = true;
-    setThinkingSaving(true);
+    if (!isAdmin || !target || loadingConversation || turns.current.has(target)
+      || mediatorSaveRef.current.has(target) || replyEffortSaveRef.current.has(target)) return;
+    mediatorSaveRef.current.add(target);
+    setMediatorSavingSessions(previous => [...previous, target]);
+    setError(null);
     try {
-      const detail = await setConversationThinking(target, !thinkingEnabled);
+      const detail = await setConversationMediator(target, !mediatorEnabled);
       if (activeSessionIdRef.current === target) applyRemoteSnapshot(detail);
+      else syncReplySettings(detail);
     } catch (err) {
       if (activeSessionIdRef.current === target) setError(err instanceof Error ? err.message : String(err));
     } finally {
-      thinkingSaveRef.current = false;
-      setThinkingSaving(false);
+      mediatorSaveRef.current.delete(target);
+      if (mountedRef.current) setMediatorSavingSessions(previous => previous.filter(id => id !== target));
     }
   }
 
@@ -710,7 +710,7 @@ export default function ConversationWorkspace({
     const target = activeSessionIdRef.current;
     if (!isAdmin || !target || loadingConversation || conversationReplyMode !== "ack_deep"
       || !replyEffortOptions?.includes(effort) || effort === replyEffort || turns.current.has(target)
-      || thinkingSaveRef.current || replyEffortSaveRef.current.has(target)) return;
+      || mediatorSaveRef.current.has(target) || replyEffortSaveRef.current.has(target)) return;
     replyEffortSaveRef.current.add(target);
     setReplyEffortSavingSessions(previous => [...previous, target]);
     setError(null);
@@ -727,9 +727,8 @@ export default function ConversationWorkspace({
   }
 
   async function handleSend(text: string) {
-    if (thinkingSaveRef.current) return;
     const sourceId = activeSessionIdRef.current;
-    if (sourceId && replyEffortSaveRef.current.has(sourceId)) return;
+    if (sourceId && (replyEffortSaveRef.current.has(sourceId) || mediatorSaveRef.current.has(sourceId))) return;
     if (!sourceId || sourceId !== sessionId || loadingConversation || turns.current.has(sourceId)) return;
     const controller = new AbortController();
     const baseline = messages.length;
@@ -1124,13 +1123,13 @@ export default function ConversationWorkspace({
           busy={busy}
           replyWaiting={replyWaiting}
           replyMode={conversationReplyMode}
-          thinkingEnabled={thinkingEnabled}
-          thinkingBusy={thinkingSaving}
+          mediatorEnabled={mediatorEnabled}
+          mediatorBusy={mediatorSaving}
+          onToggleMediator={isAdmin && sessionId ? handleMediatorToggle : undefined}
           replyEffort={replyEffort}
           replyEffortOptions={replyEffortOptions ?? []}
           replyEffortBusy={replyEffortSaving}
           onReplyEffortChange={isAdmin && sessionId && conversationReplyMode === "ack_deep" && replyEffortOptions?.length ? handleReplyEffortChange : undefined}
-          onToggleThinking={isAdmin && sessionId ? handleThinkingToggle : undefined}
           generationStartedAt={sessionId ? turns.current.get(sessionId)?.startedAt : undefined}
           loading={loadingConversation}
           error={error}

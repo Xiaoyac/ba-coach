@@ -705,7 +705,8 @@ def make_module_node(module_name: str, config: ModuleConfig):
         mediator_started = perf_counter()
         guided_knowledge, guidance_block, mediator_metrics = await mediate_knowledge(
             state=mediator_state, module=module_name, knowledge=knowledge, provider=context.router_provider,
-            settings=context.settings, prompt=mediator_prompt, debug_output=mediator_debug)
+            settings=context.settings, prompt=mediator_prompt, debug_output=mediator_debug,
+            bypass=context.knowledge_mediator_bypass)
         _send({"type":"trace", "node":"knowledge_mediator", "detail":mediator_metrics})
         logger.info("knowledge_mediator %s", json.dumps({k:v for k,v in mediator_metrics.items() if k not in ("guidance","cautions","selections","applications","note")},ensure_ascii=False))
         if context.sessionmaker is not None and mediator_metrics["status"] != "skipped":

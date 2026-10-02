@@ -694,6 +694,14 @@ class Conversation(Base):
         return f"<Conversation {self.session_id[:8]}… {self.title[:20]!r}>"
 
 
+class ConversationKnowledgeSettings(Base):
+    """Temporary, owned admin experiment; independent of workflow state."""
+    __tablename__ = "conversation_knowledge_settings"
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True)
+    mediator_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
 class ConversationReplySettings(Base):
     """App-owned per-conversation settings, separate from workflow memory.
 

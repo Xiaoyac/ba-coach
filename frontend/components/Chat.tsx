@@ -54,9 +54,9 @@ export default function Chat({
   generationStartedAt,
   onOpenSidebar,
   onShareConversation,
-  onToggleThinking,
-  thinkingEnabled = true,
-  thinkingBusy = false,
+  onToggleMediator,
+  mediatorEnabled = true,
+  mediatorBusy = false,
   replyMode = "standard",
   replyEffort = "low",
   replyEffortOptions = [],
@@ -96,9 +96,9 @@ export default function Chat({
   generationStartedAt?: number;
   onOpenSidebar: () => void;
   onShareConversation?: () => void;
-  onToggleThinking?: () => void;
-  thinkingEnabled?: boolean;
-  thinkingBusy?: boolean;
+  onToggleMediator?: () => void;
+  mediatorEnabled?: boolean;
+  mediatorBusy?: boolean;
   replyMode?: ConversationReplyMode;
   replyEffort?: ConversationReplyEffort;
   replyEffortOptions?: ConversationReplyEffort[];
@@ -182,12 +182,12 @@ export default function Chat({
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const text = input.trim();
-    if (!text || busy || loading || thinkingBusy || replyEffortBusy) return;
+    if (!text || busy || loading || replyEffortBusy || mediatorBusy) return;
     setInput("");
     onSend(text);
   }
 
-  const canSend = input.trim().length > 0 && !busy && !loading && !thinkingBusy && !replyEffortBusy;
+  const canSend = input.trim().length > 0 && !busy && !loading && !mediatorBusy && !replyEffortBusy;
   const replyModule = routing.reply_module;
   const nextModule = routing.next_module;
   const displayedModule = nextModule ?? replyModule;
@@ -423,33 +423,36 @@ export default function Chat({
           </div>
         </div>
       </header>
-      {accountRole === "admin" && onToggleThinking && <div className="shrink-0 border-b border-line px-4 py-2 sm:px-6">
-        <div className="flex items-center justify-between gap-3">
-        <p className="text-xs leading-5 text-ink-muted">{replyMode === "ack_deep" ? "深度回复固定开启；此开关只影响辅助流程" : "当前对话 · 全流程生效"}</p>
-        <button type="button" role="switch" aria-checked={thinkingEnabled} aria-label={replyMode === "ack_deep" ? "辅助流程思考" : "深度思考"}
-          onClick={onToggleThinking} disabled={busy || loading || thinkingBusy || replyEffortBusy}
-          title={busy ? "回复结束后可切换" : replyMode === "ack_deep" ? "控制路由、知识筛选与信息提取的深度思考；自然接话和深度回复并行生成" : "统一控制当前对话的回复、路由、知识筛选与信息提取的深度思考"}
-          className={`inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-edge disabled:cursor-not-allowed disabled:opacity-50 ${thinkingEnabled ? "bg-accent-wash text-accent-ink" : "bg-raised text-ink-muted"}`}>
-          <span>{replyMode === "ack_deep" ? "辅助流程思考" : "深度思考"} · {thinkingBusy ? "保存中…" : thinkingEnabled ? "开" : "关"}</span>
-          <span aria-hidden="true" className={`flex h-5 w-9 items-center rounded-full px-0.5 ${thinkingEnabled ? "justify-end bg-accent" : "justify-start bg-ink-faint"}`}>
-            <span className="h-4 w-4 rounded-full bg-panel" />
-          </span>
-        </button>
+      {accountRole === "admin" && replyMode === "ack_deep" && onReplyEffortChange && replyEffortOptions.length > 0 && <div className="shrink-0 border-b border-line px-4 py-2 sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <label htmlFor="conversation-reply-effort" className="text-sm text-ink">主回复思考强度</label>
+          <ArchiveSelect key={sessionId} id="conversation-reply-effort" label="主回复思考强度" value={replyEffort}
+            disabled={busy || loading || replyEffortBusy || mediatorBusy}
+            aria-describedby="conversation-reply-effort-help"
+            onChange={value => onReplyEffortChange(value as ConversationReplyEffort)}
+            options={replyEffortOptions.map(effort => ({ value: effort, label: replyEffortLabels[effort] }))}
+            className="min-w-40" />
         </div>
-        {replyMode === "ack_deep" && onReplyEffortChange && replyEffortOptions.length > 0 && <div className="mt-2 border-t border-line pt-2">
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-            <label htmlFor="conversation-reply-effort" className="text-sm text-ink">主回复思考强度</label>
-            <ArchiveSelect key={sessionId} id="conversation-reply-effort" label="主回复思考强度" value={replyEffort}
-              disabled={busy || loading || thinkingBusy || replyEffortBusy}
-              aria-describedby="conversation-reply-effort-help"
-              onChange={value => onReplyEffortChange(value as ConversationReplyEffort)}
-              options={replyEffortOptions.map(effort => ({ value: effort, label: replyEffortLabels[effort] }))}
-              className="min-w-40" />
-          </div>
-          <p id="conversation-reply-effort-help" className="mt-1 text-xs leading-5 text-ink-muted">
-            {replyEffortBusy ? <span role="status">保存中…</span> : "保存后从下一轮主回复生效。"} 控制思考强度，不是秒数或字数上限。
+        <p id="conversation-reply-effort-help" className="mt-1 text-xs leading-5 text-ink-muted">
+          {replyEffortBusy ? <span role="status">保存中…</span> : "保存后从下一轮主回复生效。"} 控制思考强度，不是秒数或字数上限。
+        </p>
+      </div>}
+
+      {accountRole === "admin" && onToggleMediator && <div className="shrink-0 border-b border-line px-4 py-2 sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p id="knowledge-mediator-help" className="text-xs leading-5 text-ink-muted">
+            当前对话测试 · 下一轮生效。关闭后保留知识检索，材料直接交给主回复。
           </p>
-        </div>}
+          <button type="button" role="switch" aria-checked={mediatorEnabled} aria-label="知识中介"
+            aria-describedby="knowledge-mediator-help" onClick={onToggleMediator}
+            disabled={busy || loading || replyEffortBusy || mediatorBusy}
+            className={`inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-edge disabled:cursor-not-allowed disabled:opacity-50 ${mediatorEnabled ? "bg-accent-wash text-accent-ink" : "bg-raised text-ink-muted"}`}>
+            <span>知识中介 · {mediatorBusy ? "保存中…" : mediatorEnabled ? "开" : "关（直通检索）"}</span>
+            <span aria-hidden="true" className={`flex h-5 w-9 items-center rounded-full px-0.5 ${mediatorEnabled ? "justify-end bg-accent" : "justify-start bg-ink-faint"}`}>
+              <span className="h-4 w-4 rounded-full bg-panel" />
+            </span>
+          </button>
+        </div>
       </div>}
 
       {loading ? (

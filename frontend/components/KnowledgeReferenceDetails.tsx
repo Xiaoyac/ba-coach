@@ -5,6 +5,7 @@ import { fetchKnowledgeReferences, type KnowledgeReferences } from "@/lib/conver
 import { knowledgeScoreLabel } from "@/lib/knowledgeScores";
 
 const statusLabels: Record<string, string> = {
+  bypassed: "已绕过中介", admin_direct: "管理员测试：检索材料直通主回复",
   returned: "已召回", empty: "未召回相关片段", skipped: "已跳过", disabled: "未启用",
   completed: "已完成", fallback: "未放行", timeout: "中介超时，片段未放行",
   invalid_output_or_provider_error: "中介输出异常或服务错误，片段未放行",
@@ -63,7 +64,9 @@ export default function KnowledgeReferenceDetails({ messageId, pending, view = "
         {data.mediator_cautions.map((item, index) => <li key={index} className="whitespace-pre-wrap [overflow-wrap:anywhere]">{item}</li>)}
       </ul>
     </section>}
-    {!data.mediator_guidance && <p>{data.mediator_status === "completed"
+    {!data.mediator_guidance && <p>{data.mediator_status === "bypassed"
+      ? "本轮未调用中介模型；提供给主回复的材料可在知识详情中查看。"
+      : data.mediator_status === "completed"
       ? "本条历史回复未保存中介使用建议，不会重新调用模型补填；新回复可查看实际建议。"
       : "本轮没有可用的中介使用建议，请结合上方处理状态查看原因。"}</p>}
     {data.mediator_guidance && <p className="text-ink-faint">这是中介给回复模型的知识使用建议，不是独立思考内容，也不代表回复最终实际引用。</p>}

@@ -80,7 +80,7 @@ class KnowledgeGuidance(BaseModel):
         return self
 
 
-async def mediate_knowledge(*, state, module, knowledge, provider, settings, prompt=MEDIATOR_PROMPT, debug_output=None):
+async def mediate_knowledge(*, state, module, knowledge, provider, settings, prompt=MEDIATOR_PROMPT, debug_output=None, bypass=False):
     # Explicit side channel: never put native reasoning into metrics/logs/prompts.
     if debug_output is not None:
         debug_output.clear()
@@ -90,13 +90,22 @@ async def mediate_knowledge(*, state, module, knowledge, provider, settings, pro
     if recording_status is None:
         recording_status = next((f.get("values", {}).get("recording_status")
             for f in bundle.get("facts", []) if f.get("source") == "module_three_record"), None)
-    if (settings.knowledge_mediator_enabled and module == "module_3" and recording_status == "declined"
+    if ((settings.knowledge_mediator_enabled or bypass) and module == "module_3" and recording_status == "declined"
             and task not in {"m3_recording_purpose", "m3_recording_concern", "m3_reminder"}):
         return [], "", {"status":"completed", "reason":"not_needed", "duration_ms":0,
             "decision":"not_needed", "selections":[], "selected_ids":[], "applications":[],
             "note":"用户已明确拒绝当前记录安排，本轮没有新的记录问题。", "guidance":"", "cautions":[],
             "raw_chunk_count":len(knowledge), "candidate_chunk_count":0, "approved_chunk_count":0,
             "withheld_on_error":False}
+    if bypass:
+        # Retrieval has already selected these source passages. No extra model,
+        # generated guidance, or claim that the mediator approved them.
+        return list(knowledge), "", {"status": "bypassed", "reason": "admin_direct",
+            "duration_ms": 0, "decision": None, "selections": [], "applications": [],
+            "selected_ids": [str(c.id) for c in knowledge], "note": "", "guidance": "",
+            "cautions": [], "raw_chunk_count": len(knowledge), "approved_chunk_count": 0,
+            "provided_chunk_count": len(knowledge), "forwarded_to_reply": bool(knowledge),
+            "withheld_on_error": False}
     if not settings.knowledge_mediator_enabled or not knowledge:
         # An empty retrieval is not proof that knowledge was unnecessary.
         return [], "", {"status":"skipped", "reason":"disabled" if not settings.knowledge_mediator_enabled else "no_knowledge", "duration_ms":0,
