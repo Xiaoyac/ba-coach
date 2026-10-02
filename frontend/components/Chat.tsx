@@ -2,9 +2,9 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ChatMessage, RoutingMeta } from "@/lib/api";
-import { replyEffortLabels, type ConversationReplyEffort, type ConversationReplyMode } from "@/lib/conversations";
+import { type ConversationReplyEffort, type ConversationReplyMode } from "@/lib/conversations";
 import MessageRow from "@/components/MessageRow";
-import ArchiveSelect from "@/components/ArchiveSelect";
+import { ReplyEffortSlider, SettingHelp } from "@/components/ConversationControls";
 import { MessageFeedbackProvider } from "@/components/MessageFeedback";
 import ContextUsageRing from "@/components/ContextUsageRing";
 import DailyRecordEntry from "@/components/DailyRecordEntry";
@@ -428,38 +428,33 @@ export default function Chat({
           </div>
         </div>
       </header>
-      {accountRole === "admin" && replyMode === "ack_deep" && onReplyEffortChange && replyEffortOptions.length > 0 && <div className="shrink-0 border-b border-line px-4 py-2 sm:px-6">
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-          <label htmlFor="conversation-reply-effort" className="text-sm text-ink">主回复思考强度</label>
-          <ArchiveSelect key={sessionId} id="conversation-reply-effort" label="主回复思考强度" value={replyEffort}
-            disabled={busy || loading || replyEffortBusy || mediatorBusy}
-            aria-describedby="conversation-reply-effort-help"
-            onChange={value => onReplyEffortChange(value as ConversationReplyEffort)}
-            options={replyEffortOptions.map(effort => ({ value: effort, label: replyEffortLabels[effort] }))}
-            className="min-w-40" />
+      {accountRole === "admin" && (onToggleMediator || (replyMode === "ack_deep" && onReplyEffortChange && replyEffortOptions.length > 0)) && (
+        <div className="relative flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-1 border-b border-line px-3 py-1.5 sm:gap-x-5 sm:px-6" data-testid="conversation-controls" aria-busy={replyEffortBusy || mediatorBusy}>
+          {replyMode === "ack_deep" && onReplyEffortChange && replyEffortOptions.length > 0 && <div className="flex items-center gap-1">
+            <label htmlFor="conversation-reply-effort" className="hidden text-xs text-ink sm:block">思考强度</label>
+            <ReplyEffortSlider key={sessionId} value={replyEffort} options={replyEffortOptions}
+              disabled={busy || loading || replyEffortBusy || mediatorBusy} onChange={onReplyEffortChange} />
+            <SettingHelp key={sessionId} id="reply-effort-details" label="思考强度说明">
+              <p>主回复思考强度：low 更快，high 更充分，xhigh 为最高强度。界面的 xhigh 对应 K3 API 的 max。</p>
+              <p className="mt-2">控制思考强度，不是秒数或字数上限。仅修改当前对话，保存后从下一轮生效。</p>
+            </SettingHelp>
+          </div>}
+          {onToggleMediator && <div className="flex items-center gap-1">
+            <span id="knowledge-retrieval-label" className="text-xs text-ink"><span className="hidden sm:inline">是否使用</span>新架构</span>
+            <button id="knowledge-retrieval-mode" type="button" role="switch" aria-label="是否使用新架构" aria-checked={!mediatorEnabled}
+              onClick={onToggleMediator} disabled={busy || loading || replyEffortBusy || mediatorBusy}
+              className={`relative h-6 w-10 rounded-full border transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-wait disabled:opacity-50 ${mediatorEnabled ? "border-line bg-raised" : "border-accent bg-accent"}`}>
+              <span aria-hidden="true" className={`absolute left-0.5 top-0.5 h-[18px] w-[18px] rounded-full bg-panel shadow-sm transition-transform motion-reduce:transition-none ${mediatorEnabled ? "translate-x-0" : "translate-x-4"}`} />
+            </button>
+            <SettingHelp key={sessionId} id="knowledge-retrieval-details" label="知识检索架构说明">
+              <p>关闭 · 老架构：目录检索后，由知识中介整理材料，再交给主回复。</p>
+              <p className="mt-2">开启 · 新架构：借鉴 AstrBot 的混合检索，本地向量嵌入与关键词召回，再由 K3 重排，选中的原文直接交给主回复。</p>
+              <p className="mt-2">仅修改当前对话，保存后从下一轮生效。</p>
+            </SettingHelp>
+          </div>}
+          <span role="status" className="sr-only">{replyEffortBusy || mediatorBusy ? "保存中…" : ""}</span>
         </div>
-        <p id="conversation-reply-effort-help" className="mt-1 text-xs leading-5 text-ink-muted">
-          {replyEffortBusy ? <span role="status">保存中…</span> : "保存后从下一轮主回复生效。"} 控制思考强度，不是秒数或字数上限。
-        </p>
-      </div>}
-
-      {accountRole === "admin" && onToggleMediator && <div className="shrink-0 border-b border-line px-4 py-2 sm:px-6">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <label htmlFor="knowledge-retrieval-mode" className="text-sm text-ink">知识检索模式</label>
-          <ArchiveSelect id="knowledge-retrieval-mode" label="知识检索模式"
-            value={mediatorEnabled ? "legacy_mediator" : "astrbot_hybrid"}
-            aria-describedby="knowledge-mediator-help"
-            onChange={value => { if ((value === "legacy_mediator") !== mediatorEnabled) onToggleMediator(); }}
-            disabled={busy || loading || replyEffortBusy || mediatorBusy}
-            options={[{value: "legacy_mediator", label: "目录检索＋中介"},
-                      {value: "astrbot_hybrid", label: "AstrBot 混合检索"}]}
-            className="min-w-48" />
-        </div>
-        <p id="knowledge-mediator-help" className="mt-1 text-xs leading-5 text-ink-muted">
-          {mediatorBusy ? <span role="status">保存中…</span> : "当前对话 · 下一轮生效。"}
-          {mediatorEnabled ? "目录筛选后由中介整理材料。" : "向量与关键词混合检索，材料直接交给主回复。"}
-        </p>
-      </div>}
+      )}
 
       {loading ? (
         <div className="flex flex-1 items-center justify-center" aria-busy="true">
