@@ -316,14 +316,15 @@ async def test_sparse_reserve_rescues_evidence_outside_fusion_pool(tmp_path):
     assert trace['rerank_pool_ids'] == ['kb:1','kb:2']
 
 
-async def test_k3_sees_original_refusal_even_when_embedding_query_is_focused(tmp_path):
+@pytest.mark.parametrize("backend,model", [("k3", "kimi-k3"), ("llm", "deepseek-v4.1-flash")])
+async def test_listwise_sees_original_refusal_even_when_embedding_query_is_focused(tmp_path, backend, model):
     kb = synthetic(tmp_path)
-    kb.settings.knowledge_rerank_backend = 'k3'
-    kb.settings.knowledge_rerank_model = 'kimi-k3'
+    kb.settings.knowledge_rerank_backend = backend
+    kb.settings.knowledge_rerank_model = model
     kb.settings.knowledge_hybrid_require_rerank = True
     rank = AsyncMock(return_value=[])
     from types import SimpleNamespace
-    kb._k3_reranker = SimpleNamespace(rank=rank)
+    kb._llm_reranker = SimpleNamespace(rank=rank)
     await kb.warmup()
     query = '我不想跳绳，只想散步'
     hits, metrics = await kb.search_with_diagnostics(module='module_2', query=query)

@@ -41,7 +41,7 @@ const {chromium}=require('playwright');
   await page.getByText('中介开关测试A',{exact:true}).click();await expectMode(true);await expectEffort('xhigh');
   const box=await slider.boundingBox();await page.mouse.move(box.x+box.width*5/6,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/6,box.y+box.height/2,{steps:8});await page.mouse.up();await expectEffort('low');assert.equal(efforts.at(-1),'low');
   failSave=true;await slider.press('ArrowRight');await expectEffort('low');failSave=false;
-  await page.getByRole('button',{name:'知识检索架构说明'}).click();await page.getByRole('note').getByText(/K3 重排/).waitFor();await page.keyboard.press('Escape');assert.equal(await page.getByRole('note').count(),0);
+  await page.getByRole('button',{name:'知识检索架构说明'}).click();await page.getByRole('note').getByText(/DeepSeek 4.1 Flash 重排/).waitFor();await page.keyboard.press('Escape');assert.equal(await page.getByRole('note').count(),0);
   await page.screenshot({path:'/tmp/controls-desktop.png',fullPage:true});
   await page.setViewportSize({width:390,height:844});await page.waitForTimeout(300);
   const bar=await page.getByTestId('conversation-controls').boundingBox();assert.ok(bar.height<=50,`toolbar height ${bar.height}`);

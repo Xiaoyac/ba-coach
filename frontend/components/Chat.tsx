@@ -448,7 +448,7 @@ export default function Chat({
             </button>
             <SettingHelp key={sessionId} id="knowledge-retrieval-details" label="知识检索架构说明">
               <p>关闭 · 老架构：目录检索后，由知识中介整理材料，再交给主回复。</p>
-              <p className="mt-2">开启 · 新架构：借鉴 AstrBot 的混合检索，本地向量嵌入与关键词召回，再由 K3 重排，选中的原文直接交给主回复。</p>
+              <p className="mt-2">开启 · 新架构：借鉴 AstrBot 的混合检索，本地向量嵌入与关键词召回，再由 DeepSeek 4.1 Flash 重排，选中的原文直接交给主回复。</p>
               <p className="mt-2">仅修改当前对话，保存后从下一轮生效。</p>
             </SettingHelp>
           </div>}

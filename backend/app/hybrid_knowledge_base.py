@@ -3,7 +3,7 @@
 Own implementation: the database remains authoritative. Versioned, derived
 vectors are local files; user queries and conversation state are never persisted
 in this index. No legacy catalog or mediator is used; optional reranking can
-use either a dedicated relevance API or the explicit K3 listwise adapter.
+use either a dedicated relevance API or the explicit LLM listwise adapter.
 """
 from __future__ import annotations
 
@@ -88,7 +88,7 @@ class HybridDatabaseKnowledgeBase(DatabaseKnowledgeBase):
         self.storage = Path(storage or self.settings.knowledge_hybrid_storage)
         self._embedder = embedder
         self._snapshot = None
-        self._k3_reranker = None
+        self._llm_reranker = None
         self._build_task = None
         self._build_index = None
         # Serialize ONNX inference and index writes across request threads.
@@ -105,8 +105,8 @@ class HybridDatabaseKnowledgeBase(DatabaseKnowledgeBase):
             "knowledge_rerank_backend", "knowledge_rerank_min_score", "knowledge_hybrid_require_rerank",
             "knowledge_hybrid_sparse_reserve", "knowledge_hybrid_final_results",
             "knowledge_k3_rerank_max_tokens", "knowledge_k3_rerank_max_chars", "deepseek_base_url")}
-        from .knowledge_k3_rerank import VERSION as k3_version
-        return {**super()._cache_namespace(), "hybrid_version": VERSION, "k3_version": k3_version,
+        from .knowledge_llm_rerank import VERSION as llm_version
+        return {**super()._cache_namespace(), "hybrid_version": VERSION, "llm_version": llm_version,
                 "config": hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()}
 
     def _ensure_embedder(self):
@@ -120,10 +120,10 @@ class HybridDatabaseKnowledgeBase(DatabaseKnowledgeBase):
         return self._embedder
 
     def _validate_quality_configuration(self):
-        if self.settings.knowledge_rerank_backend == "k3":
-            if self._k3_reranker is None:
-                from .knowledge_k3_rerank import K3Reranker
-                self._k3_reranker = K3Reranker(self.settings)
+        if self.settings.knowledge_rerank_backend in {"k3", "llm"}:
+            if self._llm_reranker is None:
+                from .knowledge_llm_rerank import ListwiseReranker
+                self._llm_reranker = ListwiseReranker(self.settings)
             return
         if self.settings.knowledge_hybrid_require_rerank and not all((
                 self.settings.knowledge_rerank_model, self.settings.knowledge_rerank_url,
@@ -307,8 +307,8 @@ class HybridDatabaseKnowledgeBase(DatabaseKnowledgeBase):
                 trace["rerank_api_calls"] = 1
                 rerank_started = perf_counter()
                 # Dense/sparse focusing must not erase explicit refusals from
-                # the K3 relevance judge's view of the user's original request.
-                rerank_query = query if self.settings.knowledge_rerank_backend == "k3" else focus_query(query)
+                # the LLM relevance judge's view of the user's original request.
+                rerank_query = query if self.settings.knowledge_rerank_backend in {"k3", "llm"} else focus_query(query)
                 ranked = await self._rerank(rerank_query, hits, trace=trace)
                 trace["rerank_duration_ms"] = round((perf_counter() - rerank_started) * 1000, 3)
                 rerank_status = "failed_retained_fusion" if ranked is hits else "completed"
@@ -340,9 +340,9 @@ class HybridDatabaseKnowledgeBase(DatabaseKnowledgeBase):
         import httpx
         from dataclasses import replace
         try:
-            if self.settings.knowledge_rerank_backend == "k3":
+            if self.settings.knowledge_rerank_backend in {"k3", "llm"}:
                 self._validate_quality_configuration()
-                return await self._k3_reranker.rank(query, hits, trace=trace if trace is not None else {})
+                return await self._llm_reranker.rank(query, hits, trace=trace if trace is not None else {})
             async with httpx.AsyncClient(timeout=self.settings.knowledge_rerank_timeout_seconds) as client:
                 payload = {"model": self.settings.knowledge_rerank_model, "query": query,
                            "documents": [hit.text for hit in hits], "top_n": len(hits)}

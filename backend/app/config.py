@@ -48,14 +48,15 @@ class Settings(BaseSettings):
     knowledge_hybrid_candidates: int = Field(default=20, ge=1, le=100)
     knowledge_hybrid_final_results: int = Field(default=5, ge=1, le=20)
     knowledge_hybrid_timeout_seconds: float = Field(default=20, ge=0.1, le=60)
-    # Optional reranker, disabled by default. K3 is an explicit listwise option.
+    # Optional reranker, disabled by default. llm supports explicit listwise models.
     knowledge_rerank_model: str | None = None
     knowledge_rerank_url: str | None = None
     knowledge_rerank_api_key: str | None = Field(default=None, repr=False)
-    knowledge_rerank_backend: Literal["compatible", "dashscope", "k3"] = "compatible"
-    # K3 experiment: preserve top sparse candidates per category alongside
+    knowledge_rerank_backend: Literal["compatible", "dashscope", "k3", "llm"] = "compatible"
+    # Listwise reranking: preserve top sparse candidates per category alongside
     # fusion candidates so the lightweight embedding cannot erase them.
     knowledge_hybrid_sparse_reserve: int = Field(default=0, ge=0, le=50)
+    # Historical setting names retained for deployed listwise budget compatibility.
     knowledge_k3_rerank_max_tokens: int = Field(default=4096, ge=1024, le=8192)
     knowledge_k3_rerank_max_chars: int = Field(default=140000, ge=10000, le=300000)
     knowledge_rerank_timeout_seconds: float = Field(default=15, ge=1, le=60)
