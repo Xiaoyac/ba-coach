@@ -36,7 +36,7 @@ const {chromium}=require('playwright');
   await page.getByText('中介开关测试B',{exact:true}).click();await expectMode('目录检索＋中介');
   await page.getByText('中介开关测试A',{exact:true}).click();await expectMode('AstrBot 混合检索');
   await page.screenshot({path:'mediator-switch-desktop.png',fullPage:true});
-  await page.setViewportSize({width:390,height:844});await page.screenshot({path:'mediator-switch-mobile.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});await page.waitForTimeout(500);await page.screenshot({path:'mediator-switch-mobile.png',fullPage:true});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await choose('目录检索＋中介');
   role='user';await page.reload();await page.getByText('测试对话A',{exact:true}).waitFor();
