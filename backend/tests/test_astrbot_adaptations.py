@@ -164,3 +164,25 @@ async def test_reindex_preserves_admin_changes_and_backs_up_before_replacement(e
     assert backup.stat().st_mode & 0o777 == 0o600
     with pytest.raises(FileExistsError):
         await migration.run(apply=True, backup=backup)
+
+
+@pytest.mark.parametrize('length', [64, 32])
+def test_checkpoint_migration_allows_inherited_mysql_collation_but_checks_length(monkeypatch, length):
+    from sqlalchemy.dialects import mysql
+    from scripts import create_context_checkpoints as migration
+    table = ConversationContextCheckpoint.__table__
+    columns = [{'name': c.name, 'nullable': c.nullable, 'type': c.type} for c in table.columns]
+    columns[2]['type'] = mysql.VARCHAR(length=length, collation='utf8mb4_general_ci')
+    columns[3]['type'] = mysql.TEXT(collation='utf8mb4_general_ci')
+    inspector = SimpleNamespace(has_table=lambda name: True,
+        get_columns=lambda name: columns,
+        get_pk_constraint=lambda name: {'constrained_columns': ['conversation_id']},
+        get_foreign_keys=lambda name: [{'constrained_columns': ['conversation_id'],
+            'referred_table':'conversations', 'referred_columns':['id'], 'options':{'ondelete':'CASCADE'}}])
+    monkeypatch.setattr(migration, 'inspect', lambda connection: inspector)
+    connection = SimpleNamespace(dialect=mysql.dialect())
+    if length == 64:
+        assert migration._plan(connection) == []
+    else:
+        with pytest.raises(RuntimeError, match='source_digest'):
+            migration._plan(connection)

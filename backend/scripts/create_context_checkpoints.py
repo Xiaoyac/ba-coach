@@ -28,8 +28,14 @@ def _plan(connection):
     columns = {column["name"]: column for column in inspector.get_columns(table.name)}
     for expected in table.columns:
         actual = columns.get(expected.name)
+        # MySQL reflection expands the table's inherited collation on each
+        # text column. Compare type/length while allowing that inheritance.
+        actual_type = actual["type"].copy() if actual else None
+        if (actual_type is not None and hasattr(actual_type, "collation")
+                and getattr(expected.type, "collation", None) is None):
+            actual_type.collation = None
         if (actual is None or actual["nullable"] != expected.nullable
-                or actual["type"].compile(dialect=connection.dialect)
+                or actual_type.compile(dialect=connection.dialect)
                 != expected.type.compile(dialect=connection.dialect)):
             raise RuntimeError(f"Existing {table.name}.{expected.name} differs from expected schema")
     if inspector.get_pk_constraint(table.name)["constrained_columns"] != ["conversation_id"]:
