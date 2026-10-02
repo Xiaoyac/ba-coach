@@ -7,6 +7,7 @@ import MessageRow from "@/components/MessageRow";
 import ArchiveSelect from "@/components/ArchiveSelect";
 import { MessageFeedbackProvider } from "@/components/MessageFeedback";
 import ContextUsageRing from "@/components/ContextUsageRing";
+import DailyRecordEntry from "@/components/DailyRecordEntry";
 import ThemeToggle from "@/components/ThemeToggle";
 import {
   ArrowUpMark,
@@ -66,6 +67,8 @@ export default function Chat({
   headerContent,
   sidebarExpanded = true,
   onOpenAssessment,
+  onOpenAssessmentHistory,
+  assessmentRefreshKey = 0,
   onOpenPushSettings,
   displayName,
   accountUsername,
@@ -109,6 +112,8 @@ export default function Chat({
   sidebarExpanded?: boolean;
   /** Opens the daily record on demand — nothing here waits on it. */
   onOpenAssessment: () => void;
+  onOpenAssessmentHistory?: () => void;
+  assessmentRefreshKey?: number;
   onOpenPushSettings?: () => void;
   /** Nickname, falling back to username — whom this session belongs to. */
   displayName: string;
@@ -519,28 +524,7 @@ export default function Chat({
       )}
 
       <div className="mx-auto w-full max-w-[58rem] shrink-0 px-4 pb-3 pt-3 sm:px-7 sm:pb-5">
-        {displayedModule === "module_3" && (
-          <section
-            aria-label="每日记录快捷入口"
-            className="mb-3 flex flex-wrap items-center gap-3 rounded-2xl border border-accent-edge bg-accent-wash p-3 sm:px-4"
-          >
-            <div className="flex min-w-0 flex-1 items-center gap-3">
-              <NotebookMark aria-hidden="true" className="hidden h-6 w-6 shrink-0 text-accent-ink sm:block" />
-              <div>
-                <p className="text-sm font-semibold text-ink">每日记录</p>
-                <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">记下活动与心情，也可补记或修改</p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={onOpenAssessment}
-              aria-haspopup="dialog"
-              className="flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-on-accent transition-colors hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-            >
-              打开每日记录
-            </button>
-          </section>
-        )}
+        <DailyRecordEntry onOpen={onOpenAssessment} onHistory={onOpenAssessmentHistory ?? onOpenAssessment} refreshKey={assessmentRefreshKey} />
         <form
           onSubmit={handleSubmit}
           className="composer-shell flex items-end gap-2 rounded-3xl py-2 pl-5 pr-2 transition-all duration-300 focus-within:ring-2 focus-within:ring-accent-edge"

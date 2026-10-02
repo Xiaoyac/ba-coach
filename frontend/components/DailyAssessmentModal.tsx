@@ -11,6 +11,7 @@ import {
   type DailySummary,
 } from "@/lib/assessment";
 import AssessmentHistory from "@/components/AssessmentHistory";
+import DailyTermHelp, { DAILY_TERM_HELP } from "@/components/DailyTermHelp";
 import {
   ArrowLeftMark,
   ChevronDownMark,
@@ -83,17 +84,19 @@ const FIELD_CONTROL = "rounded-xl border bg-sheet text-sm text-ink transition-co
 
 export default function DailyAssessmentModal({
   onClose,
+  onSaved,
   initialView = "record",
 }: {
-  /** Fired whenever the window goes away — submitted, skipped, the X, or
-   *  clicking outside it. This is a manually opened tool now, not a gate
-   *  the rest of the app waits on, so the caller only ever needs "it's
-   *  closed" and doesn't have to tell those cases apart. */
   onClose: () => void;
+  onSaved?: () => void;
   initialView?: "record" | "history";
 }) {
-  const [view, setView] = useState<"record" | "history">(initialView);
+  const firstDateLoad = useRef(initialView === "record");
+  const draftTouched = useRef(false);
+  const [view, setView] = useState<"record" | "history" | "saved">(initialView);
   useEffect(() => { if (initialView === "history") void loadHistory(0, false); }, [initialView]);
+  const [activitiesOpen, setActivitiesOpen] = useState(false);
+  const [savedRecord, setSavedRecord] = useState<AssessmentRecord | null>(null);
   const [activities, setActivities] = useState<ActivityLog[]>([emptyActivity()]);
   const [summary, setSummary] = useState<DailySummary>(defaultSummary);
   const [busy, setBusy] = useState(false);
@@ -110,7 +113,15 @@ export default function DailyAssessmentModal({
     const controller = new AbortController();
     setDateLoading(true);
     fetchAssessmentByDate(recordDate, controller.signal).then(record => {
-      if (!controller.signal.aborted) setDateExisting(record);
+      if (!controller.signal.aborted) {
+        setDateExisting(record);
+        if (firstDateLoad.current) {
+          firstDateLoad.current = false;
+          // Opening "modify today" should not start with an empty duplicate.
+          // Never replace edits made while this read was in flight.
+          if (record && recordDate === localToday() && !editing && !draftTouched.current) editRecord(record);
+        }
+      }
     }).catch(err => {
       if (!controller.signal.aborted) setDateError(err instanceof Error ? err.message : "读取记录失败，请重试。");
     }).finally(() => { if (!controller.signal.aborted) setDateLoading(false); });
@@ -120,6 +131,7 @@ export default function DailyAssessmentModal({
 
   function editRecord(record: AssessmentRecord) {
     setEditing(record);
+    setActivitiesOpen(record.activities.length > 0);
     setRecordDate(record.local_date);
     setActivities(record.activities.length ? record.activities.map(a => ({ ...a })) : [emptyActivity()]);
     setSummary({ completion_rate: record.completion_rate, activity_level: record.activity_level,
@@ -130,6 +142,7 @@ export default function DailyAssessmentModal({
     setView("record");
   }
   function newRecord() {
+    setActivitiesOpen(false);
     setEditing(null); setRecordDate(localToday()); setActivities([emptyActivity()]);
     setSummary(defaultSummary()); setError(null); setView("record");
   }
@@ -157,17 +170,25 @@ export default function DailyAssessmentModal({
   const missingSummary = !legacy && (summary.activity_level === null || summary.overall_mood === null || (summary.completion_rate === null && !summary.completion_not_applicable));
   const canSubmit = !missingTimeSlot && !missingRequired && !missingSummary && !!recordDate && recordDate <= localToday() && !dateLoading && !dateError && !dateConflict;
 
+  function patchSummary(update: (previous: DailySummary) => DailySummary) {
+    draftTouched.current = true;
+    setSummary(update);
+  }
+
   function patchActivity(index: number, patch: Partial<ActivityLog>) {
+    draftTouched.current = true;
     setActivities((prev) =>
       prev.map((a, i) => (i === index ? { ...a, ...patch } : a)),
     );
   }
 
   function addActivity() {
+    draftTouched.current = true;
     setActivities((prev) => [...prev, emptyActivity()]);
   }
 
   function removeActivity(index: number) {
+    draftTouched.current = true;
     // Keep one editable activity even after the last row is removed.
     setActivities((prev) =>
       prev.length === 1 ? [emptyActivity()] : prev.filter((_, i) => i !== index),
@@ -193,6 +214,7 @@ export default function DailyAssessmentModal({
   }
 
   function showHistory() {
+    firstDateLoad.current = false;
     setView("history");
     if (!historyLoading) void loadHistory(0, false);
   }
@@ -221,9 +243,14 @@ export default function DailyAssessmentModal({
             : null,
         },
       };
-      if (editing) await updateAssessment(editing.id, { ...payload, expected_revision: editing.revision_no ?? 1 });
-      else await submitAssessment(payload);
-      onClose();
+      const saved = editing
+        ? await updateAssessment(editing.id, { ...payload, expected_revision: editing.revision_no ?? 1 })
+        : await submitAssessment(payload);
+      setSavedRecord(saved);
+      setEditing(saved);
+      setDateExisting(saved);
+      setView("saved");
+      onSaved?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -243,7 +270,7 @@ export default function DailyAssessmentModal({
   return (
     <dialog
       ref={dialogRef}
-      className="m-auto max-h-[calc(100dvh-40px)] w-[min(1040px,calc(100vw-40px))] max-w-none overflow-hidden rounded-3xl border-0 bg-sheet p-0 text-ink shadow-2xl backdrop:bg-black/40 max-sm:h-[100dvh] max-sm:max-h-[100dvh] max-sm:w-screen max-sm:rounded-none"
+      className="m-auto max-h-[calc(100dvh-40px)] w-[min(780px,calc(100vw-40px))] max-w-none overflow-hidden rounded-3xl border-0 bg-sheet p-0 text-ink shadow-2xl backdrop:bg-black/40 max-sm:h-[100dvh] max-sm:max-h-[100dvh] max-sm:w-screen max-sm:rounded-none"
       aria-labelledby={titleId}
       onCancel={(event) => { if (busy) event.preventDefault(); }}
       onClose={handleDismiss}
@@ -254,7 +281,9 @@ export default function DailyAssessmentModal({
       }}
     >
       <form
-        onSubmit={(event) => { event.preventDefault(); void handleSubmit(); }}
+        onSubmit={(event) => { event.preventDefault(); if (view === "record") void handleSubmit(); }}
+        onChangeCapture={() => { draftTouched.current = true; }}
+        onClickCapture={event => { if ((event.target as HTMLElement).closest('[role="radio"]')) draftTouched.current = true; }}
         aria-busy={busy}
         className="flex max-h-[calc(100dvh-40px)] min-h-0 flex-col max-sm:h-full max-sm:max-h-[100dvh]"
       >
@@ -266,12 +295,13 @@ export default function DailyAssessmentModal({
                 id={titleId}
                 className="truncate text-[1.05rem] font-medium tracking-wide text-ink"
               >
-                {view === "history" ? "历史每日记录" : editing ? "修改行为记录" : "每日行为记录"}
+                {view === "history" ? "趋势与历史记录" : view === "saved" ? "记录已保存" : editing ? "修改行为记录" : "每日行为记录"}
               </h2>
-              <p className="mt-0.5 truncate text-xs leading-relaxed text-ink-faint">
+              <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">
                 {view === "history"
-                  ? "看看过去的行动，也看看自己走过的路"
-                  : "可以补录过去的活动，也可以在历史记录中修改内容和日期。"}
+                  ? "从自己的记录里，回看活动与心情的变化"
+                  : view === "saved" ? "这一天的感受已经留下，之后也可以修改"
+                  : "无论有没有运动，都可以记录整天的感受。支持补记和修改。"}
               </p>
             </div>
             <button
@@ -296,6 +326,7 @@ export default function DailyAssessmentModal({
           {view === "history" ? (
             <AssessmentHistory
               records={history}
+              showTrends
               loading={historyLoading}
               loadingMore={historyLoadingMore}
               error={historyError}
@@ -308,12 +339,18 @@ export default function DailyAssessmentModal({
               onRetry={() => void loadHistory(0, false)}
               onEdit={editRecord}
             />
+          ) : view === "saved" && savedRecord ? (
+            <SavedAssessment record={savedRecord} onHistory={showHistory} />
           ) : (
-            <fieldset disabled={busy} className="grid min-w-0 items-start gap-6 lg:grid-cols-2 lg:gap-6">
-            <div className="space-y-2 lg:col-span-2">
+            <fieldset disabled={busy} className="min-w-0 space-y-5">
+            <div className="rounded-2xl border border-accent-edge bg-accent-wash px-4 py-3 text-sm leading-6 text-ink-muted">
+              <p className="font-medium text-ink">先填三项整体评分，活动明细可选</p>
+              <p>保存后可看当天回顾与趋势，之后也能补充或修改。</p>
+            </div>
+            <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-3">
                 <label className="flex items-center gap-3 text-sm font-medium">记录日期
-                  <input type="date" required value={recordDate} max={localToday()} onChange={e => setRecordDate(e.target.value)} className={`${FIELD_CONTROL} min-h-11 border-line px-3`} />
+                  <input type="date" required value={recordDate} max={localToday()} onChange={e => { firstDateLoad.current = false; setRecordDate(e.target.value); }} className={`${FIELD_CONTROL} min-h-11 border-line px-3`} />
                 </label>
                 {editing && <button type="button" onClick={newRecord} className="min-h-11 px-3 text-sm text-accent-ink">新建记录</button>}
               </div>
@@ -326,8 +363,44 @@ export default function DailyAssessmentModal({
                 <button type="button" onClick={() => editRecord(dateExisting)} className="mt-2 min-h-11 rounded-full border border-accent-edge px-4 text-accent-ink">打开这一天的记录</button>
               </div>}
             </div>
-            <section aria-labelledby={`${titleId}-activities`} className="min-w-0 space-y-3">
-              <div className="flex items-baseline justify-between gap-3"><h3 id={`${titleId}-activities`} className="text-base font-semibold">这一天做了什么</h3><span className="text-xs text-ink-muted">按活动记录（可选）</span></div>
+            <section aria-labelledby={`${titleId}-summary`} className="min-w-0 space-y-3">
+              <div className="flex items-baseline justify-between gap-3"><h3 id={`${titleId}-summary`} className="text-base font-semibold">回看这一天</h3><span className="text-xs text-ink-muted">{legacy ? "旧版总体评分 · 0–10 分" : "3 项评分 · 0–5 分"}</span></div>
+              <div data-daily-summary-panel className="space-y-4 rounded-2xl bg-raised p-4 sm:p-5">
+              {(legacy ? LEGACY_SCALES : SUMMARY_SCALES).map((s) => (
+                <div key={s.key}>
+                  <SegmentedScore
+                    label={s.label} helpKey={s.key} hint={`0 · ${s.low}　—　${legacy ? 10 : 5} · ${s.high}`} value={summary[s.key] ?? null} required={!legacy} maximum={legacy ? 10 : 5}
+                    onChange={v => patchSummary(prev => ({ ...prev, [s.key]: v, ...(s.key === "completion_rate" ? { completion_not_applicable: false } : {}) }))}
+                  />
+                </div>
+              ))}
+
+              {editing && !legacy && <label className="flex min-h-11 items-center gap-2 text-sm text-ink-muted">
+                <input type="checkbox" checked={summary.completion_not_applicable} onChange={e => patchSummary(prev => ({ ...prev, completion_not_applicable: e.target.checked, completion_rate: null }))} />
+                这一天没有预定计划／完成程度不适用
+              </label>}
+              <label className="block">
+                <span className="mb-2 block text-[0.85rem] text-ink-muted">
+                  想再写一点（可留空）
+                </span>
+                <textarea
+                  value={summary.reflection_note ?? ""}
+                  onChange={(e) =>
+                    patchSummary((prev) => ({
+                      ...prev,
+                      reflection_note: e.target.value,
+                    }))
+                  }
+                  rows={2}
+                  placeholder="这一天有什么想记下来的…"
+                  className={`zen-scroll block min-h-16 w-full resize-y border-line px-3 py-2 leading-6 placeholder:text-ink-muted ${FIELD_CONTROL}`}
+                />
+              </label>
+              </div>
+            </section>
+            <details open={activitiesOpen} onToggle={event => setActivitiesOpen(event.currentTarget.open)} className="min-w-0 rounded-2xl border border-line p-4">
+              <summary className="cursor-pointer text-sm font-semibold text-ink focus-visible:outline-2 focus-visible:outline-accent">补充活动明细（可选）<span className="ml-2 text-xs font-normal text-ink-muted">{filled.length > 0 ? `已填写 ${filled.length} 项` : "走路、家务、休息等都可以记"}</span></summary>
+              <div className="mt-4 space-y-3">
               {activities.map((a, i) => (
                 <ActivityCard
                   key={i}
@@ -348,43 +421,8 @@ export default function DailyAssessmentModal({
                 <PlusMark className="h-4 w-4" />
                 添加一项活动
               </button>
-            </section>
-            <section aria-labelledby={`${titleId}-summary`} className="min-w-0 space-y-3">
-              <div className="flex items-baseline justify-between gap-3"><h3 id={`${titleId}-summary`} className="text-base font-semibold">回看这一天</h3><span className="text-xs text-ink-muted">按天记录</span></div>
-              <div data-daily-summary-panel className="space-y-5 rounded-2xl bg-raised p-4 sm:p-5">
-              <div className="flex min-h-7 items-center justify-between gap-3"><h4 className="text-sm font-semibold">整体感受</h4><span className="text-xs text-ink-muted">{legacy ? "旧版总体评分 · 0–10 分" : "3 项评分 · 0–5 分"}</span></div>
-              {(legacy ? LEGACY_SCALES : SUMMARY_SCALES).map((s) => (
-                <div key={s.key}>
-                  <SegmentedScore
-                    label={s.label} hint={`0 · ${s.low}　—　${legacy ? 10 : 5} · ${s.high}`} value={summary[s.key] ?? null} required={!legacy} maximum={legacy ? 10 : 5}
-                    onChange={v => setSummary(prev => ({ ...prev, [s.key]: v, ...(s.key === "completion_rate" ? { completion_not_applicable: false } : {}) }))}
-                  />
-                </div>
-              ))}
-
-              {editing && !legacy && <label className="flex min-h-11 items-center gap-2 text-sm text-ink-muted">
-                <input type="checkbox" checked={summary.completion_not_applicable} onChange={e => setSummary(prev => ({ ...prev, completion_not_applicable: e.target.checked, completion_rate: null }))} />
-                这一天没有预定计划／完成程度不适用
-              </label>}
-              <label className="block">
-                <span className="mb-2 block text-[0.85rem] text-ink-muted">
-                  想再写一点（可留空）
-                </span>
-                <textarea
-                  value={summary.reflection_note ?? ""}
-                  onChange={(e) =>
-                    setSummary((prev) => ({
-                      ...prev,
-                      reflection_note: e.target.value,
-                    }))
-                  }
-                  rows={2}
-                  placeholder="这一天有什么想记下来的…"
-                  className={`zen-scroll block min-h-16 w-full resize-y border-line px-3 py-2 leading-6 placeholder:text-ink-muted ${FIELD_CONTROL}`}
-                />
-              </label>
               </div>
-            </section>
+            </details>
             </fieldset>
           )}
         </div>
@@ -397,7 +435,9 @@ export default function DailyAssessmentModal({
             </p>
           )}
 
-          {view === "history" ? (
+          {view === "saved" ? (
+            <button type="button" onClick={handleDismiss} className="ml-auto flex min-h-11 items-center rounded-full bg-accent px-5 py-2 text-sm font-medium text-on-accent">完成，返回对话</button>
+          ) : view === "history" ? (
             <button
               type="button"
               onClick={() => setView("record")}
@@ -415,10 +455,15 @@ export default function DailyAssessmentModal({
               className="flex shrink-0 items-center gap-2 rounded-full px-2 py-2 text-[0.8rem] text-ink-faint transition-colors duration-300 hover:bg-accent-wash hover:text-accent-ink disabled:opacity-40 sm:px-3"
             >
               <HistoryMark className="h-4 w-4" />
-              查看历史
+              趋势与历史
             </button>
 
-            <p id={`${titleId}-validation`} className="order-first basis-full text-xs leading-relaxed text-ink-muted sm:order-none sm:max-w-[45%] sm:basis-auto">{missingRequired || missingTimeSlot ? "请补全已填写活动的时间、内容和做完后的心情，或删除该活动" : missingSummary ? "请完成这一天的三项总体评分" : filled.length === 0 ? "可仅保存这一天的整体总结" : `已填写 ${filled.length} 项活动`}</p>
+            <div id={`${titleId}-validation`} className="order-first basis-full text-xs leading-relaxed text-ink-muted sm:order-none sm:max-w-[45%] sm:basis-auto">
+              {missingRequired || missingTimeSlot ? <button type="button" className="text-left underline underline-offset-2" onClick={() => {
+                setActivitiesOpen(true);
+                requestAnimationFrame(() => scrollRef.current?.querySelector('details')?.scrollIntoView({ block: "start", behavior: "smooth" }));
+              }}>请补全已填写活动的时间、内容和心情，或删除该活动</button> : missingSummary ? "请完成这一天的三项总体评分" : filled.length === 0 ? "可仅保存这一天的整体总结" : `已填写 ${filled.length} 项活动`}
+            </div>
               <button
                 type="submit"
                 disabled={busy || !canSubmit}
@@ -436,6 +481,27 @@ export default function DailyAssessmentModal({
       </form>
     </dialog>
   );
+}
+
+function SavedAssessment({ record, onHistory }: { record: AssessmentRecord; onHistory: () => void }) {
+  const maximum = record.scale_version === 2 ? 5 : 10;
+  return <section aria-label="本次记录回顾" className="space-y-5">
+    <div className="rounded-2xl border border-accent-edge bg-accent-wash p-5">
+      <p role="status" className="text-base font-semibold">{record.local_date} 的记录已保存</p>
+      <p className="mt-2 text-sm leading-6 text-ink-muted">已保存整天的感受{record.activities.length > 0 ? `和 ${record.activities.length} 项活动` : "，没有填写活动明细"}。以后可以从每日记录入口回看、补充或修改。</p>
+    </div>
+    <div className="grid grid-cols-3 gap-2">
+      {SUMMARY_SCALES.map(s => <div key={s.key} className="rounded-xl bg-raised p-3 text-center">
+        <p className="text-xs leading-5 text-ink-muted">{s.key === "completion_rate" ? "完成程度" : s.key === "activity_level" ? "身体活动" : "整体心情"}</p>
+        <p className="mt-2 text-lg font-semibold tabular-nums">{s.key === "completion_rate" && record.completion_not_applicable ? "不适用" : record[s.key] === null ? "未填写" : <>{record[s.key]}<span className="text-xs font-normal text-ink-muted"> / {maximum}</span></>}</p>
+      </div>)}
+    </div>
+    <div className="rounded-2xl border border-line p-5">
+      <h3 className="font-semibold">记录之后，可以看到什么？</h3>
+      <p className="mt-2 text-sm leading-7 text-ink-muted">当天的回顾和历史明细会保留下来。积累多次记录后，可以对照心情、身体活动和完成程度的变化；只有一次记录时，会先显示这一次的分数。</p>
+      <button type="button" onClick={onHistory} className="mt-4 min-h-11 rounded-xl border border-accent-edge bg-accent-wash px-4 py-2 text-sm font-medium text-accent-ink">查看我的趋势与历史</button>
+    </div>
+  </section>;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -480,7 +546,7 @@ function ActivityCard({
       </div>
       <div data-activity-required className="space-y-4">
       <div className="space-y-2">
-        <p className={FIELD_LABEL}>活动时间 <RequiredMark /></p>
+        <div className={FIELD_LABEL}>活动时间 <RequiredMark /><DailyTermHelp label="活动时间" explanation="选择这项活动发生的时间段。这里记录的是回顾的大致时段，不是计划提醒时间。" /></div>
         {freeTime ? <input aria-label={`活动 ${index + 1} 的时间段`} value={value.time_slot} onChange={e => onChange({ time_slot: e.target.value })} className={`${FIELD_CONTROL} min-h-11 w-full border-line px-3`} /> : <TimeSlotSelect
           value={value.time_slot}
           onChange={(time_slot) => onChange({ time_slot })}
@@ -510,16 +576,17 @@ function ActivityCard({
       </div>
 
       <div data-activity-mood>
-        <SegmentedScore label="做完活动后的心情" hint="0 · 很低落　—　5 · 很愉快" required value={value.emotion} onChange={emotion => onChange({emotion})} />
+        <SegmentedScore label="做完活动后的心情" helpKey="emotion" hint="0 · 很低落　—　5 · 很愉快" required value={value.emotion} onChange={emotion => onChange({emotion})} />
       </div>
       </div>
-      <section aria-label="其他感受（可选）" className="mt-4 rounded-xl bg-sheet/50 p-3">
-        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1"><h4 className="text-sm font-medium text-ink-muted">其他感受</h4><p className="text-xs text-ink-muted">4项选填</p></div>
-        <div className="grid gap-x-4 gap-y-2.5 sm:grid-cols-2">
+      <details className="mt-4 rounded-xl bg-sheet/50 p-3">
+        <summary className="cursor-pointer text-sm font-medium text-ink-muted">其他感受（4 项选填）<span className="ml-2 text-xs">{ACTIVITY_SCALES.filter(s => value[s.key] !== null).length > 0 ? `已填 ${ACTIVITY_SCALES.filter(s => value[s.key] !== null).length} 项` : "成就、联结、愉悦、重要"}</span></summary>
+        <div className="mt-3 grid gap-x-4 gap-y-2.5 sm:grid-cols-2">
         {ACTIVITY_SCALES.map((s) => (
           <SegmentedScore
             key={s.key}
             label={s.label}
+            helpKey={s.key}
             hint={s.hint}
             compact
             value={value[s.key]}
@@ -528,7 +595,7 @@ function ActivityCard({
         ))}
         </div>
         <p className="mt-2 text-xs leading-5 text-ink-muted">0 · 很少 — 5 · 很多；再点一次可取消。</p>
-      </section>
+      </details>
 
       <input
         value={value.note ?? ""}
@@ -791,6 +858,7 @@ function HourColumn({
  *  once is what makes the answer a comparison rather than a recall task. */
 function SegmentedScore({
   label,
+  helpKey,
   hint,
   value,
   onChange,
@@ -799,6 +867,7 @@ function SegmentedScore({
   maximum = 5,
 }: {
   label: string;
+  helpKey?: string;
   hint: string;
   value: number | null;
   onChange: (v: number) => void;
@@ -812,9 +881,10 @@ function SegmentedScore({
   return (
     <div className={compact ? "flex items-center gap-2" : "flex flex-col gap-2"}>
       <div className={compact ? "shrink-0" : "space-y-1"}>
-        <span title={compact ? hint : undefined} className={compact ? "text-xs font-medium leading-5 text-ink-muted" : FIELD_LABEL}>
+        <div className={compact ? "flex items-center text-xs font-medium leading-5 text-ink-muted" : FIELD_LABEL}>
           <span>{label}</span> {required && <RequiredMark />}
-        </span>
+          {helpKey && DAILY_TERM_HELP[helpKey] && <DailyTermHelp label={label} explanation={maximum === 10 ? DAILY_TERM_HELP[helpKey].replace(/5 表示/g, "10 表示") : DAILY_TERM_HELP[helpKey]} />}
+        </div>
         {compact && <span id={hintId} className="sr-only">
           {hint}
         </span>}

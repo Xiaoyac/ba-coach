@@ -167,9 +167,9 @@ export default function ConversationWorkspace({
     update(); media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
-  // Opened only from the header button now — nothing checks assessment
-  // status on mount, so chat is never blocked behind this.
+  // Daily records remain independent of module routing and never block chat.
   const [assessmentOpen, setAssessmentOpen] = useState(false);
+  const [assessmentRefreshKey, setAssessmentRefreshKey] = useState(0);
   const [assessmentView, setAssessmentView] = useState<"record" | "history">("record");
   const appliedRevisions = useRef(new Map<string, number>());
   const pendingFloors = useRef(new Map<string, number>());
@@ -1141,6 +1141,8 @@ export default function ConversationWorkspace({
           onShareConversation={sessionId ? () => handleShare(sessionId) : undefined}
           sidebarExpanded={desktopLayout ? !sidebarCollapsed : sidebarOpen}
           onOpenAssessment={() => { setAssessmentView("record"); setAssessmentOpen(true); }}
+          onOpenAssessmentHistory={() => { setAssessmentView("history"); setAssessmentOpen(true); }}
+          assessmentRefreshKey={assessmentRefreshKey}
           onOpenPushSettings={() => setPushSettingsOpen(true)}
           displayName={displayName}
           accountUsername={accountUsername}
@@ -1229,7 +1231,7 @@ export default function ConversationWorkspace({
       )}
 
       {assessmentOpen && (
-        <DailyAssessmentModal initialView={assessmentView} onClose={() => setAssessmentOpen(false)} />
+        <DailyAssessmentModal initialView={assessmentView} onSaved={() => setAssessmentRefreshKey(key => key + 1)} onClose={() => setAssessmentOpen(false)} />
       )}
     </div>
   );

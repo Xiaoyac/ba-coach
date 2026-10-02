@@ -72,13 +72,13 @@ export async function submitAssessment(payload: {
   local_date?: string;
   activities: ActivityLog[];
   summary: DailySummary;
-}): Promise<void> {
+}): Promise<AssessmentRecord> {
   const res = await fetch(`${API_BASE}/api/assessment`, {
     method: "POST",
     headers: apiHeaders({ json: true }),
     body: JSON.stringify({ timezone: localTimezone(), ...payload }),
   });
-  await parse(res, "Saving the assessment");
+  return parse<AssessmentRecord>(res, "Saving the assessment");
 }
 
 export async function fetchAssessmentHistory(
