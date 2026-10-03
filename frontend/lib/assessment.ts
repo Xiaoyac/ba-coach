@@ -59,11 +59,21 @@ export interface AssessmentHistoryPage {
   next_offset: number | null;
 }
 
+export class AssessmentRequestError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
+export function isRetryableAssessmentRead(error: unknown): boolean {
+  return error instanceof TypeError
+    || (error instanceof DOMException && error.name === "TimeoutError")
+    || (error instanceof AssessmentRequestError && [408, 429, 500, 502, 503, 504].includes(error.status));
+}
+
 async function parse<T>(res: Response, what: string): Promise<T> {
   checkAuthentication(res);
   if (!res.ok) {
     const body = await res.json().catch(() => null);
-    throw new Error(typeof body?.detail === "string" ? body.detail : `每日记录暂时无法加载或保存，请稍后重试（${res.status}）。`);
+    throw new AssessmentRequestError(typeof body?.detail === "string" ? body.detail : `每日记录暂时无法加载或保存，请稍后重试（${res.status}）。`, res.status);
   }
   return res.json() as Promise<T>;
 }
@@ -108,6 +118,6 @@ export async function updateAssessment(id: number, payload: {
 
 export async function fetchAssessmentByDate(date: string, signal?: AbortSignal): Promise<AssessmentRecord | null> {
   return parse(await fetch(`${API_BASE}/api/assessment/by-date?local_date=${encodeURIComponent(date)}`, {
-    headers: apiHeaders(), signal,
+    headers: apiHeaders(), cache: "no-store", signal,
   }), "Loading selected date");
 }

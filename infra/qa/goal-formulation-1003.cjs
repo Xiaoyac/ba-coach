@@ -5,7 +5,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const OUT = path.resolve(__dirname, '../../.test-tmp/goal-card-ui/browser');
 
-function installFixtures() {
+function installFixtures({ role = 'user', settings = {} } = {}) {
   localStorage.setItem('psy-auth-token', 'synthetic-goal-card-1003');
   localStorage.setItem('psy-theme', 'warm');
   const f = window.goalCardFixture = {
@@ -13,7 +13,7 @@ function installFixtures() {
     calls: [], writes: [], chats: [], unknown: [], failPut: false, failConfirm: false, holdCard: false, held: [],
   };
   const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
-  const detail = () => ({ session_id: 'goal-card-ui', title: '目标卡验收', revision: f.revision, updated_at: '2026-10-03T00:00:00Z', next_module: f.module, pinned: false, messages: f.messages });
+  const detail = () => ({ session_id: 'goal-card-ui', title: '目标卡验收', revision: f.revision, updated_at: '2026-10-03T00:00:00Z', next_module: f.module, pinned: false, messages: f.messages, ...settings });
   const events = new Set();
   f.broadcast = () => { f.revision++; for (const controller of events) controller.enqueue(new TextEncoder().encode(`event: snapshot\ndata: ${JSON.stringify(detail())}\n\n`)); window.dispatchEvent(new Event('focus')); };
   f.setCard = (kind, id) => { f.card = { id, kind, phase: 'formulating', revision: 1, fields: {}, concerns: [] }; f.broadcast(); };
@@ -24,7 +24,7 @@ function installFixtures() {
     const p = url.pathname;
     if (!p.startsWith('/api/')) return original(input, options);
     const method = options.method || 'GET'; f.calls.push({ path: p, method });
-    if (p === '/api/auth/me') return json({ username: 'goal-test', nickname: '普通用户', role: 'user', profile_uuid: 'goal-test', email_required: false, email_verified: true, birth_date_required: false });
+    if (p === '/api/auth/me') return json({ username: 'goal-test', nickname: '普通用户', role, profile_uuid: 'goal-test', email_required: false, email_verified: true, birth_date_required: false });
     if (p === '/api/modules') return json({ modules: ['module_1', 'module_2', 'module_3', 'module_4'] });
     if (p === '/api/message-feedback') return json([]);
     if (p === '/api/conversations/goal-card-ui/context') return json({ estimated_tokens: 20, token_budget: null, retained_messages: f.messages.length, summarized_messages: 0, total_messages: f.messages.length, message_budget: null, mode: 'compression' });
@@ -60,6 +60,8 @@ function installFixtures() {
     f.unknown.push({ path: p, method }); return json({ detail: `Unmocked ${method} ${p}` }, 501);
   };
 }
+
+exports.installFixtures = installFixtures;
 
 async function noOverflow(page) {
   assert.deepEqual(await page.evaluate(() => {

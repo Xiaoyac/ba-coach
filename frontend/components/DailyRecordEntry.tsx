@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { NotebookMark } from "@/components/icons";
-import { fetchAssessmentByDate } from "@/lib/assessment";
+import { fetchAssessmentByDate, isRetryableAssessmentRead } from "@/lib/assessment";
 
 type RecordStatus = "loading" | "error" | "none" | "completed";
 
@@ -34,31 +34,52 @@ export default function DailyRecordEntry({
     let active = true;
     let controller: AbortController | undefined;
     let requestedDate = "";
+    let inFlight = false;
+    let retryTimer: number | undefined;
+    let retries = 0;
 
-    async function refresh() {
+    async function refresh(automaticRetry = false) {
+      if (!active || document.visibilityState === "hidden") return;
+      const date = localToday();
+      // Focus and visibility often arrive together. Do not keep aborting a
+      // useful same-day request, or let an old retry supersede a fresh read.
+      if (inFlight && requestedDate === date) return;
+      window.clearTimeout(retryTimer);
+      if (!automaticRetry) retries = 0;
       controller?.abort();
       const request = new AbortController();
       controller = request;
-      const date = localToday();
+      inFlight = true;
       requestedDate = date;
-      setStatus("loading");
+      if (!automaticRetry) setStatus("loading");
 
       try {
-        const record = await fetchAssessmentByDate(date, request.signal);
+        const record = await fetchAssessmentByDate(date,
+          AbortSignal.any([request.signal, AbortSignal.timeout(8000)]));
         if (!active || request.signal.aborted) return;
         // A response for yesterday must not become today's completion state.
         if (date !== localToday()) {
+          inFlight = false;
           void refresh();
           return;
         }
         setStatus(record?.status === "completed" ? "completed" : "none");
-      } catch {
+      } catch (error) {
         if (!active || request.signal.aborted) return;
         if (date !== localToday()) {
+          inFlight = false;
           void refresh();
           return;
         }
         setStatus("error");
+        // Keep the real error visible until a successful read. Retry only
+        // temporary failures, at most twice; auth/validation errors need action.
+        if (isRetryableAssessmentRead(error) && retries < 2) {
+          const delay = [1000, 3000][retries++];
+          retryTimer = window.setTimeout(() => void refresh(true), delay);
+        }
+      } finally {
+        if (controller === request) inFlight = false;
       }
     }
 
@@ -72,6 +93,7 @@ export default function DailyRecordEntry({
 
     void refresh();
     window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onFocus);
     document.addEventListener("visibilitychange", onVisibilityChange);
     const rolloverCheck = window.setInterval(() => {
       if (requestedDate !== localToday()) void refresh();
@@ -80,7 +102,9 @@ export default function DailyRecordEntry({
     return () => {
       active = false;
       controller?.abort();
+      window.clearTimeout(retryTimer);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onFocus);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.clearInterval(rolloverCheck);
     };

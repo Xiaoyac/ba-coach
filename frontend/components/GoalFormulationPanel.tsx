@@ -44,6 +44,8 @@ export default function GoalFormulationPanel({sessionId, accountKey, module, bus
   const mounted = useRef(true);
   const mutation = useRef<AbortController | null>(null);
   const savingRef = useRef(false);
+  const formWriteRef = useRef(false);
+  const readGeneration = useRef(0);
   const seen = useRef(new Set<string>());
   const prefix = `bacoach-goal-card:${accountKey}:${sessionId ?? "none"}`;
   const prefixRef = useRef(prefix);
@@ -60,13 +62,17 @@ export default function GoalFormulationPanel({sessionId, accountKey, module, bus
     let readInFlight = false;
     const originalPrefix = prefix;
     const refresh = async () => {
-      if (savingRef.current || readInFlight || document.visibilityState === "hidden") return;
+      // Sending a button action waits for the whole chat stream. Only a form
+      // PUT needs to pause reads; committed cards must refresh during replies.
+      if (formWriteRef.current || readInFlight || document.visibilityState === "hidden") return;
       readInFlight = true;
+      const generation = readGeneration.current;
       request = new AbortController();
       const controller = request;
       try {
         const result = await fetchGoalCard(sessionId, AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]));
-        if (!active || controller.signal.aborted || savingRef.current || originalPrefix !== prefixRef.current) return;
+        if (!active || controller.signal.aborted || formWriteRef.current
+            || generation !== readGeneration.current || originalPrefix !== prefixRef.current) return;
         setEnabled(result.enabled);
         const next = result.card;
         const previous = cardRef.current;
@@ -112,7 +118,9 @@ export default function GoalFormulationPanel({sessionId, accountKey, module, bus
         }
         if (next.phase === "paused" && previous?.phase !== "paused") setExpanded(false);
       } catch (reason) {
-        if (active && !controller.signal.aborted && originalPrefix === prefixRef.current) setReadError(reason instanceof Error ? reason.message : "目标卡暂时无法读取，请重试。");
+        if (active && !controller.signal.aborted && !formWriteRef.current
+            && generation === readGeneration.current && originalPrefix === prefixRef.current)
+          setReadError(reason instanceof Error ? reason.message : "目标卡暂时无法读取，请重试。");
       } finally { readInFlight = false; }
     };
     void refresh();
@@ -136,6 +144,7 @@ export default function GoalFormulationPanel({sessionId, accountKey, module, bus
     const targetPrefix = prefix;
     const controller = new AbortController(); mutation.current = controller;
     savingRef.current = true; setSaving(true); setError(""); setNotice("");
+    formWriteRef.current = true; readGeneration.current++;
     try {
       const result = await submitGoalCard(sessionId, card, fieldsOf(draft, card.kind), AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]));
       if (!mounted.current || controller.signal.aborted || prefixRef.current !== targetPrefix) return;
@@ -145,13 +154,14 @@ export default function GoalFormulationPanel({sessionId, accountKey, module, bus
       // leave every field and its recovery copy intact.
       dirtyRef.current = false; changedFields.current.clear(); setDirty(false); setDraft(draftOf(result.card.fields));
       storageRemove(`${targetPrefix}:draft:${card.id}`);
+      formWriteRef.current = false;
       setExpanded(false); setNotice("草稿已保存，接着和教练一起看看。草稿还不代表确认执行。");
       onUpdatedRef.current?.();
       await onSend(result.submission_text, {goal_card_id: result.card.id, goal_card_revision: String(result.card.revision), goal_card_action: "submit"});
     } catch (reason) {
       if (mounted.current && !controller.signal.aborted && prefixRef.current === targetPrefix) setError(reason instanceof Error ? reason.message : "提交失败，填写内容已保留。");
     } finally {
-      if (mounted.current && prefixRef.current === targetPrefix) { savingRef.current = false; setSaving(false); setRetry(value => value + 1); }
+      if (mounted.current && prefixRef.current === targetPrefix) { formWriteRef.current = false; savingRef.current = false; setSaving(false); setRetry(value => value + 1); }
     }
   }
 
@@ -164,18 +174,20 @@ export default function GoalFormulationPanel({sessionId, accountKey, module, bus
       let chosen = card;
       // Pausing after typing preserves that partial draft on the server too.
       if (action === "pause" && dirtyRef.current) {
+        formWriteRef.current = true; readGeneration.current++;
         const result = await submitGoalCard(sessionId, card, fieldsOf(draft, card.kind), AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]));
         if (!mounted.current || controller.signal.aborted || prefixRef.current !== targetPrefix) return;
         if (!result.card) throw new Error("草稿暂时无法保存，填写内容仍保留。");
         chosen = result.card; cardRef.current = chosen; setCard(chosen);
         dirtyRef.current = false; changedFields.current.clear(); setDirty(false); setDraft(draftOf(chosen.fields));
         storageRemove(`${targetPrefix}:draft:${card.id}`);
+        formWriteRef.current = false;
       }
       const text = action === "confirm" ? `确认这张${goalCardKind(chosen.kind)}卡（第 ${chosen.revision} 版），就按这个安排。` : `先不用继续细化这张${goalCardKind(chosen.kind)}卡，保留草稿。`;
       await onSend(text, {goal_card_id: chosen.id, goal_card_revision: String(chosen.revision), goal_card_action: action});
     }
     catch (reason) { if (mounted.current) setError(reason instanceof Error ? reason.message : "暂时无法发送，请重试。"); }
-    finally { if (mounted.current) { savingRef.current = false; setSaving(false); setRetry(value => value + 1); } }
+    finally { if (mounted.current) { formWriteRef.current = false; savingRef.current = false; setSaving(false); setRetry(value => value + 1); } }
   }
 
   async function resume() {
