@@ -48,7 +48,7 @@ export default function ConversationModeModal({ busy, error, replyEffortOptions,
           className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-4 transition-colors ${replyMode === value ? "border-accent-edge bg-accent-wash" : "border-line bg-raised/40 hover:bg-raised"} ${busy ? "cursor-wait opacity-60" : ""}`}>
           <input type="radio" name="reply-mode" value={value} checked={replyMode === value} onChange={() => setReplyMode(value)} className="mt-1 size-4 shrink-0 accent-accent" />
           <span><span className="block text-sm font-medium">{replyModeLabels[value]}</span>
-            <span className="mt-1 block text-xs leading-5 text-ink-muted">{value === "standard" ? "沿用当前回复流程和深度思考设置。" : "两路同时开始：一路轻松接话，另一路处理正式内容。在同一气泡中显示，合成一条回复保存；深度回复先完成时，直接显示正文。"}</span></span>
+            <span className="mt-1 block text-xs leading-5 text-ink-muted">{value === "standard" ? "沿用当前回复流程和深度思考设置。" : "先逐字显示简短接话，深度回复读过接话后继续展开；正文到达时恢复正常显示速度，在同一气泡中保存。"}</span></span>
         </label>)}
       </fieldset>
       {replyMode === "ack_deep" && (efforts.length ? <div className="mt-4 rounded-2xl border border-line px-4 py-3">

@@ -40,6 +40,13 @@ def enabled(settings, state):
         and not (state.get('memory') or {}).get('sandbox_mode') and not state.get('forced_module'))
 
 
+def form_ui_enabled(settings, state):
+    return bool(getattr(settings, 'goal_card_ui_enabled', False)
+        and settings.database_schema_version == 'v2' and state.get('subject_id')
+        and state.get('user_message_id') and not (state.get('memory') or {}).get('sandbox_mode')
+        and not state.get('forced_module'))
+
+
 def specs_for(module):
     from .clinical_fields import MODULE_SPECS
     from .goal_contract import GOAL_SPEC, CHOICE_SPEC, PLAN_SPEC, M2_CONTEXT_SPEC, ACTIVITY_SPEC, CORRECTION_SPEC
@@ -72,6 +79,14 @@ def definitions(module):
         properties['difficulty_evidence']={'type':['object','null'],'properties':{
             'rating':score_source,'original':score_source},'additionalProperties':False,
             'description':'用户评分原文来源；不能把助手代评当作来源。'}
+        properties['barrier_coping_plan'] = {'type': ['array', 'null'],
+            'description': properties['barrier_coping_plan']['description'],
+            'items': {'anyOf': [
+                {'type': 'object', 'properties': {'barrier': {'type': 'string'}, 'plan': {'type': 'string'}},
+                 'required': ['barrier', 'plan'], 'additionalProperties': False},
+                {'type': 'object', 'properties': {'status': {'type': 'string', 'enum': ['not_applicable']},
+                    'source_message_id': {'type': 'integer'}, 'source_quote': {'type': 'string'}},
+                 'required': ['status', 'source_message_id', 'source_quote'], 'additionalProperties': False}]}}
         properties['goal_proposal']={'type':['object','null'],'properties':{
             'selection_status':{'type':'string','enum':['selected','ambiguous','not_expressed','retracted']},
             'selection_role':{'type':'string','enum':['core','secondary','trial']},
@@ -103,7 +118,9 @@ def definitions(module):
 
 
 class ToolRejected(ValueError):
-    pass
+    def __init__(self, reason, **details):
+        super().__init__(reason)
+        self.details = details
 
 
 def _json(value):
@@ -111,12 +128,43 @@ def _json(value):
 
 
 class PACardTools:
-    def __init__(self, *, maker, session_id, user_id, user_message_id, module, provider=None):
+    def __init__(self, *, maker, session_id, user_id, user_message_id, module, provider=None, ui_enabled=False, assistant_message_id=None):
         self.maker,self.session_id,self.user_id=maker,session_id,user_id
         self.boundary,self.module,self.provider=user_message_id,module,provider
+        self.assistant_message_id = assistant_message_id
         self.definitions=definitions(module)
+        self.ui_enabled = ui_enabled and module == 'module_2'
+        if self.ui_enabled:
+            from .goal_card_interaction import tool_definitions
+            self.definitions.extend(tool_definitions())
         self.displays=[]
         self.trace=[]
+        self.ui_card = None
+        self.ui_action = None
+
+    def available_tools(self):
+        if not self.ui_enabled:
+            return self.definitions
+        # Do not ask the model to save clinical fields before a formulation
+        # card exists. An introductory PA question must remain conversation.
+        names = {'get_pa_card', 'continue_pa_conversation', 'open_goal_card'}
+        card = self.ui_card
+        if (card and card['phase'] == 'ready' and self.ui_action
+                and self.ui_action.get('action') == 'confirm'):
+            confirm = 'confirm_pa_card' if card['kind'] == 'primary' else 'confirm_secondary_goal_card'
+            return [tool for tool in self.definitions if tool['function']['name'] in {'get_pa_card', confirm}]
+        if card and card['phase'] not in {'paused', 'confirmed'}:
+            names.update({'review_goal_card', 'pause_goal_card'})
+            if card['kind'] == 'primary':
+                names.add('save_pa_card')
+                names.add('present_pa_card')
+                if card['phase'] == 'ready':
+                    names.add('confirm_pa_card')
+            else:
+                names.update({'update_secondary_goal_card', 'present_secondary_goal_card'})
+                if card['phase'] == 'ready':
+                    names.add('confirm_secondary_goal_card')
+        return [tool for tool in self.definitions if tool['function']['name'] in names]
 
     async def _owned(self, db):
         # Same lock order as the existing persistence/confirmation paths.
@@ -130,30 +178,83 @@ class PACardTools:
         state=(await db.execute(select(rt).where(rt.c.conversation_id==conversation.id).with_for_update())).mappings().one_or_none()
         latest=(await db.execute(select(ConversationMessage).where(ConversationMessage.conversation_id==conversation.id)
             .order_by(ConversationMessage.position.desc(),ConversationMessage.id.desc()).limit(1).with_for_update())).scalar_one_or_none()
+        if self.assistant_message_id is not None:
+            if not latest or latest.id != self.assistant_message_id or latest.role != 'assistant':
+                raise ToolRejected('current_user_boundary_changed')
+            latest = (await db.execute(select(ConversationMessage).where(
+                ConversationMessage.conversation_id == conversation.id,
+                ConversationMessage.position < latest.position).order_by(
+                    ConversationMessage.position.desc(), ConversationMessage.id.desc())
+                .limit(1).with_for_update())).scalar_one_or_none()
         if not state or not latest or latest.id!=self.boundary or latest.role!='user':
             raise ToolRejected('current_user_boundary_changed')
         if (state['memory'] or {}).get('sandbox_mode') or state['flow_status'] in {'paused','completed'}:
             raise ToolRejected('write_window_closed')
         return conversation,dict(state),latest
 
+    async def evidence(self, db, conversation_id):
+        from .goal_contract import evidence_messages
+        messages = await evidence_messages(db, conversation_id, self.user_id)
+        # The newly generated reply is not evidence for the user's PA choices,
+        # consent, review, or scores. Ground all tool decisions at their user.
+        boundary = next((m for m in messages if m.id == self.boundary and m.role == 'user'), None)
+        if boundary is None:
+            raise ToolRejected('current_user_boundary_changed')
+        return [m for m in messages if m.position <= boundary.position]
+
     async def snapshot(self, db, conversation, state):
         from .program_confirmation import draft
         from .pa_lifecycle import unfinished_core_goals,reviewed_goal
         from .goal_contract import evidence_messages
         pending=await draft(db,state,self.user_id) if state['current_module'] in {'module_2','module_4'} else None
-        messages=await evidence_messages(db,conversation.id,self.user_id)
+        messages=await self.evidence(db,conversation.id)
         plans,cycles,goals=(schema.tables[k] for k in ('module_two_record','pa_cycles','pa_goals'))
         confirmed=(await db.execute(select(plans).join(cycles,cycles.c.module_two_record_id==plans.c.id)
             .join(goals,goals.c.id==cycles.c.goal_id).where(cycles.c.id==state['active_cycle_id'],
                 plans.c.goal_id==goals.c.id,goals.c.user_id==self.user_id,
                 plans.c.record_status=='confirmed',plans.c.confirmation_status=='confirmed'))).mappings().one_or_none()
-        return _json({'status':'ok','state_version':state['row_version'],'module':state['current_module'],
+        result = _json({'status':'ok','state_version':state['row_version'],'module':state['current_module'],
             'goal_id':state['active_goal_id'],'cycle_id':state['active_cycle_id'],
             'draft':dict(pending) if pending else None,
             'confirmed_plan':dict(confirmed) if confirmed else None,
             'unfinished_core_goals':await unfinished_core_goals(db,user_id=self.user_id),
             'last_reviewed_goal':await reviewed_goal(db,user_id=self.user_id,memory=state['memory']),
             'recent_sources':[{'message_id':m.id,'role':m.role,'text':m.content} for m in messages[-12:]]})
+        if self.ui_enabled:
+            from .goal_card_workspace import latest_card
+            from .goal_card_interaction import current_user_action, presentation_readiness
+            result['goal_card'] = await latest_card(db, conversation.id, self.user_id)
+            result['goal_card_action'] = await current_user_action(db, conversation, self.boundary)
+            result['goal_card_readiness'] = await presentation_readiness(db, conversation, state, pending=pending)
+        return result
+
+    async def _confirmation_preflight(self, name):
+        if self.assistant_message_id is None or name not in {'confirm_pa_card', 'confirm_secondary_goal_card'}:
+            return None
+        from .confirmation_intent import ConfirmationEvidence, semantic_confirmation
+        from .dialogue_confirmation import affirmative
+        # Close this read session before the model runs. A slow interpretation
+        # must not hold Conversation FOR UPDATE and delay the next chat turn.
+        async with self.maker() as db:
+            conversation = (await db.execute(select(Conversation).where(
+                Conversation.session_id == self.session_id,
+                Conversation.subject_id == self.user_id))).scalar_one_or_none()
+            user = await db.get(ConversationMessage, self.boundary)
+            if not conversation or not user or user.conversation_id != conversation.id or user.role != 'user':
+                raise ToolRejected('owned_conversation_unavailable')
+            if affirmative(user.content):
+                return None
+            previous = (await db.execute(select(ConversationMessage).where(
+                ConversationMessage.conversation_id == conversation.id,
+                ConversationMessage.position < user.position).order_by(
+                    ConversationMessage.position.desc(), ConversationMessage.id.desc()).limit(1))).scalar_one_or_none()
+            if not previous or previous.role != 'assistant':
+                raise ToolRejected('confirmation_not_verified')
+            user_id, previous_id = user.id, previous.id
+            user_text, assistant_text = user.content, previous.content
+        accepted = await semantic_confirmation(self.provider, user_text=user_text,
+            assistant_text=assistant_text, module=self.module)
+        return ConfirmationEvidence(user_id, previous_id, user_text, assistant_text, self.module, accepted)
 
     async def execute(self, call):
         name=call.get('function',{}).get('name'); raw=call.get('function',{}).get('arguments','')
@@ -170,6 +271,7 @@ class PACardTools:
             if name=='close_pa_card' and (not isinstance(args['summary'],str) or not 0<len(args['summary'].strip())<=2000):
                 raise ToolRejected('invalid_summary')
             key=hashlib.sha256(json.dumps([self.boundary,name,args],sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+            confirmation_evidence = await self._confirmation_preflight(name)
             async with self.maker() as db:
                 conversation,state,user=await self._owned(db)
                 logs=schema.tables['ai_decision_logs']
@@ -192,9 +294,27 @@ class PACardTools:
                         'decision_type':'pa_native_tool','decision_value':{'operation_key':key,'status':'pending'},
                         'evidence_message_ids':[self.boundary]})
                     receipt_id=receipt.inserted_primary_key[0]
-                    result=await self._mutate(db,conversation,state,user,name,args,call['id'])
+                    result=await self._mutate(db,conversation,state,user,name,args,call['id'],
+                        confirmation_evidence=confirmation_evidence)
+                    if self.assistant_message_id is not None and result.get('display_text'):
+                        # Expose a ready card and its exact transcript anchor in
+                        # one commit. A new user turn must never see an
+                        # unconfirmable ready version between these two writes.
+                        assistant = await db.get(ConversationMessage, self.assistant_message_id)
+                        if result['display_text'] not in assistant.content:
+                            assistant.content += ('\n\n' if assistant.content else '') + result['display_text']
+                        await db.flush()
+                        await finalize_tool_display(db, session_id=self.session_id, user_id=self.user_id,
+                            assistant_message_id=self.assistant_message_id)
+                        if self.ui_enabled:
+                            from .goal_card_interaction import finalize_ui_display
+                            await finalize_ui_display(db, session_id=self.session_id, user_id=self.user_id,
+                                assistant_message_id=self.assistant_message_id)
                     _,fresh=await runtime_for(db,self.session_id)
                     result=_json({**result,'state_version':fresh['row_version'],'module':fresh['current_module']})
+                    if self.ui_enabled:
+                        from .goal_card_workspace import latest_card
+                        result['goal_card'] = await latest_card(db, conversation.id, self.user_id)
                     await db.execute(update(logs).where(logs.c.id==receipt_id).values(
                         goal_id=fresh['active_goal_id'],cycle_id=fresh['active_cycle_id'],
                         decision_value={'operation_key':key,'tool':name,'tool_call_id':call['id'],'result':result}))
@@ -202,11 +322,16 @@ class PACardTools:
                     await db.commit()
             if name=='save_pa_card' and result.get('status')=='draft_saved':
                 self.displays.clear()
+            if self.ui_enabled and 'goal_card' in result:
+                self.ui_card = result['goal_card']
+            if self.ui_enabled and 'goal_card_action' in result:
+                self.ui_action = result['goal_card_action']
             if result.get('display_text') and result['display_text'] not in self.displays:
                 self.displays.append(result['display_text'])
         except (ToolRejected,HTTPException,V2Conflict) as exc:
             result={'status':'blocked','reason':str(getattr(exc,'detail',exc)),
-                    'guidance':'检查已有消息、当前版本和工具结果；不要把系统未保存解释为用户未回答。'}
+                    'guidance':'检查已有消息、当前版本和工具结果；不要把系统未保存解释为用户未回答。',
+                    **getattr(exc, 'details', {})}
         except SQLAlchemyError:
             logger.exception('PA tool transaction failed')
             result={'status':'failed','reason':'storage_error','guidance':'本次操作未提交；不要声称保存成功。'}
@@ -215,28 +340,51 @@ class PACardTools:
         self.trace.append({'tool_call_id':call.get('id'),'name':name,'arguments':raw,'result':result})
         return result
 
-    async def _mutate(self, db, conversation, state, user, name, args, call_id):
+    async def _mutate(self, db, conversation, state, user, name, args, call_id, *, confirmation_evidence=None):
         from .v2_workflow import persist_record,create_goal_from_agent_dialogue,record_steps
         from .program_confirmation import draft,record_hash,validate_confirmation,commit_confirmation
         from .goal_contract import evidence_messages,save_m2_activity_context,capture_activities
         from .clinical_store import coerce
         from .dialogue_confirmation import render_confirmation_summary,confirmation_fields_complete
         rt=schema.tables['conversation_runtime_states']
+        if self.ui_enabled:
+            from .goal_card_interaction import execute_ui_tool, before_core_operation, check_current_action
+            await check_current_action(db, conversation, user, operation=name)
+            result = await execute_ui_tool(db, conversation, state, user, name, args,
+                provider=None if self.assistant_message_id is not None else self.provider,
+                following_assistant_message_id=self.assistant_message_id, confirmation_evidence=confirmation_evidence)
+            if result is not None:
+                if (name == 'review_goal_card' and result.get('ready')
+                        and result['goal_card']['kind'] == 'primary'):
+                    # The reviewed persisted version can be rendered immediately;
+                    # no extra LLM round or inferred user consent is necessary.
+                    return await self._mutate(db, conversation, state, user, 'present_pa_card',
+                        {'state_version': state['row_version']}, call_id)
+                return result
+            await before_core_operation(db, conversation, state, name)
         if name in {'save_pa_card','save_pa_review','close_pa_card'}:
             raw=args['data']
             data=coerce(specs_for(self.module),raw)
             invalid=[key for key,value in raw.items() if value is not None and key not in data]
             if invalid:raise ToolRejected('invalid_field_types: '+','.join(invalid))
+            if self.module == 'module_2':
+                from .plan_contract import normalize_coping_evidence
+                messages = await self.evidence(db, conversation.id)
+                existing = await draft(db, state, self.user_id) if state.get('active_cycle_id') else None
+                try:
+                    data = normalize_coping_evidence(data, messages, existing=existing)
+                except ValueError as exc:
+                    raise ToolRejected(str(exc)) from exc
             if self.module=='module_2' and any(k in data for k in ('difficulty_rating','difficulty_original')):
                 from .goal_contract import difficulty_values
-                messages=await evidence_messages(db,conversation.id,self.user_id)
+                messages=await self.evidence(db,conversation.id)
                 verified=difficulty_values(data,messages)
                 invalid=[k for k in ('difficulty_rating','difficulty_original') if k in data and verified.get(k)!=data[k]]
                 if invalid:
                     raise ToolRejected('invalid_difficulty_source: 评分须有真实用户原文，score_text只含数字如4，不含分；请修正参数引用，不要重问用户')
             if self.module=='module_4' and isinstance(data.get('m4_contract'),dict):
                 from .goal_contract import source_reference
-                messages=await evidence_messages(db,conversation.id,self.user_id)
+                messages=await self.evidence(db,conversation.id)
                 evidence=dict(data['m4_contract'])
                 for key,value in evidence.items():
                     if key.endswith('_quote') and isinstance(value,dict):
@@ -249,15 +397,18 @@ class PACardTools:
                         evidence[key]=value['quote']
                 data['m4_contract']=evidence
             data.update(_source_session_id=self.session_id,_source_user_message_id=self.boundary)
+            if self.assistant_message_id is not None:
+                data['_source_assistant_message_id'] = self.assistant_message_id
             if name=='save_pa_card':
-                messages=await evidence_messages(db,conversation.id,self.user_id)
+                messages=await self.evidence(db,conversation.id)
                 await save_m2_activity_context(db,conversation=conversation,state=state,raw=data.get('m2_activity_context'),messages=messages)
                 await capture_activities(db,user_id=self.user_id,conversation=conversation,state=state,
                     raw=data.get('activity_observations'),messages=messages,corrections=data.get('activity_corrections'))
                 if not state['active_cycle_id'] or data.get('core_goal_choice'):
                     diagnostics={}
                     created=await create_goal_from_agent_dialogue(db,session_id=self.session_id,user_id=self.user_id,data=data,
-                        completed_steps=[],assistant_message_id=self.boundary,diagnostics=diagnostics)
+                        completed_steps=[],assistant_message_id=self.assistant_message_id or self.boundary,diagnostics=diagnostics,
+                        **({"source_user_message_id": self.boundary} if self.assistant_message_id is not None else {}))
                     if not created:
                         reason=diagnostics.get('goal_creation',{}).get('reason_code')
                         if reason in {'secondary_only','selection_not_core'}:
@@ -271,7 +422,7 @@ class PACardTools:
                 cycle_id=state['active_cycle_id'],db_session=db,tool_closing_summary=summary)
             if not record_id:raise ToolRejected('record_write_not_applied')
             await record_steps(db,session_id=self.session_id,user_id=self.user_id,module=self.module,
-                requested_target=self.module,steps=[],assistant_message_id=self.boundary,allow_transition=False)
+                requested_target=self.module,steps=[],assistant_message_id=self.assistant_message_id or self.boundary,allow_transition=False)
             if name!='close_pa_card':
                 if name=='save_pa_card':
                     _,fresh=await runtime_for(db,self.session_id)
@@ -279,13 +430,16 @@ class PACardTools:
                     await db.execute(update(rt).where(rt.c.conversation_id==conversation.id).values(memory=memory))
                 _,fresh=await runtime_for(db,self.session_id)
                 saved=await draft(db,fresh,self.user_id)
+                if self.ui_enabled and saved:
+                    from .goal_card_workspace import sync_core_card
+                    await sync_core_card(db, conversation, fresh, 'discussing', saved)
                 return {'status':'draft_saved','record_id':record_id,'confirmed':False,
                         'saved_draft':_json(dict(saved)) if saved else None}
             _,fresh=await runtime_for(db,self.session_id)
             pending=await draft(db,fresh,self.user_id)
             pending,action=await validate_confirmation(db,conversation=conversation,state=fresh,user_id=self.user_id,
                 session_id=self.session_id,payload=SimpleNamespace(record_id=pending['id'],record_hash=record_hash(pending),row_version=fresh['row_version']),
-                extraction_assistant_message_id=self.boundary)
+                extraction_assistant_message_id=self.assistant_message_id or self.boundary)
             from .m4_contract import contract_for
             source_id=contract_for(pending)['evidence']['confirmation_quote']['message_id']
             source=await db.get(ConversationMessage,source_id)
@@ -295,19 +449,45 @@ class PACardTools:
                     'next_goal_choice':'deferred_to_M2','display_text':summary['text']}
         pending=await draft(db,state,self.user_id)
         if name=='present_pa_card':
+            readiness = None
+            if self.ui_enabled:
+                from .goal_card_interaction import presentation_readiness, current_card
+                row = await current_card(db, conversation)
+                readiness = await presentation_readiness(db, conversation, state, row=row, pending=pending)
+                if not readiness['ready_for_display']:
+                    raise ToolRejected('plan_not_ready_to_present', readiness=readiness,
+                        missing_fields=readiness['missing_fields'], blockers=readiness['blockers'])
             if not pending or not confirmation_fields_complete('module_2',pending):
-                raise ToolRejected('plan_not_ready_to_present: 请核对get_pa_card的实际草稿，检查活动、安排、有效用户评分、障碍及应对来源；已有消息中的信息修正参数即可')
+                from .plan_contract import missing_plan_fields
+                raise ToolRejected('plan_not_ready_to_present',
+                    missing_fields=missing_plan_fields(pending or {}),
+                    blockers=[] if pending else ['plan_not_saved'])
             text=render_confirmation_summary('module_2',pending)
+            if (self.ui_enabled and row['phase'] == 'ready' and row.get('display_text') == text
+                    and row.get('display_user_message_id') == self.boundary):
+                return {'status':'ready_to_display','record_id':pending['id'],'display_text':text,
+                    'confirmed':False, 'ready':True, 'readiness':readiness}
             from .dialogue_confirmation import fingerprint
             memory={**(state['memory'] or {}),'pa_tool_display':{'record_id':pending['id'],
                 'fingerprint':fingerprint(pending),'user_message_id':self.boundary,'text':text}}
             await db.execute(update(rt).where(rt.c.conversation_id==conversation.id).values(memory=memory,row_version=rt.c.row_version+1))
-            return {'status':'ready_to_display','record_id':pending['id'],'display_text':text,'confirmed':False}
+            if self.ui_enabled:
+                from .goal_card_interaction import mark_core_presented
+                await mark_core_presented(db, conversation, state, pending, text, self.boundary)
+            return {'status':'ready_to_display','record_id':pending['id'],'display_text':text,'confirmed':False,
+                'ready':True, 'readiness':readiness}
         if name=='confirm_pa_card':
             from .dialogue_confirmation import precommit_user_confirmation
             receipt=await precommit_user_confirmation(db,session_id=self.session_id,user_id=self.user_id,
-                user_message_id=self.boundary,confirmation_provider=self.provider)
+                user_message_id=self.boundary,
+                confirmation_provider=None if self.assistant_message_id is not None else self.provider,
+                following_assistant_message_id=self.assistant_message_id, confirmation_evidence=confirmation_evidence)
             if not receipt:raise ToolRejected('confirmation_not_verified')
+            if self.ui_enabled:
+                from .goal_card_workspace import sync_core_card
+                confirmed = (await db.execute(select(schema.tables['module_two_record']).where(
+                    schema.tables['module_two_record'].c.id == pending['id']))).mappings().one()
+                await sync_core_card(db, conversation, state, 'confirmed', confirmed)
             return {'status':'confirmed','cycle_id':state['active_cycle_id'],'next_module':receipt[0]}
         raise ToolRejected('unknown_tool')
 

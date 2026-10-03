@@ -1,10 +1,54 @@
 """Deterministic minimum shape of the existing M2 completion contract.
 
 Semantic truth still requires user evidence; these checks do not infer it.
-Explicit no-barrier discussion uses ["用户明确表示暂无障碍"] and a matching
-plan (for example "无需额外应对"); unknown/untouched empty lists cannot confirm.
+An explicit, source-checked no-barrier assessment uses a not_applicable item,
+not an invented coping plan. Unknown/untouched empty lists cannot confirm.
 """
 import re
+
+
+NO_COPING_NEEDED = "暂无需要应对的困难"
+
+
+def no_coping_required(plan):
+    """Recognize only the canonical source-bound shape written below."""
+    coping = plan.get("barrier_coping_plan")
+    if not isinstance(coping, list) or len(coping) != 1 or not isinstance(coping[0], dict):
+        return False
+    item = coping[0]
+    quote = item.get("source_quote")
+    return (item.get("status") == "not_applicable"
+        and type(item.get("source_message_id")) is int and item["source_message_id"] > 0
+        and isinstance(quote, str) and bool(quote.strip())
+        and plan.get("potential_barriers") == [quote]
+        and not item.get("barrier") and not item.get("plan"))
+
+
+def normalize_coping_evidence(values, messages, *, existing=None):
+    """Validate a model's explicit no-barrier assessment at the write boundary.
+
+    The model interprets intent; code checks the cited user, exact wording and
+    matching barrier assessment. Empty fields never imply not_applicable.
+    """
+    coping = values.get("barrier_coping_plan")
+    if not isinstance(coping, list) or not any(isinstance(item, dict) and "status" in item for item in coping):
+        return values
+    from .goal_contract import source_reference
+    if len(coping) != 1 or not isinstance(coping[0], dict) or coping[0].get("status") != "not_applicable":
+        raise ValueError("invalid_no_barrier_assessment: not_applicable不能与真实障碍的应对混用")
+    item = coping[0]
+    source = source_reference({"message_id": item.get("source_message_id"),
+        "quote": item.get("source_quote")}, messages)
+    if (type(item.get("source_message_id")) is not int or source is None
+            or item.get("source_quote") not in source.content
+            or item.get("barrier") or item.get("plan")):
+        raise ValueError("invalid_no_barrier_source: 引用用户明确表示当前计划无障碍的真实原话，不补造应对方案")
+    quote = item["source_quote"]
+    barriers = values.get("potential_barriers", (existing or {}).get("potential_barriers"))
+    if barriers != [quote]:
+        raise ValueError("no_barrier_assessment_mismatch: potential_barriers须为同一条无障碍用户原话，不与其他障碍混用")
+    return {**values, "potential_barriers": [quote], "barrier_coping_plan": [{
+        "status": "not_applicable", "source_message_id": source.id, "source_quote": quote}]}
 
 
 # DeepSeek occasionally emits a short canonical label for an obstacle and a
@@ -117,6 +161,8 @@ def missing_plan_fields(plan):
     barriers, coping = plan.get("potential_barriers"), plan.get("barrier_coping_plan")
     if not isinstance(barriers, list) or not barriers or any(not isinstance(x, str) or not x.strip() for x in barriers):
         missing.append("potential_barriers")
+    if no_coping_required(plan):
+        return missing
     if not isinstance(coping, list) or not coping or any(not isinstance(x, dict) or not isinstance(x.get("barrier"), str) or not x["barrier"].strip() or not isinstance(x.get("plan"), str) or not x["plan"].strip() for x in coping):
         missing.append("barrier_coping_plan")
     elif isinstance(barriers, list) and any(

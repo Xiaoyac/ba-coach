@@ -133,7 +133,7 @@ export interface StreamHandlers {
   onMeta?: (meta: Partial<RoutingMeta>) => void;
   onReasoningDelta?: (text: string) => void;
   onRoutingReasoning?: (text: string, model: string) => void;
-  onDelta?: (text: string) => void;
+  onDelta?: (text: string, phase?: "lead" | "body") => void;
   onDone?: () => void;
   onError?: (message: string) => void;
 }
@@ -201,7 +201,7 @@ export async function streamChat(
           break;
         case "delta":
           if (typeof payload.text === "string" && payload.text.trim()) replyReceived = true;
-          handlers.onDelta?.(payload.text);
+          handlers.onDelta?.(payload.text, payload.phase === "lead" ? "lead" : "body");
           break;
         case "reasoning_delta":
           handlers.onReasoningDelta?.(payload.text);

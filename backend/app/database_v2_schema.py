@@ -212,6 +212,25 @@ ai_decision_logs = table("ai_decision_logs", col("id", Integer, primary=True),
     col("evidence_message_ids", JSON), col("schema_version", SmallInteger, required=True, default="1"),
     col("created_at", timestamp, required=True, default=func.now()))
 
+# User-editable formulation workspaces are separate from confirmed PA plans.
+# A card may be incomplete/non-PA while it is being discussed. Every revision
+# is retained in ai_decision_logs; this table is only the current projection.
+goal_card_workspaces = table("goal_card_workspaces", ident(primary=True), user_key(),
+    col("conversation_id", Integer),
+    *status(["primary", "secondary"], name="kind"),
+    *status(["formulating", "discussing", "ready", "confirmed", "paused"], name="phase"),
+    col("revision", Integer, required=True, default="1"),
+    col("fields", JSON, required=True), col("concerns", JSON, required=True),
+    ident("goal_id", ref="pa_goals.id"), ident("plan_id", ref="module_two_record.id"),
+    ident("cycle_id", ref="pa_cycles.id"),
+    col("opened_message_id", Integer, required=True), col("submission_text"),
+    col("submission_message_id", Integer), col("review_message_id", Integer),
+    col("review_display_text"), col("review", JSON), col("display_text"),
+    col("display_user_message_id", Integer), col("display_assistant_message_id", Integer),
+    col("confirmation_message_id", Integer), *times(),
+    CheckConstraint("revision > 0"),
+    Index("ix_goal_card_owner_conversation", "user_id", "conversation_id", "updated_at"))
+
 # Additive goal-model tables: historic goals stay unclassified until evidence
 # exists. No parent-goal foreign key: secondary goals are independent.
 pa_goal_details = table("pa_goal_details", ident("goal_id", primary=True, ref="pa_goals.id"),

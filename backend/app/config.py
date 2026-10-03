@@ -26,8 +26,14 @@ class Settings(BaseSettings):
     database_schema_version: Literal["legacy", "v2"] = "legacy"
     # Controlled PA-card experiment; independent of intervention and routing modes.
     pa_card_tools_enabled: bool = False
+    # Explicit rollout after migrate_goal_cards_1003.py; adds a user-editable
+    # M2 workspace without enabling the separate M4 tool experiment.
+    goal_card_ui_enabled: bool = False
     pa_card_tool_timeout_seconds: float = Field(default=90, ge=1, le=300)
     pa_card_tool_max_rounds: int = Field(default=5, ge=1, le=8)
+    # Native background tool arguments may include a complete sourced plan;
+    # leave room for channels with mandatory low-effort reasoning as well.
+    pa_card_background_max_tokens: int = Field(default=4096, ge=256, le=16384)
     # Explicit rollout switch. Catalog performs two grounded router-model
     # decisions and is only constructed when explicitly selected.
     knowledge_retrieval_mode: Literal["p0", "enhanced", "catalog"] = "p0"
@@ -48,14 +54,15 @@ class Settings(BaseSettings):
     knowledge_hybrid_candidates: int = Field(default=20, ge=1, le=100)
     knowledge_hybrid_final_results: int = Field(default=5, ge=1, le=20)
     knowledge_hybrid_timeout_seconds: float = Field(default=20, ge=0.1, le=60)
-    # Optional reranker, disabled by default. K3 is an explicit listwise option.
+    # Optional reranker, disabled by default. llm supports explicit listwise models.
     knowledge_rerank_model: str | None = None
     knowledge_rerank_url: str | None = None
     knowledge_rerank_api_key: str | None = Field(default=None, repr=False)
-    knowledge_rerank_backend: Literal["compatible", "dashscope", "k3"] = "compatible"
-    # K3 experiment: preserve top sparse candidates per category alongside
+    knowledge_rerank_backend: Literal["compatible", "dashscope", "k3", "llm"] = "compatible"
+    # Listwise reranking: preserve top sparse candidates per category alongside
     # fusion candidates so the lightweight embedding cannot erase them.
     knowledge_hybrid_sparse_reserve: int = Field(default=0, ge=0, le=50)
+    # Historical setting names retained for deployed listwise budget compatibility.
     knowledge_k3_rerank_max_tokens: int = Field(default=4096, ge=1024, le=8192)
     knowledge_k3_rerank_max_chars: int = Field(default=140000, ge=10000, le=300000)
     knowledge_rerank_timeout_seconds: float = Field(default=15, ge=1, le=60)
@@ -120,6 +127,15 @@ class Settings(BaseSettings):
     # Only exact short acknowledgements use the same main model without native
     # thinking. Context, risk screening, retrieval rules and validators remain.
     chat_fast_ack_enabled: bool = True
+    # Separate short opening from the main reply's reasoning budget/channel.
+    # Auto selects a non-thinking alternative when the main model always reasons.
+    reply_lead_provider: Provider | None = None
+    reply_lead_base_url: str | None = None
+    reply_lead_api_key: str | None = Field(default=None, repr=False)
+    reply_lead_model: str | None = None
+    reply_lead_timeout_seconds: float = Field(default=8.0, ge=1, le=20)
+    reply_lead_max_tokens: int = Field(default=384, ge=128, le=1024)
+    reply_lead_character_seconds: float = Field(default=0.12, ge=0.01, le=0.5)
     # Low effort is opt-in: the live probe can exhaust its output budget without
     # producing routing JSON. Keep production behaviour until separately qualified.
     module_router_reasoning_effort: Literal["disabled", "low", "medium", "high", "provider_default"] = "provider_default"

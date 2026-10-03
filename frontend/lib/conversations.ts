@@ -23,7 +23,7 @@ export const replyEffortLabels: Record<ConversationReplyEffort, string> = {
 };
 export const replyModeLabels: Record<ConversationReplyMode, string> = {
   standard: "现有回复",
-  ack_deep: "自然接话＋深度回复（并行实验）",
+  ack_deep: "自然接话＋深度回复",
 };
 
 export interface ConversationDetail extends ConversationSummary {

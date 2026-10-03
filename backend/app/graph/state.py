@@ -107,6 +107,8 @@ class AgentState(TypedDict, total=False):
     # Present only after the chat transaction has actually committed consent.
     confirmation_receipt: dict
     pa_tools_used: bool
+    # Native PA operations belong to the detached background worker.
+    pa_background_pending: bool
 
     # ---- Output -------------------------------------------------------
     final_response: str
@@ -163,5 +165,9 @@ class GraphContext:
     generation_id: str | None = None
     reply_progress: dict[str, Any] = field(default_factory=dict)
     reply_lead_prompt: str | None = None
+    reply_lead_context: Any | None = None
+    # Owned by the SSE wrapper. Main generation awaits this bounded task so
+    # its continuation knows the exact opening that will precede it.
+    reply_lead_task: Any | None = None
     # Authorized from an owned admin preference each turn, never client metadata.
     knowledge_mediator_bypass: bool = False

@@ -8,6 +8,7 @@ import { ReplyEffortSlider, SettingHelp } from "@/components/ConversationControl
 import { MessageFeedbackProvider } from "@/components/MessageFeedback";
 import ContextUsageRing from "@/components/ContextUsageRing";
 import DailyRecordEntry from "@/components/DailyRecordEntry";
+import GoalFormulationPanel from "@/components/GoalFormulationPanel";
 import ThemeToggle from "@/components/ThemeToggle";
 import {
   ArrowUpMark,
@@ -69,6 +70,9 @@ export default function Chat({
   onOpenAssessment,
   onOpenAssessmentHistory,
   assessmentRefreshKey = 0,
+  onOpenGoals,
+  onSendGoalCard,
+  onGoalCardUpdated,
   onOpenPushSettings,
   displayName,
   accountUsername,
@@ -114,6 +118,9 @@ export default function Chat({
   onOpenAssessment: () => void;
   onOpenAssessmentHistory?: () => void;
   assessmentRefreshKey?: number;
+  onOpenGoals: () => void;
+  onSendGoalCard: (text: string, metadata?: Record<string, string>) => Promise<void>;
+  onGoalCardUpdated?: () => void;
   onOpenPushSettings?: () => void;
   /** Nickname, falling back to username — whom this session belongs to. */
   displayName: string;
@@ -196,6 +203,7 @@ export default function Chat({
   const replyModule = routing.reply_module;
   const nextModule = routing.next_module;
   const displayedModule = nextModule ?? replyModule;
+  const showDailyRecords = !loading && displayedModule === "module_3";
   const moduleChanged = Boolean(
     replyModule && nextModule && replyModule !== nextModule,
   );
@@ -229,9 +237,9 @@ export default function Chat({
           )}
           {accountRole !== "admin" && (
             <>
-              <button type="button" onClick={onOpenAssessment} className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-xs text-ink-muted transition-colors hover:bg-raised hover:text-ink sm:px-3">
+              {showDailyRecords && <button type="button" onClick={onOpenAssessment} className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-xs text-ink-muted transition-colors hover:bg-raised hover:text-ink sm:px-3">
                 <NotebookMark className="h-4 w-4 shrink-0" /><span>每日记录</span>
-              </button>
+              </button>}
               <button type="button" onClick={onOpenProfile} className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-xs text-ink-muted transition-colors hover:bg-raised hover:text-ink sm:px-3">
                 <IdCardMark className="h-4 w-4 shrink-0" /><span>我的档案</span>
               </button>
@@ -448,13 +456,18 @@ export default function Chat({
             </button>
             <SettingHelp key={sessionId} id="knowledge-retrieval-details" label="知识检索架构说明">
               <p>关闭 · 老架构：目录检索后，由知识中介整理材料，再交给主回复。</p>
-              <p className="mt-2">开启 · 新架构：借鉴 AstrBot 的混合检索，本地向量嵌入与关键词召回，再由 K3 重排，选中的原文直接交给主回复。</p>
+              <p className="mt-2">开启 · 新架构：借鉴 AstrBot 的混合检索，本地向量嵌入与关键词召回，再由 DeepSeek 4.1 Flash 重排，选中的原文直接交给主回复。</p>
               <p className="mt-2">仅修改当前对话，保存后从下一轮生效。</p>
             </SettingHelp>
           </div>}
           <span role="status" className="sr-only">{replyEffortBusy || mediatorBusy ? "保存中…" : ""}</span>
         </div>
       )}
+
+      <GoalFormulationPanel key={`${accountUsername}:${sessionId ?? "new"}`} sessionId={sessionId}
+        accountKey={accountUsername} module={routing.next_module ?? routing.reply_module} busy={busy} loading={loading}
+        refreshKey={`${messages.length}:${messages.at(-1)?.id ?? ""}:${busy}`}
+        onSend={onSendGoalCard} onOpenGoals={onOpenGoals} onUpdated={onGoalCardUpdated} />
 
       {loading ? (
         <div className="flex flex-1 items-center justify-center" aria-busy="true">
@@ -519,7 +532,7 @@ export default function Chat({
       )}
 
       <div className="mx-auto w-full max-w-[58rem] shrink-0 px-4 pb-3 pt-3 sm:px-7 sm:pb-5">
-        <DailyRecordEntry onOpen={onOpenAssessment} onHistory={onOpenAssessmentHistory ?? onOpenAssessment} refreshKey={assessmentRefreshKey} />
+        {showDailyRecords && <DailyRecordEntry onOpen={onOpenAssessment} onHistory={onOpenAssessmentHistory ?? onOpenAssessment} refreshKey={assessmentRefreshKey} />}
         <form
           onSubmit={handleSubmit}
           className="composer-shell flex items-end gap-2 rounded-3xl py-2 pl-5 pr-2 transition-all duration-300 focus-within:ring-2 focus-within:ring-accent-edge"

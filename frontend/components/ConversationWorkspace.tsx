@@ -167,10 +167,14 @@ export default function ConversationWorkspace({
     update(); media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
-  // Daily records remain independent of module routing and never block chat.
+  // Daily records are available only in Module III and never block chat.
   const [assessmentOpen, setAssessmentOpen] = useState(false);
   const [assessmentRefreshKey, setAssessmentRefreshKey] = useState(0);
   const [assessmentView, setAssessmentView] = useState<"record" | "history">("record");
+  const dailyRecordsAvailable = !loadingConversation && (routing.next_module ?? routing.reply_module) === "module_3";
+  useEffect(() => {
+    if (!loadingConversation && !dailyRecordsAvailable) setAssessmentOpen(false);
+  }, [loadingConversation, dailyRecordsAvailable]);
   const appliedRevisions = useRef(new Map<string, number>());
   const pendingFloors = useRef(new Map<string, number>());
   const turns = useRef(new Map<string, ConversationTurn>());
@@ -726,10 +730,13 @@ export default function ConversationWorkspace({
     }
   }
 
-  async function handleSend(text: string) {
+  async function handleSend(text: string, metadata?: Record<string, string>) {
     const sourceId = activeSessionIdRef.current;
-    if (sourceId && (replyEffortSaveRef.current.has(sourceId) || mediatorSaveRef.current.has(sourceId))) return;
-    if (!sourceId || sourceId !== sessionId || loadingConversation || turns.current.has(sourceId)) return;
+    if ((sourceId && (replyEffortSaveRef.current.has(sourceId) || mediatorSaveRef.current.has(sourceId)))
+      || !sourceId || sourceId !== sessionId || loadingConversation || turns.current.has(sourceId)) {
+      if (metadata?.goal_card_action) throw new Error("请等当前回复完成后再继续；目标卡内容已保留。");
+      return;
+    }
     const controller = new AbortController();
     const baseline = messages.length;
     const turn: ConversationTurn = {
@@ -783,7 +790,7 @@ export default function ConversationWorkspace({
     const deadline = window.setTimeout(() => controller.abort(), conversationReplyMode === "ack_deep" ? 240000 : 180000);
     try {
       await streamChat(
-        { message: text, session_id: sourceId, generation_id: turn.id },
+        { message: text, session_id: sourceId, generation_id: turn.id, ...(metadata ? {metadata} : {}) },
         {
           onReplyWait: value => {
             if (!isAdmin || conversationReplyMode !== "ack_deep" || !ownsTask() || activeSessionIdRef.current !== sourceId
@@ -820,8 +827,8 @@ export default function ConversationWorkspace({
             if (meta.model) updateAssistant(message => ({ ...message, model_name: meta.model }));
             else publishTurn(turn);
           },
-          onDelta: delta => {
-            if (delta.trim() && turn.replyWaitPhase === "waiting") {
+          onDelta: (delta, phase) => {
+            if (phase !== "lead" && delta.trim() && turn.replyWaitPhase === "waiting") {
               turn.replyWaiting = false;
               turn.replyWaitPhase = "closed";
             }
@@ -1143,6 +1150,9 @@ export default function ConversationWorkspace({
           onOpenAssessment={() => { setAssessmentView("record"); setAssessmentOpen(true); }}
           onOpenAssessmentHistory={() => { setAssessmentView("history"); setAssessmentOpen(true); }}
           assessmentRefreshKey={assessmentRefreshKey}
+          onOpenGoals={() => setGoalsOpen(true)}
+          onSendGoalCard={handleSend}
+          onGoalCardUpdated={() => setProgramRefreshKey(value => value + 1)}
           onOpenPushSettings={() => setPushSettingsOpen(true)}
           displayName={displayName}
           accountUsername={accountUsername}
@@ -1165,9 +1175,9 @@ export default function ConversationWorkspace({
       {isAdmin && modeChooserOpen && <ConversationModeModal busy={modeChooserBusy} error={modeChooserError} replyEffortOptions={replyEffortOptions}
         onChoose={handleModeChoice} onClose={() => { if (!creatingConversationRef.current) setModeChooserOpen(false); }} />}
 
-      {isAdmin && <GoalOverview open={goalsOpen} sessionId={sessionId} busy={busy || loadingConversation}
+      <GoalOverview open={goalsOpen} sessionId={sessionId} busy={busy || loadingConversation}
         onOpenReminders={() => setPushSettingsOpen(true)}
-        refreshKey={programRefreshKey} onClose={() => setGoalsOpen(false)} />}
+        refreshKey={programRefreshKey} onClose={() => setGoalsOpen(false)} />
       {pushSettingsOpen && <PushReminderModal onClose={() => setPushSettingsOpen(false)} />}
       {shareTarget && <ConversationShareModal
         key={shareTarget.sessionId}
@@ -1230,7 +1240,7 @@ export default function ConversationWorkspace({
         />
       )}
 
-      {assessmentOpen && (
+      {dailyRecordsAvailable && assessmentOpen && (
         <DailyAssessmentModal initialView={assessmentView} onSaved={() => setAssessmentRefreshKey(key => key + 1)} onClose={() => setAssessmentOpen(false)} />
       )}
     </div>

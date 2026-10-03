@@ -86,6 +86,7 @@ async def _persist_user_message(
     session_id: str,
     user_text: str,
     created_at: datetime | None = None,
+    metadata: dict | None = None,
 ) -> int | None:
     """Best-effort immediate write of the user's message.
 
@@ -97,14 +98,33 @@ async def _persist_user_message(
     """
     if not subject_id:
         return None
+    if metadata:
+        from ..goal_card_interaction import validate_card_action
+        await validate_card_action(db, session_id=session_id, user_id=subject_id,
+                                   metadata=metadata, text=user_text)
     try:
-        return await start_turn(
+        message_id = await start_turn(
             db,
             subject_id=subject_id,
             session_id=session_id,
             user_text=user_text,
             created_at=created_at,
         )
+        if get_settings().goal_card_ui_enabled:
+            try:
+                from ..goal_card_workspace import bind_submission
+                from ..goal_card_interaction import bind_card_action
+                from ..v2_workflow import runtime_for
+                conversation, _ = await runtime_for(db, session_id)
+                await bind_submission(db, conversation, message_id)
+                await bind_card_action(db, conversation, message_id, metadata or {})
+                await db.commit()
+            except Exception:
+                # start_turn already committed: retain the real message ID.
+                # Missing card linkage will block confirmation, not lose input.
+                await db.rollback()
+                logger.exception('failed to bind goal card input for %s', session_id)
+        return message_id
     except Exception:  # noqa: BLE001
         await db.rollback()
         logger.exception("failed to persist user message for session %s", session_id)
@@ -181,6 +201,10 @@ async def _finalize_pa_display(db, *, store, session_id, subject_id, assistant_m
     try:
         await finalize_tool_display(db, session_id=session_id, user_id=subject_id,
                                     assistant_message_id=assistant_message_id)
+        if get_settings().goal_card_ui_enabled:
+            from ..goal_card_interaction import finalize_ui_display
+            await finalize_ui_display(db, session_id=session_id, user_id=subject_id,
+                                      assistant_message_id=assistant_message_id)
         await db.commit()
         _, fresh = await runtime_for(db, session_id)
         await store.set_module(session_id, fresh['current_module'])
@@ -345,7 +369,7 @@ async def _initial_state(
     received_at = received_at or utc_now()
     session = await _resume_or_create(request, store, db, subject_id=subject_id)
     if request.metadata:
-        session.metadata.update(request.metadata)
+        session.metadata.update({k: v for k, v in request.metadata.items() if not k.startswith('goal_card_')})
 
     state: AgentState = {
         "session_id": session.session_id,
@@ -422,6 +446,7 @@ async def chat(
         session_id=session_id,
         user_text=request.message,
         created_at=state["user_created_at"],
+        metadata=request.metadata,
     )
     state["user_message_id"] = user_message_id
     state["turn_started_monotonic"] = request_started
@@ -568,6 +593,7 @@ async def _prepare_chat_stream(
         session_id=session_id,
         user_text=request.message,
         created_at=state["user_created_at"],
+        metadata=request.metadata,
     )
     state["user_message_id"] = user_message_id
     state["turn_started_monotonic"] = request_started
@@ -659,7 +685,8 @@ async def _prepare_chat_stream(
                         session_id=session_id, subject_id=subject_id, maker=get_sessionmaker(),
                         metrics=lead_metrics, prompt=context.reply_lead_prompt,
                         user_created_at=state["user_created_at"],
-                        max_history_messages=context.settings.max_history_messages)
+                        max_history_messages=context.settings.max_history_messages,
+                        context=context)
                 # A disconnect can close this generator while it is yielding a
                 # receipt. Wait for graph/receipt cleanup before releasing the
                 # turn lock; async-for alone defers child closure to GC.

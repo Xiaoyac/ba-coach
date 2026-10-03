@@ -593,16 +593,22 @@ def make_module_node(module_name: str, config: ModuleConfig):
         # Validation is diagnostic only. Once sent, visible text must also be
         # the text persisted, including when the provider fails mid-stream.
         emitted_content: list[str] = []
+        continuation_prefix = None
         force_reply_validation = False
         def emit_output(event):
             if context.stream:
                 if event.get("type") == "delta":
+                    if continuation_prefix is not None:
+                        event = {**event, "text": continuation_prefix.push(event["text"])}
+                        if not event["text"]:
+                            return
                     emitted_content.append(event["text"])
                 _send(event)
         context = runtime.context
         user_input = state["user_input"]
-        from ..pa_card_tools import enabled as pa_tools_enabled
-        use_pa_tools = pa_tools_enabled(context.settings, state) and module_name in {"module_2", "module_4"}
+        from ..pa_card_tools import enabled as pa_tools_enabled, form_ui_enabled
+        use_goal_card_ui = module_name == 'module_2' and form_ui_enabled(context.settings, state)
+        use_pa_tools = use_goal_card_ui or (pa_tools_enabled(context.settings, state) and module_name in {"module_2", "module_4"})
 
         knowledge = []
         retrieval_metrics = {}
@@ -771,6 +777,9 @@ def make_module_node(module_name: str, config: ModuleConfig):
         )
         if guidance_block:
             system.append(SystemPromptSegment(guidance_block, cacheable=False, always_current=True))
+        if use_pa_tools:
+            from ..pa_background import FOREGROUND_POLICY
+            system.append(SystemPromptSegment(FOREGROUND_POLICY, always_current=True))
         authority = await reply_authority()
         if authority is not None:
             system.append(SystemPromptSegment(workflow_prompt(authority,
@@ -834,9 +843,19 @@ def make_module_node(module_name: str, config: ModuleConfig):
             user_created_at=state.get("user_created_at"),
             prefix_cache=cache_layout, history_summary=history_summary)
         system, messages = prepared.system, prepared.messages
+        lead_text = ""
         if context.stream and (state.get("telemetry") or {}).get("reply_mode") == "ack_deep":
             from ..provisional_reply import parallel_reply_system
-            system = parallel_reply_system(system)
+            lead_context = getattr(context, "reply_lead_context", None)
+            if lead_context is not None and not lead_context.done():
+                lead_context.set_result(as_text(system))
+            lead_task = getattr(context, "reply_lead_task", None)
+            if lead_task is not None:
+                lead_text = (await lead_task).get("text", "")
+            system = parallel_reply_system(system, lead_text)
+            if lead_text:
+                from ..provisional_reply import ContinuationPrefix
+                continuation_prefix = ContinuationPrefix(lead_text)
         telemetry["prompt_version"] = hashlib.sha256(
             as_text(system).encode("utf-8")
         ).hexdigest()[:16]
@@ -865,39 +884,12 @@ def make_module_node(module_name: str, config: ModuleConfig):
         reasoning_parts: list[str] = []
         generation_started = perf_counter()
         generation_provider = context.provider
+        # Card mutations are handled after this reply is durable by a separate
+        # background model. The selected conversational provider never sees
+        # native tools and never waits on their read/write/validation rounds.
         if use_pa_tools:
-            context.pa_tools_started = True
-            from ..pa_card_tools import PACardTools
-            from ..pa_tool_loop import PAToolReply
-            executor = PACardTools(maker=context.sessionmaker, session_id=state['session_id'],
-                user_id=state['subject_id'], user_message_id=state['user_message_id'],
-                module=module_name, provider=context.router_provider)
-            async def pa_transition_prompt(target):
-                # Confirmation commits before M3 coaching, just like the
-                # existing pre-reply path. Do not continue with stale M2 policy.
-                if context.prompt_snapshot is not None:
-                    global_text=context.prompt_snapshot.get('global')
-                    module_text=context.prompt_snapshot.get(target)
-                else:
-                    async with context.sessionmaker() as db:
-                        global_text,module_text=await effective_prompt_pair(db,target)
-                async with context.sessionmaker() as db:
-                    from ..v2_workflow import runtime_for
-                    conversation,fresh=await runtime_for(db,state['session_id'])
-                    snapshot=await executor.snapshot(db,conversation,fresh)
-                transitioned = build_system_segments(target,global_prompt=global_text,module_prompt=module_text,
-                    clinical_context=['工具提交后的数据库事实：'+json.dumps(snapshot,ensure_ascii=False)],
-                    profile_context=state.get('profile_context'),long_term_memory=state.get('long_term_memory'),
-                    history=messages)
-                if cache_layout:
-                    return prepare_context(system=transitioned, history=[], user_input=user_input,
-                        max_history_messages=0, user_created_at=state.get('user_created_at'),
-                        prefix_cache=True, history_summary=history_summary).system
-                return transitioned
-            generation_provider = PAToolReply(context.provider, executor,
-                max_rounds=context.settings.pa_card_tool_max_rounds, telemetry=telemetry,
-                timeout_seconds=context.settings.pa_card_tool_timeout_seconds,transition_prompt=pa_transition_prompt)
-            update['pa_tools_used'] = True
+            update['pa_background_pending'] = True
+            telemetry['pa_background_tools'] = {'status': 'scheduled_after_reply'}
         first_reasoning_seen = False
         first_content_seen = False
         try:
@@ -992,6 +984,11 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 telemetry["finish_reason"] = "timeout"
 
         if context.stream:
+            if continuation_prefix is not None:
+                tail = continuation_prefix.finish()
+                if tail:
+                    emit_output({"type": "delta", "text": tail})
+                telemetry["repeated_lead_removed"] = continuation_prefix.removed
             telemetry["raw_model_reply"] = content_guard.raw
         invalid_protocol = contains_internal_protocol(telemetry.get("raw_model_reply"))
         if invalid_protocol and not update.get("error"):
@@ -1014,25 +1011,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
                               model='BA Coach 状态机')
                 emit_output({'type': 'delta', 'text': receipt_text})
 
-        # Budget exhaustion or an invalid provider envelope is a generation
-        # failure, not inappropriate user input or a semantic validator rejection.
-        if use_pa_tools:
-            # A committed tool action survives a later provider failure. Show
-            # its actual artifact, never regenerate using pre-tool context.
-            for display in executor.displays:
-                if display not in update.get('final_response', ''):
-                    suffix = ('\n\n' if update.get('final_response') else '') + display
-                    update['final_response'] = update.get('final_response', '') + suffix
-                    emit_output({'type': 'delta', 'text': suffix})
-            if not update.get('final_response', '').strip():
-                update['error'] = update.get('error') or '工具操作后未收到完整回复，请重试；已保存的数据不会丢失。'
-            from ..v2_workflow import runtime_for
-            async with context.sessionmaker() as db:
-                _, durable = await runtime_for(db, state['session_id'])
-                update.update(memory=durable['memory'] or {}, current_module=durable['current_module'],
-                    next_module=durable['current_module'], active_cycle_id=durable['active_cycle_id'])
-            _send({'type':'trace', 'node':'pa_tools', 'detail':telemetry['pa_tools']})
-        if not use_pa_tools and not update.get("error") and not update.get("final_response", "").strip():
+        if not update.get("error") and not update.get("final_response", "").strip():
             from ..reply_recovery import recover_empty_reply, GENERATION_INTERRUPTED_REPLY
             recovered, recovery = await recover_empty_reply(
                 provider=context.provider, system=system, messages=messages,
@@ -1056,6 +1035,10 @@ def make_module_node(module_name: str, config: ModuleConfig):
             if recovered:
                 normalized = normalize_reasoning_channels(unwrap_chat_reply(recovered.text), "")
                 update["final_response"] = normalized.reply
+                if lead_text:
+                    from ..provisional_reply import ContinuationPrefix
+                    recovered_prefix = ContinuationPrefix(lead_text)
+                    update["final_response"] = recovered_prefix.push(normalized.reply) + recovered_prefix.finish()
                 if not normalized.reply:
                     recovery["status"] = "invalid_normalized_completion"
                 update["model"] = recovered.model
@@ -1231,6 +1214,24 @@ async def crisis_node(state: AgentState, runtime: Runtime[GraphContext], writer:
         max_history_messages=context.settings.max_history_messages,
         user_created_at=state.get("user_created_at"))
     system, messages = prepared.system, prepared.messages
+    crisis_prefix = None
+    crisis_emitted = []
+    if context.stream and getattr(context, "reply_lead_task", None) is not None:
+        from ..provisional_reply import parallel_reply_system, ContinuationPrefix
+        lead_context = getattr(context, "reply_lead_context", None)
+        if lead_context is not None and not lead_context.done():
+            lead_context.set_result(as_text(system))
+        lead_text = (await context.reply_lead_task).get("text", "")
+        system = parallel_reply_system(system, lead_text)
+        if lead_text:
+            crisis_prefix = ContinuationPrefix(lead_text)
+
+    def emit_crisis_text(text):
+        text = crisis_prefix.push(text) if crisis_prefix is not None else text
+        if text:
+            crisis_emitted.append(text)
+            _send({"type": "delta", "text": text})
+
     _send({"type": "trace", "node": "context_pipeline", "detail": prepared.metrics})
 
     reply_buffer = VisibleReplyBuffer.create()
@@ -1276,7 +1277,7 @@ async def crisis_node(state: AgentState, runtime: Runtime[GraphContext], writer:
                     first_content_seen = True
                 for guarded_delta in content_guard.push(delta.text):
                     for visible_delta in reply_buffer.push(guarded_delta):
-                        _send({"type": "delta", "text": visible_delta})
+                        emit_crisis_text(visible_delta)
         else:
             completion = await context.provider.complete(system=system, messages=messages)
             normalized = normalize_reasoning_channels(
@@ -1309,7 +1310,13 @@ async def crisis_node(state: AgentState, runtime: Runtime[GraphContext], writer:
             content_guard, reply_buffer, reasoning_parts
         )
         for visible_delta in final_deltas:
-            _send({"type": "delta", "text": visible_delta})
+            emit_crisis_text(visible_delta)
+        if crisis_prefix is not None:
+            tail = crisis_prefix.finish()
+            if tail:
+                emit_crisis_text(tail)
+            telemetry["repeated_lead_removed"] = crisis_prefix.removed
+        visible = "".join(crisis_emitted)
         if disclosed_reasoning:
             _send({"type": "reasoning_delta", "text": disclosed_reasoning})
         _send({"type": "delta", "text": CRISIS_RESOURCES})
@@ -1343,7 +1350,7 @@ async def route_next_module_node(
     result = {"next_module": state.get('next_module', current) if state.get('pa_tools_used') else current,
         "routing_reasoning_content": state.get("routing_reasoning_content", ""),
         "router_model_name": state.get("router_model_name", ""),
-        "routing_pending": not bool(state.get("pa_tools_used") or state.get("reply_held") or state.get("error")
+        "routing_pending": not bool(state.get("pa_tools_used") or state.get("pa_background_pending") or state.get("reply_held") or state.get("error")
             or state.get("risk") or state.get("forced_module")
             or (state.get("memory") or {}).get("sandbox_mode") == "true")}
     if state.get("risk"):
@@ -1940,6 +1947,10 @@ def schedule_background_routing(
     assistant_message_id: int | None,
 ) -> None:
     """Start sourced fact extraction after the visible reply is durable."""
+    if state.get("pa_background_pending"):
+        from ..pa_background import schedule_pa_background
+        schedule_pa_background(state, context, assistant_message_id=assistant_message_id)
+        return
     if not state.get("routing_pending") or state.get("reply_held"):
         return
     session_id = state["session_id"]

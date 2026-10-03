@@ -60,6 +60,7 @@ async def current_m1_missing(db, pending, conversation_id, session_id):
 async def confirmation_readiness(
     db, *, conversation, state, user_id, session_id, pending=None,
     extraction_assistant_message_id=None, confirmation_user_message_id=None,
+    following_assistant_message_id=None,
 ):
     """Evaluate the one authoritative readiness contract for confirmation.
 
@@ -79,6 +80,7 @@ async def confirmation_readiness(
             db, conversation_id=conversation.id, state=state, module=module,
             assistant_message_id=extraction_assistant_message_id,
             following_user_message_id=confirmation_user_message_id,
+            following_assistant_message_id=following_assistant_message_id,
         )
     memory = state.get("memory") or {}
     marker = memory.get("dialogue_draft") if isinstance(memory, dict) else None
@@ -143,6 +145,7 @@ async def confirmation_readiness(
 async def validate_confirmation(
     db, *, conversation, state, user_id, session_id, payload,
     extraction_assistant_message_id=None, confirmation_user_message_id=None,
+    following_assistant_message_id=None,
 ):
     pending = await draft(db, state, user_id)
     if state["row_version"] != payload.row_version or not pending or pending["id"] != payload.record_id or record_hash(pending) != payload.record_hash:
@@ -164,6 +167,7 @@ async def validate_confirmation(
             session_id=session_id, pending=pending,
             extraction_assistant_message_id=extraction_assistant_message_id,
             confirmation_user_message_id=confirmation_user_message_id,
+            following_assistant_message_id=following_assistant_message_id,
         )
         if not readiness["ready"]:
             codes = [item["code"] for item in readiness["reasons"]]

@@ -95,7 +95,7 @@ MODULE_TWO: tuple[Spec, ...] = (
     Spec(
         "barrier_coping_plan",
         "json",
-        '针对障碍的应对方案，数组，每项 {"barrier":"障碍","plan":"应对"}；没谈到给 []',
+        '针对实际障碍的应对方案，数组，每项 {"barrier":"障碍","plan":"应对"}；未知/没谈到给 []。只有用户明确表达当前计划没有障碍时，使用 [{"status":"not_applicable","source_message_id":真实用户消息ID,"source_quote":"无障碍的用户逐字原话"}]，并将potential_barriers设为同一条原话的单项数组；不编造plan，不把未谈到当成没有障碍。',
     ),
     Spec(
         "has_target_card_generated",

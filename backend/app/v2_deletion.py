@@ -7,6 +7,8 @@ from .models import (Conversation, ConversationMessage, AIExecutionEvent,
 
 async def detach_conversation(db, conversation):
     cid, uid = conversation.id, conversation.subject_id
+    from .goal_card_workspace import delete_conversation_cards
+    await delete_conversation_cards(db, conversation)
     message_ids = list((await db.execute(select(ConversationMessage.id).where(
         ConversationMessage.conversation_id == cid))).scalars())
     goals, cycles, rt = [schema.tables[n] for n in (

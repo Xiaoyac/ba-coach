@@ -171,10 +171,11 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
         started = perf_counter()
         try:
             if apply_decision is None:
-                from .pa_card_tools import enabled as pa_tools_enabled
-                if pa_tools_enabled(context.settings, prepared) and current in {"module_2", "module_4"}:
-                    # PA mutations are selected by native calls in the reply
-                    # loop. A router label cannot bypass those transactions.
+                from .pa_card_tools import enabled as pa_tools_enabled, form_ui_enabled
+                if ((pa_tools_enabled(context.settings, prepared) and current in {"module_2", "module_4"})
+                        or (current == 'module_2' and form_ui_enabled(context.settings, prepared))):
+                    # PA mutations are selected by native calls in the background
+                    # worker. A router label cannot bypass those transactions.
                     async def apply_decision(state, ctx, proposed):
                         snapshot = await load_routing_snapshot(state, ctx)
                         return {**snapshot, "diagnostics": {"policy": "pa_native_tools"}}

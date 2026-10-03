@@ -144,6 +144,8 @@ async def _purge_account_business_data(db: AsyncSession, *, profile_uuid: str) -
     were shared between chats owned by the same account.
     """
     tables = v2_schema.tables
+    from ..goal_card_workspace import delete_user_cards
+    await delete_user_cards(db, profile_uuid)
     if get_settings().database_schema_version != "v2":
         # Local/legacy installations do not have the V2 tables.  Keep the
         # same deletion contract there using the externally-owned ORM models.

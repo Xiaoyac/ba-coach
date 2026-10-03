@@ -11,6 +11,7 @@ from ..v2_profile import enabled
 from ..v2_repository import start_cycle, owned_goal, initial_module, V2Conflict, V2NotFound
 from ..v2_workflow import runtime_for, module_extraction_is_current
 from ..program_confirmation import draft, current_m1_missing, record_hash, validate_confirmation, commit_confirmation
+from ..goal_card_workspace import CardSubmission
 
 router = APIRouter(prefix="/program", tags=["program"])
 
@@ -78,6 +79,10 @@ async def get_goal_overview(user_id=Depends(require_subject_id), db=Depends(get_
                             if row["ordinal"] is not None else None} for row in rows]}
     from ..pa_lifecycle import read_pa_cards
     result["pa_cards"] = await read_pa_cards(db, user_id=user_id, goals=result["goals"])
+    from ..config import get_settings
+    if getattr(get_settings(), "goal_card_ui_enabled", False):
+        from ..goal_card_workspace import confirmed_secondary_cards
+        result["formulation_cards"] = await confirmed_secondary_cards(db, user_id)
     return result
 
 
@@ -148,6 +153,48 @@ async def get_program(session_id: str, user_id=Depends(require_subject_id), db=D
             "missing_fields": missing,
             "readiness": {k: readiness[k] for k in ("ready", "module", "missing_fields", "reasons")} if readiness else None,
             "m1_reusable": (await initial_module(db, user_id=user_id)) == "module_2"}
+
+
+@router.get("/{session_id}/goal-card")
+async def get_goal_card(session_id: str, user_id=Depends(require_subject_id), db=Depends(get_db)):
+    from ..config import get_settings
+    if not enabled() or not getattr(get_settings(), "goal_card_ui_enabled", False):
+        return {"enabled": False, "card": None}
+    conversation, state = await runtime_for(db, session_id)
+    if not conversation or conversation.subject_id != user_id or not state:
+        raise HTTPException(404, "聊天不存在")
+    # Read-only UI polling also runs in administrator sandboxes. It should
+    # quietly disable this production-only panel, while writes stay rejected.
+    if str((state.get("memory") or {}).get("sandbox_mode", "")).lower() == "true":
+        return {"enabled": False, "card": None}
+    from ..goal_card_workspace import latest_card
+    return {"enabled": True, "card": await latest_card(db, conversation.id, user_id)}
+
+
+@router.put("/{session_id}/goal-card")
+async def put_goal_card(session_id: str, payload: CardSubmission, user_id=Depends(require_subject_id),
+                        db=Depends(get_db), store=Depends(get_session_store)):
+    from ..config import get_settings
+    if not enabled() or not getattr(get_settings(), "goal_card_ui_enabled", False):
+        raise HTTPException(409, "目标卡填写功能尚未开启")
+    # Verify ownership before checking any runtime lock. A foreign account
+    # learns neither an existing card nor whether its owner is generating.
+    await own_state(db, session_id, user_id)
+    lock = await store.get_turn_lock(session_id)
+    if lock.locked():
+        raise HTTPException(409, "教练正在回应，请等本轮结束后再提交目标卡")
+    async with lock:
+        profiles, rt = schema.tables["user_profile"], schema.tables["conversation_runtime_states"]
+        await db.execute(select(profiles.c.uuid).where(profiles.c.uuid == user_id).with_for_update())
+        conversation, state = await own_state(db, session_id, user_id)
+        from ..models import Conversation
+        await db.execute(select(Conversation.id).where(Conversation.id == conversation.id).with_for_update())
+        state = dict((await db.execute(select(rt).where(rt.c.conversation_id == conversation.id)
+            .with_for_update())).mappings().one())
+        from ..goal_card_workspace import save_card_fields
+        result = await save_card_fields(db, conversation, state, payload)
+        await db.commit()
+    return result
 
 
 @router.post("/{session_id}/goal")
