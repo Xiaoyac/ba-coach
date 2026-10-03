@@ -1100,7 +1100,7 @@ export default function ConversationWorkspace({
         }
         sandboxBusy={busy || sandboxStarting}
         onOpenTestWorkbench={accountRole === "admin" ? () => setTestWorkbenchOpen(true) : undefined}
-        onOpenAssessment={() => { setAssessmentView("record"); setAssessmentOpen(true); setSidebarOpen(false); }}
+        onOpenAssessment={dailyRecordsAvailable ? () => { setAssessmentView("record"); setAssessmentOpen(true); setSidebarOpen(false); } : undefined}
         onOpenGoals={() => { setGoalsOpen(true); setSidebarOpen(false); }}
         open={sidebarOpen}
         collapsed={sidebarCollapsed}

@@ -112,6 +112,20 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
         return {"extracted_intent": current, "next_module": current, "routed_by": "state_read_failed", "telemetry": telemetry}
     record_span(telemetry, "state_load", started, origin=origin)
     current = prepared["current_module"]
+    # Router-only owns the conversational stage, but does not disable an
+    # independently sourced acceptance of the exact card the user saw.
+    # Settle that transaction before asking the Router for this turn's stage.
+    from .pa_card_tools import enabled as pa_tools_enabled, form_ui_enabled
+    if (prepared['routing_mode'] == ROUTER_ONLY and current in {'module_2', 'module_3'}
+            and (prepared.get('memory') or {}).get('dialogue_draft')
+            and not (pa_tools_enabled(context.settings, prepared)
+                or (current == 'module_2' and form_ui_enabled(context.settings, prepared)))):
+        from .router_business_confirmation import settle_confirmation
+        receipt = await settle_confirmation(prepared, context)
+        if receipt:
+            prepared.update(await load_routing_snapshot(state, context))
+            prepared['confirmation_receipt'] = receipt
+            current = prepared['current_module']
     if forced and prepared["routing_mode"] != ROUTER_ONLY:
         return {"extracted_intent": forced, "next_module": forced, "routed_by": "explicit",
                 "routing_pending": False}
@@ -242,6 +256,7 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
     _emit({"type": "trace", "node": "pre_reply_router", "detail": telemetry["router_pre_reply"]})
     return {**{key: value for key, value in prepared.items() if key in {"current_module", "memory", "active_cycle_id", "routing_state", "routing_mode", "recording_status", "recording_decision_scope"}},
             **{key: value for key, value in applied.items() if key != "diagnostics"},
+            **({'confirmation_receipt': prepared['confirmation_receipt']} if prepared.get('confirmation_receipt') else {}),
             **({"forced_module": None} if prepared["routing_mode"] == ROUTER_ONLY else {}),
             "transition_from_module": current, "knowledge_task": knowledge_task,
             "extracted_intent": selected, "next_module": selected, "routed_by": "pre_reply_router",

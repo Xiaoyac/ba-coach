@@ -98,7 +98,7 @@ async def test_workflow_reply_findings_do_not_replace_or_hold(
     assert audit['mode'] == 'diagnostic_only'
     if stream:
         assert ''.join(e['text'] for e in events if e['type'] == 'delta') == result['final_response']
-        assert original in str(events)
+        assert original == "".join(e["text"] for e in events if e["type"] == "delta")
 
 
 @pytest.mark.parametrize('stream', [False, True])

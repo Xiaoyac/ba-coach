@@ -590,9 +590,11 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 return await read_reply_workflow(runtime.context.sessionmaker, state['subject_id'], state['session_id'])
             except Exception:
                 return {"available": False}
-        # Validation is diagnostic only. Once sent, visible text must also be
-        # the text persisted, including when the provider fails mid-stream.
+        # Ordinary coaching diagnostics do not alter replies. Persistence
+        # claims in owned non-tool replies are checked before publication.
         emitted_content: list[str] = []
+        published_content: list[str] = []
+        workflow_stream_guard = None
         continuation_prefix = None
         force_reply_validation = False
         def emit_output(event):
@@ -603,12 +605,19 @@ def make_module_node(module_name: str, config: ModuleConfig):
                         if not event["text"]:
                             return
                     emitted_content.append(event["text"])
+                    if hold_workflow_claims:
+                        if workflow_stream_guard is not None:
+                            for sentence in workflow_stream_guard.push(event['text']):
+                                published_content.append(sentence)
+                                _send({'type': 'delta', 'text': sentence})
+                        return
                 _send(event)
         context = runtime.context
         user_input = state["user_input"]
         from ..pa_card_tools import enabled as pa_tools_enabled, form_ui_enabled
         use_goal_card_ui = module_name == 'module_2' and form_ui_enabled(context.settings, state)
         use_pa_tools = use_goal_card_ui or (pa_tools_enabled(context.settings, state) and module_name in {"module_2", "module_4"})
+        hold_workflow_claims = authoritative
 
         knowledge = []
         retrieval_metrics = {}
@@ -790,7 +799,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
         from ..dialogue_confirmation import affirmative
         card = (authority or {}).get('confirmation_summary')
         show_confirmation_card = False
-        if authoritative and not router_only and not use_pa_tools and card and module_name == 'module_2':
+        if authoritative and not use_pa_tools and card and module_name == 'module_2':
             show_confirmation_card = affirmative(user_input)
             if not show_confirmation_card:
                 from ..confirmation_intent import may_redisplay_unchanged_plan
@@ -884,6 +893,10 @@ def make_module_node(module_name: str, config: ModuleConfig):
         reasoning_parts: list[str] = []
         generation_started = perf_counter()
         generation_provider = context.provider
+        if hold_workflow_claims and context.stream:
+            from ..reply_integrity import SentenceSaveGuard
+            workflow_stream_guard = SentenceSaveGuard(authority, module_name,
+                current_turn_committed=bool(state.get('confirmation_receipt')))
         # Card mutations are handled after this reply is durable by a separate
         # background model. The selected conversational provider never sees
         # native tools and never waits on their read/write/validation rounds.
@@ -1053,6 +1066,47 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 telemetry["error_code"] = ("invalid_protocol_completion" if invalid_protocol else
                     "reasoning_budget_exhausted" if recovery.get("original_finish_reason") == "length" else "empty_completion")
                 emit_output({"type": "delta", "text": update["final_response"]})
+
+        if hold_workflow_claims:
+            from ..reply_integrity import verify_reply
+            published_prefix = ''.join(published_content)
+            proposed = update.get('final_response', '')
+            pending_suffix = proposed[len(published_prefix):] if context.stream else proposed
+            verified, truth_audit = await verify_reply(
+                reply=pending_suffix, read_authority=reply_authority,
+                module=module_name, provider=context.provider, system=system, messages=messages,
+                elapsed_seconds=perf_counter() - generation_started,
+                total_timeout_seconds=(context.provider._main_timeout_seconds()
+                    if getattr(context.provider, 'deep_reply_enabled', False)
+                    and hasattr(context.provider, '_settings')
+                    else context.settings.provider_request_timeout_seconds),
+                allow_recovery=not update.get('error'),
+                current_turn_committed=bool(state.get('confirmation_receipt')),
+                visible_prefix=published_prefix)
+            telemetry['workflow_truth'] = truth_audit
+            if truth_audit.get('usage'):
+                usage = update.get('usage', {})
+                for key, value in truth_audit['usage'].items():
+                    usage[key] = usage.get(key, 0) + value
+                update['usage'] = telemetry['usage'] = usage
+            if verified is None:
+                # Preserve any already published safe prefix byte-for-byte.
+                # The suspect sentence is never displayed or persisted.
+                emitted_content[:] = [published_prefix] if published_prefix else []
+                update.update(final_response=published_prefix, reasoning_content='', reply_held=True,
+                    error='暂时无法核实后续回复中的保存结果，相关内容未展示；已有信息无需重新填写。')
+                telemetry['error_code'] = 'uncommitted_workflow_claim'
+            else:
+                if truth_audit['status'] == 'recovered':
+                    if lead_text and not published_prefix:
+                        from ..provisional_reply import ContinuationPrefix
+                        prefix = ContinuationPrefix(lead_text)
+                        verified = prefix.push(verified) + prefix.finish()
+                    update['reasoning_content'] = ''
+                emitted_content[:] = [published_prefix + verified]
+                update['final_response'] = published_prefix + verified
+                if context.stream and verified:
+                    _send({'type': 'delta', 'text': verified})
 
         if context.stream:
             # Keep the saved answer byte-for-byte aligned with delivered deltas;
@@ -1901,6 +1955,20 @@ async def _run_background_routing(
                         rt = schema.tables["conversation_runtime_states"]
                         await db.execute(update(rt).where(rt.c.conversation_id == conversation.id).values(
                             current_module=current))
+                if mode == ROUTER_ONLY and current == 'module_2' and data:
+                    from ..dialogue_confirmation import advance_from_dialogue
+                    await advance_from_dialogue(db, session_id=session_id, user_id=subject_id,
+                        assistant_message_id=assistant_message_id, allow_transition=False)
+                    # Readiness here only enables acceptance of a displayed
+                    # version; it cannot change the Router-owned module.
+                    _, refreshed = await runtime_for(db, session_id)
+                    marker = (refreshed['memory'] or {}).get('dialogue_draft') or {}
+                    if (marker.get('summary_verified') and marker.get('field_complete')
+                            and marker.get('assistant_message_id') == assistant_message_id
+                            and marker.get('cycle_id') == refreshed['active_cycle_id']):
+                        rt = schema.tables['conversation_runtime_states']
+                        await db.execute(update(rt).where(rt.c.conversation_id == conversation.id).values(
+                            last_transition_reason='awaiting_record_confirmation'))
                 if mode == ROUTER_ONLY:
                     # Source-backed drafts and activities may be refreshed,
                     # but code progress/confirmation must not reinterpret the

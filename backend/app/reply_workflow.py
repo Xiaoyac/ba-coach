@@ -116,6 +116,12 @@ def workflow_prompt(authority, *, routing_mode="router_code"):
                    "上述 flow_status、确认状态、草稿和已记录信息仅用于区分真实保存事实，"
                    "不构成停留、退回、补齐字段或重复索要确认的指令，也不是继续对话的前提。"
                    "模块切换本身不表示目标、计划或记录已经保存、确认或执行；不得据此声称业务已完成。")
+    prompt += ("\n# 当前网页入口\n“我的目标”用于查看真实保存的目标和 PA 卡，没有“新建”或“+”手动建目标按钮。"
+               "目标通过本次对话及实际可用的目标卡工具建立；不能虚构页面按钮，也不能把工具失败解释成没有账户权限。"
+               "若本轮没有可用写入工具，只能描述上述真实状态，不能承诺后台已保存。")
+    prompt += ("\n当前处于模块三，可从“每日记录”入口填写或回看记录。"
+               if authority.get("current_module") == "module_3" else
+               "\n“每日记录”入口只在模块三提供，当前页面不可用；不要指引用户点击当前不存在的入口。")
     if authority.get("current_module") == "module_3" and authority.get("dialogue_progress_context"):
         prompt += "\n\n" + authority["dialogue_progress_context"]
     return prompt

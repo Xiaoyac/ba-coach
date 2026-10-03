@@ -134,7 +134,7 @@ def validate_answer(*, reply: str, module: str, evidence_ids: list[str],
                 flag("premature_plan")
         if module == "module_2":
             decision = re.search(r"(?:我们|我).{0,6}(?:就定成|就定为|替你定|帮你定)|我们已经确定|你已经确认|你已同意", sentence)
-            if decision and _declaration(sentence, decision.start()) and not (workflow or {}).get("plan_confirmed"):
+            if decision and _declaration(sentence, decision.start()) and (not (workflow or {}).get("plan_confirmed") or (workflow or {}).get("last_operation_failed")):
                 flag("confirmation_claim")
             # Natural finality claims are not all phrased as “已确认”.  Keep
             # them behind the same committed-state gate so a background goal
@@ -146,7 +146,7 @@ def validate_answer(*, reply: str, module: str, evidence_ids: list[str],
                 r"|(?:这份|这个)(?:安排|计划|目标).{0,16}(?:照|按).{0,12}(?:开始|执行|做)",
                 sentence,
             )
-            if implicit_decision and _declaration(sentence, implicit_decision.start()) and not (workflow or {}).get("plan_confirmed"):
+            if implicit_decision and _declaration(sentence, implicit_decision.start()) and (not (workflow or {}).get("plan_confirmed") or (workflow or {}).get("last_operation_failed")):
                 flag("confirmation_claim")
         if module == "module_3":
             replacement = re.search(r"(?:改成|换成|改为).{0,15}(?:目标|跑步|散步|游泳|运动)", sentence)
@@ -159,8 +159,15 @@ def validate_answer(*, reply: str, module: str, evidence_ids: list[str],
 
         # A committed plan/module is a server fact, not a model inference.
         committed = re.search(r"(?:目标卡片?|计划|目标|记录).{0,8}(?:已(?:经)?(?:被)?(?:锁定|保存|提交|确认|确定)|保存成功|提交成功)|(?:已(?:经)?(?:锁定|保存|提交|确定)).{0,8}(?:目标卡|计划|目标)|(?:我们已经确定|你已经确认|你已同意)|(?:已(?:经)?把).{0,12}(?:写入数据库|保存)", sentence)
+        # Colloquial receipts such as “我已帮你记下了” are still persistence
+        # claims. Keep the same negation/question checks as explicit 保存成功.
+        committed = committed or re.search(
+            r"(?:计划|目标|安排|记录).{0,8}已(?:经)?(?:被)?(?:记下|记录|存好)"
+            r"|(?:我|系统)(?:已(?:经)?)?(?:帮你|为你)?(?:记下|记录|存下)(?:好|下)?了"
+            r"|已(?:经)?(?:帮你|为你)(?:记下|记录|存好)"
+            r"|已(?:经)?(?:记到|记录到|保存到).{0,8}我的目标", sentence)
         moved = re.search(r"(?:接下来|现在|正式|已经|已|我们).{0,10}(?:进入|切换到|转入|来到)\s*(?:模块\s*([一二三四1234])|M([1234]))", sentence)
-        if committed and _declaration(sentence, committed.start()) and not (workflow or {}).get("plan_confirmed"):
+        if committed and _declaration(sentence, committed.start()) and (not (workflow or {}).get("plan_confirmed") or (workflow or {}).get("last_operation_failed")):
             flag("uncommitted_workflow_claim")
         if moved and _declaration(sentence, moved.start()):
             token = moved.group(1) or moved.group(2)

@@ -21,7 +21,9 @@ def db():
 
 def test_schema_has_no_supporter_slots_and_compiles_for_mysql():
     assert not any(c.name.startswith("supporter") for c in metadata.tables["user_profile"].columns)
-    assert len(metadata.tables) == 20
+    # The goal-card workspace is persisted alongside the existing V2 records.
+    assert "goal_card_workspaces" in metadata.tables
+    assert len(metadata.tables) == 21
     for table in metadata.sorted_tables:
         assert "CREATE TABLE" in str(CreateTable(table).compile(dialect=mysql.dialect()))
 
