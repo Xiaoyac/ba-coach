@@ -274,6 +274,37 @@ async def current_user_action(db, conversation, message_id):
         logs.c.decision_type == 'goal_card_user_action').order_by(logs.c.id.desc()).limit(1))).scalar_one_or_none()
 
 
+def confirmation_button_text(kind, revision):
+    """Exact text emitted by GoalFormulationPanel; free chat is not a button."""
+    label = '核心目标' if kind == 'primary' else '次要目标'
+    return f'确认这张{label}卡（第 {revision} 版），就按这个安排。'
+
+
+async def structured_confirmation_evidence(db, conversation, user, *, row=None):
+    """Validate the durable UI action and displayed version without an LLM.
+
+    Called again inside the mutation transaction. The existing clinical
+    confirmation service still validates the actual plan and its fingerprint.
+    """
+    action = await current_user_action(db, conversation, user.id)
+    if not action or action.get('action') != 'confirm':
+        return None
+    row = row or await current_card(db, conversation)
+    if user.content != confirmation_button_text(row['kind'], action.get('revision')):
+        return None
+    await check_current_action(db, conversation, user, row)
+    previous = (await db.execute(select(ConversationMessage).where(
+        ConversationMessage.conversation_id == conversation.id,
+        ConversationMessage.position < user.position).order_by(
+            ConversationMessage.position.desc(), ConversationMessage.id.desc()).limit(1))).scalar_one_or_none()
+    if (row['phase'] != 'ready' or not review_passes(row) or not previous
+            or previous.role != 'assistant' or row.get('display_assistant_message_id') != previous.id
+            or not row.get('display_text') or row['display_text'] not in previous.content):
+        reject('goal_card_confirmation_display_changed')
+    from .confirmation_intent import ConfirmationEvidence
+    return ConfirmationEvidence(user.id, previous.id, user.content, previous.content, 'module_2', True)
+
+
 async def check_current_action(db, conversation, user, row=None, *, operation=None):
     action = await current_user_action(db, conversation, user.id)
     if not action or action.get('action') != 'confirm':

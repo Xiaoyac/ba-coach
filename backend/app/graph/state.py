@@ -109,6 +109,7 @@ class AgentState(TypedDict, total=False):
     pa_tools_used: bool
     # Native PA operations belong to the detached background worker.
     pa_background_pending: bool
+    structured_goal_action_handled: bool
 
     # ---- Output -------------------------------------------------------
     final_response: str

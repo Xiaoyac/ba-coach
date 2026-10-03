@@ -20,7 +20,7 @@ from .providers.prompt_cache import ordered_messages
 
 BACKGROUND_POLICY = """你是后台 PA 卡片操作员，只根据真实用户消息和工具结果管理卡片。
 本任务不会生成或展示聊天回复。忽略其他提示词中要求你撰写面向用户回复的部分；不要输出解释、开头、总结正文或对用户的承诺。
-先调用 get_pa_card。每轮必须调用当前提供的工具；根据最新版本和真实来源按需保存、核验、展示、确认或暂停。
+应用已先行读取真实 get_pa_card 结果，先使用提供的状态。每轮必须调用当前提供的工具；根据最新版本和真实来源按需保存、核验、展示、确认或暂停。
 只有真实工具成功才算完成；版本冲突时重新查询，修正参数，不重复提交同一写操作。
 操作结束或无需改动时调用 continue_pa_conversation。工具返回展示就停止，不自行确认；确认、暂停、收尾成功就立即结束，不再生成自然语言回复。
 工具的 display_text 由应用处理，不要抄写。缺少用户信息时保留已保存的真实草稿，结束后台任务；不要为了填参数编造用户意愿或证据。"""
@@ -67,7 +67,7 @@ async def run_pa_background_tools(
 ):
     """Return an operation summary; cancellation propagates after cleanup.
 
-    ``max_rounds`` counts *all* native tool requests, including the forced read.
+    ``max_rounds`` counts native model requests; the initial database read is local.
     There is deliberately no final ``tool_choice='none'`` request. Expected
     provider/tool/timeout failures return a failed summary so the job owner can
     record failure independently from an already successful foreground reply.
@@ -112,13 +112,33 @@ async def run_pa_background_tools(
         nonlocal query_allowed, last_request_id
         if type(max_rounds) is not int or max_rounds < 1 or timeout_seconds <= 0:
             raise _StopLoop("invalid_tool_budget")
+        # The first operation is known by the application; choosing it does
+        # not require a model. Preserve native tool history and the executor's
+        # ownership/version checks, without synthesizing any business state.
+        initial = {"id": "server_initial_pa_read", "type": "function",
+                   "function": {"name": "get_pa_card", "arguments": "{}"}}
+        if "get_pa_card" not in {_tool_name(t) for t in available_tools()}:
+            raise _StopLoop("required_tools_unavailable")
+        history.append({"role": "assistant", "content": None, "tool_calls": [initial]})
+        read_started = perf_counter()
+        initial_result = await executor.execute(initial)
+        append_result(initial, initial_result, duration_ms=int((perf_counter()-read_started)*1000), executed_call=True)
+        trace["initial_read_source"] = "application"
+        summary["result"] = deepcopy(initial_result)
+        seen_ids.add(initial["id"])
+        queried.add(_signature(initial))
+        if initial_result.get("status") != "ok":
+            raise _StopLoop(initial_result.get("reason") or "initial_query_failed")
+        if (getattr(executor, "module", None) and initial_result.get("module")
+                and initial_result["module"] != executor.module):
+            raise _StopLoop("module_changed_requery_state")
+        query_allowed = False
         for round_no in range(max_rounds):
             tools = available_tools()
             names = {_tool_name(tool) for tool in tools}
-            if not tools or (round_no == 0 and "get_pa_card" not in names):
+            if not tools:
                 raise _StopLoop("required_tools_unavailable")
-            choice = ({"type": "function", "function": {"name": "get_pa_card"}}
-                      if round_no == 0 else "required")
+            choice = "required"
             request = {
                 "round": round_no, "system": as_text(segments),
                 "input_messages": deepcopy(history), "tools": deepcopy(tools),
@@ -179,9 +199,7 @@ async def run_pa_background_tools(
                 if stop_reason or terminal:
                     append_result(call, {"status": "blocked", "reason": "background_operation_already_finished"})
                     continue
-                if round_no == 0 and (len(calls) != 1 or name != "get_pa_card"):
-                    stop_reason = "initial_query_required"
-                elif name not in names or name not in {_tool_name(tool) for tool in available_tools()}:
+                if name not in names or name not in {_tool_name(tool) for tool in available_tools()}:
                     stop_reason = "tool_not_available"
                 elif _signature(call) in (queried if name == "get_pa_card" else executed):
                     stop_reason = "repeated_identical_call_limit"

@@ -112,6 +112,32 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
         return {"extracted_intent": current, "next_module": current, "routed_by": "state_read_failed", "telemetry": telemetry}
     record_span(telemetry, "state_load", started, origin=origin)
     current = prepared["current_module"]
+    from .structured_goal_confirmation import confirm_goal_button
+    button_started = perf_counter()
+    button_result = await confirm_goal_button(prepared, context)
+    if button_result is not None:
+        # A verified UI action has a deterministic operation and destination.
+        # The risk gate already ran; model routing cannot improve this commit.
+        fresh = await load_routing_snapshot(state, context)
+        selected = fresh['current_module']
+        committed = button_result.get('status') in {'confirmed', 'secondary_confirmed'}
+        record_span(telemetry, 'goal_button_confirmation', button_started, origin=origin,
+                    status='completed' if committed else 'failed')
+        telemetry['goal_button_confirmation'] = {
+            'status': button_result.get('status'), 'reason': button_result.get('reason'),
+            'model_requests': 0, 'module': selected}
+        _emit({'type': 'meta', 'node': 'pre_reply_router', 'reply_module': selected,
+               'routed_by': 'structured_goal_confirmation'})
+        _emit({'type': 'trace', 'node': 'goal_button_confirmation',
+               'detail': telemetry['goal_button_confirmation']})
+        return {**fresh, 'transition_from_module': current, 'extracted_intent': selected,
+            'next_module': selected, 'routed_by': 'structured_goal_confirmation',
+            'routing_pending': False, 'knowledge_task': 'general',
+            'structured_goal_action_handled': True, 'pa_background_pending': False,
+            'pa_tools_used': True, 'telemetry': telemetry,
+            'confirmation_receipt': button_result if committed else {},
+            'clinical_context': ([] if committed else [
+                f"本轮目标卡确认未提交（{button_result.get('reason', 'unknown')}）；不得声称保存成功。"])}
     # Router-only owns the conversational stage, but does not disable an
     # independently sourced acceptance of the exact card the user saw.
     # Settle that transaction before asking the Router for this turn's stage.

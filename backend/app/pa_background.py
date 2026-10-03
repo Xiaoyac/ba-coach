@@ -31,7 +31,8 @@ def background_provider(context):
 
 def schedule_pa_background(state, context, *, assistant_message_id):
     """Never register in the routing queue: the next reply must not await PA."""
-    if (not state.get('pa_background_pending') or state.get('error') or state.get('reply_held')
+    if (not state.get('pa_background_pending') or state.get('structured_goal_action_handled')
+            or state.get('error') or state.get('reply_held')
             or state.get('risk') or state.get('forced_module')
             or (state.get('memory') or {}).get('sandbox_mode')
             or context.settings.database_schema_version != 'v2' or context.sessionmaker is None

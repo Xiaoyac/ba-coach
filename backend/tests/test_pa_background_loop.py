@@ -59,7 +59,7 @@ async def run(provider, executor, **kwargs):
 
 
 async def test_native_history_is_private_and_terminal_has_no_reply_request():
-    provider = Provider([[call("get_pa_card")], [call("save_pa_card", {"state_version": 4})],
+    provider = Provider([[call("save_pa_card", {"state_version": 4})],
                          [call("continue_pa_conversation")]])
     executor = Executor([{"status": "ok", "state_version": 4},
                          {"status": "draft_saved", "state_version": 5},
@@ -68,25 +68,25 @@ async def test_native_history_is_private_and_terminal_has_no_reply_request():
     result = await run(provider, executor, telemetry=telemetry)
     assert result["status"] == "completed"
     assert result["outcome"] == "continue_conversation"
-    assert result["usage"] == {"input_tokens": 15, "output_tokens": 6}
-    assert result["request_id"] == "request-3"
-    assert result["rounds"] == len(provider.requests) == 3
-    assert provider.requests[0]["tool_choice"] == {"type": "function", "function": {"name": "get_pa_card"}}
-    assert [r["tool_choice"] for r in provider.requests[1:]] == ["required", "required"]
+    assert result["usage"] == {"input_tokens": 10, "output_tokens": 4}
+    assert result["request_id"] == "request-2"
+    assert result["rounds"] == len(provider.requests) == 2
+    assert provider.requests[0]["tool_choice"] == "required"
+    assert [r["tool_choice"] for r in provider.requests] == ["required", "required"]
     assert as_text(provider.requests[-1]["system"]).endswith(BACKGROUND_POLICY)
-    history = provider.requests[1]["messages"]
+    history = provider.requests[0]["messages"]
     assert history[-2]["role"] == "assistant"
-    assert history[-2]["tool_calls"] == [call("get_pa_card")]
-    assert history[-2]["reasoning_content"] == "private reasoning"
+    assert history[-2]["tool_calls"] == [call("get_pa_card", id="server_initial_pa_read")]
+    assert "reasoning_content" not in history[-2]
     assert history[-1]["role"] == "tool"
-    assert history[-1]["tool_call_id"] == "get_pa_card"
+    assert history[-1]["tool_call_id"] == "server_initial_pa_read"
     assert json.loads(history[-1]["content"])["state_version"] == 4
-    assert provider.requests[0]["messages"] == [{"role": "user", "content": "请保存计划"}]
+    assert provider.requests[0]["messages"][0] == {"role": "user", "content": "请保存计划"}
     assert telemetry["main_input"] == {"preserved": True}
     assert telemetry["main_generation"] == {"usage": 17}
     trace = telemetry["pa_background_tools"]
     assert trace["status"] == "completed"
-    assert len(trace["requests"]) == len(trace["calls"]) == 3
+    assert len(trace["requests"]) == 2 and len(trace["calls"]) == 3
     assert trace["requests"][0]["duration_ms"] >= 0
     assert "private unsolicited wording" not in str(result)
 
@@ -94,14 +94,14 @@ async def test_native_history_is_private_and_terminal_has_no_reply_request():
 @pytest.mark.parametrize("status", ["continue_conversation", "ready_to_display", "confirmed",
     "secondary_confirmed", "goal_card_paused", "closed", "saved_activity_context"])
 async def test_every_explicit_terminal_stops_without_final_wording(status):
-    provider = Provider([[call("get_pa_card")], [call("continue_pa_conversation"),
+    provider = Provider([[call("continue_pa_conversation"),
                          call("save_pa_card", {"state_version": 4})]])
     executor = Executor([{"status": "ok"}, {"status": status}])
     telemetry = {}
     result = await run(provider, executor, telemetry=telemetry)
     assert result["outcome"] == status
     assert result["status"] == "completed"
-    assert len(provider.requests) == len(executor.calls) == 2
+    assert len(provider.requests) == 1 and len(executor.calls) == 2
     assert telemetry["pa_background_tools"]["calls"][-1]["executed"] is False
     # Even an unexecuted tail has an honest tool response matching its call ID.
     assert telemetry["pa_background_tools"]["history"][-1]["tool_call_id"] == "save_pa_card"
@@ -115,17 +115,16 @@ async def test_tools_refresh_after_each_round_and_ui_policy_is_background_only()
             names = {"get_pa_card"} if not self.calls else {"continue_pa_conversation"}
             return [t for t in self.definitions if t["function"]["name"] in names]
 
-    provider = Provider([[call("get_pa_card")], [call("continue_pa_conversation")]])
+    provider = Provider([[call("continue_pa_conversation")]])
     result = await run(provider, DynamicExecutor([{"status": "ok"}, {"status": "continue_conversation"}]))
     assert result["status"] == "completed"
-    assert [t["function"]["name"] for t in provider.requests[1]["tools"]] == ["continue_pa_conversation"]
+    assert [t["function"]["name"] for t in provider.requests[0]["tools"]] == ["continue_pa_conversation"]
     assert "网页目标卡交互" in as_text(provider.requests[0]["system"])
     assert as_text(provider.requests[0]["system"]).endswith(BACKGROUND_POLICY)
 
 
 async def test_sequential_mutations_can_requery_after_version_conflict():
     provider = Provider([
-        [call("get_pa_card", id="read-1")],
         [call("save_pa_card", {"state_version": 4}), call("present_pa_card", {"state_version": 4}, id="present-1")],
         [call("get_pa_card", id="read-2")],
         [call("present_pa_card", {"state_version": 5}, id="present-2")],
@@ -138,12 +137,12 @@ async def test_sequential_mutations_can_requery_after_version_conflict():
     result = await run(provider, executor)
     assert result["status"] == "completed"
     assert len(executor.calls) == 5
-    assert "get_pa_card" not in [t["function"]["name"] for t in provider.requests[1]["tools"]]
-    assert "get_pa_card" in [t["function"]["name"] for t in provider.requests[2]["tools"]]
+    assert "get_pa_card" not in [t["function"]["name"] for t in provider.requests[0]["tools"]]
+    assert "get_pa_card" in [t["function"]["name"] for t in provider.requests[1]["tools"]]
 
 
 async def test_duplicate_write_does_not_execute_again():
-    provider = Provider([[call("get_pa_card")], [call("save_pa_card", {"state_version": 4}, id="save-1")],
+    provider = Provider([[call("save_pa_card", {"state_version": 4}, id="save-1")],
                          [call("save_pa_card", {"state_version": 4}, id="save-2")]])
     executor = Executor([{"status": "ok"}, {"status": "draft_saved"}])
     result = await run(provider, executor)
@@ -153,11 +152,12 @@ async def test_duplicate_write_does_not_execute_again():
 
 
 async def test_identical_failed_query_is_not_repeated():
-    provider = Provider([[call("get_pa_card", id="read-1")], [call("get_pa_card", id="read-2")]])
+    provider = Provider([])
     executor = Executor([{"status": "blocked", "reason": "invalid_arguments"}])
     result = await run(provider, executor)
-    assert result["reason"] == "repeated_identical_call_limit"
+    assert result["reason"] == "invalid_arguments"
     assert len(executor.calls) == 1
+    assert not provider.requests
 
 
 async def test_explicit_native_messages_preserve_tool_and_reasoning_fields():
@@ -165,57 +165,62 @@ async def test_explicit_native_messages_preserve_tool_and_reasoning_fields():
                  "tool_calls": [call("get_pa_card", id="prior-read")]},
                 {"role": "tool", "tool_call_id": "prior-read", "content": '{"status":"ok"}'},
                 {"role": "user", "content": "确认"}]
-    provider = Provider([[call("get_pa_card")], [call("continue_pa_conversation")]])
+    provider = Provider([[call("continue_pa_conversation")]])
     await run_pa_background_tools(provider, Executor([{"status": "ok"}, {"status": "continue_conversation"}]),
                                   system="policy", messages=messages)
-    assert provider.requests[0]["messages"] == messages
+    assert provider.requests[0]["messages"][:len(messages)] == messages
     assert len(messages) == 3
 
 
 @pytest.mark.parametrize("reason", ["owned_conversation_unavailable", "current_user_boundary_changed",
     "write_window_closed", "module_changed_requery_state"])
 async def test_lost_ownership_or_boundary_stops_immediately(reason):
-    provider = Provider([[call("get_pa_card")], [call("save_pa_card", {"state_version": 4}),
+    provider = Provider([[call("save_pa_card", {"state_version": 4}),
                                               call("present_pa_card", {"state_version": 5})]])
     executor = Executor([{"status": "ok"}, {"status": "blocked", "reason": reason}])
     result = await run(provider, executor)
     assert result["status"] == "failed"
     assert result["reason"] == reason
-    assert len(executor.calls) == len(provider.requests) == 2
+    assert len(executor.calls) == 2
+    assert len(provider.requests) == 1
 
 
 async def test_changed_module_read_does_not_continue_old_job():
-    provider = Provider([[call("get_pa_card")]])
+    provider = Provider([])
     result = await run(provider, Executor([{"status": "ok", "module": "module_3"}]))
     assert result["reason"] == "module_changed_requery_state"
 
 
 async def test_budget_is_exact_and_plain_text_is_not_a_tool_decision():
-    provider = Provider([[call("get_pa_card")]])
-    result = await run(provider, Executor([{"status": "ok"}]), max_rounds=1)
+    provider = Provider([[call("save_pa_card", {"state_version": 1})]])
+    result = await run(provider, Executor([{"status": "ok"}, {"status": "draft_saved"}]), max_rounds=1)
     assert result["reason"] == "tool_budget_exhausted"
     assert len(provider.requests) == 1
-    result = await run(Provider([[]]), Executor([]))
+    result = await run(Provider([[]]), Executor([{"status": "ok"}]))
     assert result["reason"] == "required_tool_decision_missing"
 
 
-@pytest.mark.parametrize("batch", [[call("save_pa_card")], [call("get_pa_card"), call("save_pa_card")]])
-async def test_forced_query_cannot_be_bypassed(batch):
-    executor = Executor([])
-    result = await run(Provider([batch]), executor)
-    assert result["reason"] == "initial_query_required"
-    assert executor.calls == []
+async def test_initial_database_read_precedes_any_model_request():
+    class Ordered(Provider):
+        async def stream_tools(self, **kwargs):
+            assert executor.calls[0]['function']['name'] == 'get_pa_card'
+            assert 'get_pa_card' not in [t['function']['name'] for t in kwargs['tools']]
+            async for delta in super().stream_tools(**kwargs): yield delta
+    executor = Executor([{'status':'ok'}, {'status':'continue_conversation'}])
+    provider = Ordered([[call('continue_pa_conversation')]])
+    result = await run(provider, executor)
+    assert result['status'] == 'completed' and len(provider.requests) == 1
 
 
 async def test_unknown_tool_and_duplicate_ids_are_rejected_before_execution():
     executor = Executor([{"status": "ok"}])
-    result = await run(Provider([[call("get_pa_card")], [call("execute_sql")]]), executor)
+    result = await run(Provider([[call("execute_sql")]]), executor)
     assert result["reason"] == "tool_not_available"
     assert len(executor.calls) == 1
-    executor = Executor([])
-    result = await run(Provider([[call("get_pa_card"), call("get_pa_card")]]), executor)
+    executor = Executor([{"status":"ok"}])
+    result = await run(Provider([[call("continue_pa_conversation"), call("continue_pa_conversation")]]), executor)
     assert result["reason"] == "duplicate_tool_call_id"
-    assert not executor.calls
+    assert len(executor.calls) == 1
 
 
 async def test_provider_failure_and_timeout_have_separate_diagnostics():
@@ -225,7 +230,7 @@ async def test_provider_failure_and_timeout_have_separate_diagnostics():
             raise ProviderError("unavailable")
 
     telemetry = {}
-    result = await run(FailingProvider(), Executor([]), telemetry=telemetry)
+    result = await run(FailingProvider(), Executor([{"status":"ok"}]), telemetry=telemetry)
     assert result["reason"] == "provider_error"
     assert result["usage"] == {"input_tokens": 3}
     assert result["request_id"] == "upstream-id"
@@ -241,7 +246,7 @@ async def test_provider_failure_and_timeout_have_separate_diagnostics():
             finally:
                 closed.set()
 
-    result = await run(WaitingProvider(), Executor([]), timeout_seconds=0.01)
+    result = await run(WaitingProvider(), Executor([{"status":"ok"}]), timeout_seconds=0.01)
     assert result["reason"] == "total_timeout"
     assert closed.is_set()
 
@@ -258,14 +263,14 @@ async def test_cancellation_propagates_and_closes_provider_without_writes():
             finally:
                 closed.set()
 
-    telemetry, executor = {}, Executor([])
+    telemetry, executor = {}, Executor([{"status":"ok"}])
     task = asyncio.create_task(run(WaitingProvider(), executor, telemetry=telemetry))
     await entered.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
     assert closed.is_set()
-    assert not executor.calls
+    assert len(executor.calls) == 1
     assert telemetry["pa_background_tools"]["status"] == "cancelled"
     assert telemetry["pa_background_tools"]["error"] == "cancelled"
 
@@ -284,7 +289,7 @@ async def test_timeout_cancels_inflight_mutation_and_does_not_run_batch_tail():
                 rolled_back.set()
 
     executor = SlowExecutor([{"status": "ok"}])
-    provider = Provider([[call("get_pa_card")], [call("save_pa_card"), call("present_pa_card")]])
+    provider = Provider([[call("save_pa_card"), call("present_pa_card")]])
     telemetry = {}
     result = await run(provider, executor, timeout_seconds=0.01, telemetry=telemetry)
     assert result["reason"] == "total_timeout"

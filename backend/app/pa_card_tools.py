@@ -242,6 +242,18 @@ class PACardTools:
             user = await db.get(ConversationMessage, self.boundary)
             if not conversation or not user or user.conversation_id != conversation.id or user.role != 'user':
                 raise ToolRejected('owned_conversation_unavailable')
+            if self.ui_enabled:
+                from .goal_card_interaction import structured_confirmation_evidence
+                from .goal_card_workspace import read_card_row
+                card = await read_card_row(db, conversation.id, self.user_id)
+                if (card and card['phase'] == 'confirmed'
+                        and card.get('confirmation_message_id') == user.id):
+                    # No new consent: the locked executor may replay its own
+                    # receipt. Without that exact receipt, mutation still fails.
+                    return None
+                evidence = await structured_confirmation_evidence(db, conversation, user)
+                if evidence is not None:
+                    return evidence
             if affirmative(user.content):
                 return None
             previous = (await db.execute(select(ConversationMessage).where(
@@ -350,6 +362,11 @@ class PACardTools:
         if self.ui_enabled:
             from .goal_card_interaction import execute_ui_tool, before_core_operation, check_current_action
             await check_current_action(db, conversation, user, operation=name)
+            if name in {'confirm_pa_card', 'confirm_secondary_goal_card'}:
+                from .goal_card_interaction import structured_confirmation_evidence
+                structured = await structured_confirmation_evidence(db, conversation, user)
+                if structured is not None:
+                    confirmation_evidence = structured
             result = await execute_ui_tool(db, conversation, state, user, name, args,
                 provider=None if self.assistant_message_id is not None else self.provider,
                 following_assistant_message_id=self.assistant_message_id, confirmation_evidence=confirmation_evidence)

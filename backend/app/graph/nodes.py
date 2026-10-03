@@ -786,7 +786,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
         )
         if guidance_block:
             system.append(SystemPromptSegment(guidance_block, cacheable=False, always_current=True))
-        if use_pa_tools:
+        if use_pa_tools and not state.get("structured_goal_action_handled"):
             from ..pa_background import FOREGROUND_POLICY
             system.append(SystemPromptSegment(FOREGROUND_POLICY, always_current=True))
         authority = await reply_authority()
@@ -900,7 +900,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
         # Card mutations are handled after this reply is durable by a separate
         # background model. The selected conversational provider never sees
         # native tools and never waits on their read/write/validation rounds.
-        if use_pa_tools:
+        if use_pa_tools and not state.get('structured_goal_action_handled'):
             update['pa_background_pending'] = True
             telemetry['pa_background_tools'] = {'status': 'scheduled_after_reply'}
         first_reasoning_seen = False

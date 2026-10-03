@@ -280,7 +280,7 @@ async def test_worker_appends_real_card_and_binds_durable_assistant(goal_api, co
     assert task is not None
     await finish_task(task)
     assert router.thinking == [False]
-    assert 2 <= len(router.requests) <= 3
+    assert len(router.requests) == 1
     await db.rollback()
     _, actual = await runtime_for(db, "chat-a")
     marker = actual["memory"]["dialogue_draft"]
