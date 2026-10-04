@@ -96,6 +96,20 @@ async def retrieve(state, context, module_name, module_config):
     return knowledge, retrieval_metrics, retrieval_started, events, token
 
 
+async def corpus_is_current(context, token):
+    """Check again where prepared evidence is consumed, after graph scheduling."""
+    if token is None:
+        return True
+    kb = context.knowledge_base
+    if not isinstance(kb, DatabaseKnowledgeBase):
+        return False
+    try:
+        await kb._load_index()
+        return token == (id(kb._index), kb._index_revision, kb._index_epoch)
+    except Exception:
+        return False
+
+
 async def route_with_retrieval(state, context, route):
     # Only legacy catalog calls are expensive enough to justify speculation.
     # Risk has already been screened by the graph. No speculative writes,
@@ -124,14 +138,8 @@ async def route_with_retrieval(state, context, route):
             except Exception:
                 # Preserve the module's ordinary error/retry handling.
                 result = None
-            if result is not None and result[4] is not None:
-                try:
-                    kb = context.knowledge_base
-                    await kb._load_index()
-                    if result[4] != (id(kb._index), kb._index_revision, kb._index_epoch):
-                        result = None
-                except Exception:
-                    result = None
+            if result is not None and not await corpus_is_current(context, result[4]):
+                result = None
             if result is not None:
                 context.prepared_retrieval = (key, result)
         telemetry = dict(update.get('telemetry') or {})

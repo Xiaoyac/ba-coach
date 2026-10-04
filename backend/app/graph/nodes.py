@@ -610,11 +610,12 @@ def make_module_node(module_name: str, config: ModuleConfig):
         use_pa_tools = use_goal_card_ui or (pa_tools_enabled(context.settings, state) and module_name in {"module_2", "module_4"})
         hold_workflow_claims = authoritative
 
-        from ..reply_retrieval import request_key, retrieve
+        from ..reply_retrieval import request_key, retrieve, corpus_is_current
         prepared_retrieval = getattr(context, 'prepared_retrieval', None)
         context.prepared_retrieval = None
         key = request_key(state, context, module_name, module_config)
-        if prepared_retrieval is not None and prepared_retrieval[0] == key:
+        if (prepared_retrieval is not None and prepared_retrieval[0] == key
+                and await corpus_is_current(context, prepared_retrieval[1][4])):
             knowledge, retrieval_metrics, retrieval_started, retrieval_events, _corpus_token = prepared_retrieval[1]
         else:
             knowledge, retrieval_metrics, retrieval_started, retrieval_events, _corpus_token = await retrieve(
