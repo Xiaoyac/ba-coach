@@ -548,17 +548,8 @@ MODULE_CONFIGS: dict[str, ModuleConfig] = {
 
 def _knowledge_query(state: AgentState) -> str:
     """Build retrieval context without sending the whole transcript to search."""
-    pieces = [state["user_input"]]
-    for message in reversed(state.get("chat_history") or []):
-        if message.role != "user" or message.content in pieces:
-            continue
-        pieces.append(message.content)
-        if len(pieces) == 3:
-            break
-    pa_card = (state.get("memory") or {}).get("pa_card")
-    if pa_card:
-        pieces.append(pa_card)
-    return "\n".join(pieces)[:6000]
+    from ..reply_retrieval import knowledge_query
+    return knowledge_query(state)
 
 
 def make_module_node(module_name: str, config: ModuleConfig):
@@ -619,63 +610,18 @@ def make_module_node(module_name: str, config: ModuleConfig):
         use_pa_tools = use_goal_card_ui or (pa_tools_enabled(context.settings, state) and module_name in {"module_2", "module_4"})
         hold_workflow_claims = authoritative
 
-        knowledge = []
-        retrieval_metrics = {}
-        if module_config.retrieve:
-            gate_started = perf_counter()
-            decision = decide_retrieval(
-                state, enabled=context.settings.knowledge_intent_gate_enabled
-            )
-            gate_ms = (perf_counter() - gate_started) * 1000
-            retrieval_started = perf_counter()
-            outcome = "skipped"
-            cache_metrics = {"cache": "bypass_custom_or_skipped"}
-            try:
-                if decision.retrieve:
-                    outcome = "error"
-                    search_args = {"module": module_name, "query": _knowledge_query(state), "top_k": module_config.top_k}
-                    if getattr(context.knowledge_base, "ranking_mode", None) == "astrbot_hybrid":
-                        search_args["top_k"] = context.settings.knowledge_hybrid_final_results
-                    if isinstance(context.knowledge_base, DatabaseKnowledgeBase):
-                        subject, session = state.get("subject_id"), state.get("session_id")
-                        scope = (subject, session, str(bool((state.get("memory") or {}).get("sandbox_mode")))) if subject and session else None
-                        knowledge, cache_metrics = await context.knowledge_base.search_with_diagnostics(
-                            **search_args, cache_scope=scope)
-                    else:
-                        knowledge = await context.knowledge_base.search(**search_args)
-                    outcome = "returned" if knowledge else "empty"
-                    if cache_metrics.get("status", "").startswith("withheld_"):
-                        outcome = "error"
-            finally:
-                retrieval_ms = (perf_counter() - retrieval_started) * 1000 if decision.retrieve else 0.0
-                retrieval_metrics = {
-                    "gate": decision.as_dict(),
-                    "gate_duration_ms": round(gate_ms, 4),
-                    "search_duration_ms": round(retrieval_ms, 4),
-                    "total_duration_ms": round(gate_ms + retrieval_ms, 4),
-                    "outcome": outcome,
-                    "returned": len(knowledge),
-                    "context_chars": sum(len(chunk.text) for chunk in knowledge),
-                    "retriever": type(context.knowledge_base).__name__,
-                    "ranking_mode": getattr(context.knowledge_base, "ranking_mode", "custom"),
-                    "module": module_name,
-                    "exact_cache": cache_metrics,
-                }
-                # Structured server log: no query, transcript, user ID, or reference text.
-                logger.info("retrieval_gate %s", json.dumps(retrieval_metrics, ensure_ascii=False))
-            _send(
-                {
-                    "type": "trace",
-                    "node": module_name,
-                    "detail": {
-                        "retrieved": [chunk.id for chunk in knowledge],
-                        "top_score": knowledge[0].score if knowledge else None,
-                        "score_type": knowledge[0].score_type if knowledge else None,
-                        "duration_ms": round(gate_ms + retrieval_ms),
-                        "intent_gate": retrieval_metrics,
-                    },
-                }
-            )
+        from ..reply_retrieval import request_key, retrieve
+        prepared_retrieval = getattr(context, 'prepared_retrieval', None)
+        context.prepared_retrieval = None
+        key = request_key(state, context, module_name, module_config)
+        if prepared_retrieval is not None and prepared_retrieval[0] == key:
+            knowledge, retrieval_metrics, retrieval_started, retrieval_events, _corpus_token = prepared_retrieval[1]
+        else:
+            knowledge, retrieval_metrics, retrieval_started, retrieval_events, _corpus_token = await retrieve(
+                state, context, module_name, module_config)
+        for event in retrieval_events:
+            _send(event)
+        outcome = retrieval_metrics.get('outcome', 'skipped')
 
         global_prompt = None
         module_prompt = None

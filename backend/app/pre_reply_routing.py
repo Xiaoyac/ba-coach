@@ -290,7 +290,8 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
 
 
 async def pre_reply_router_node(state, runtime):
-    return await route_before_reply(state, runtime.context)
+    from .reply_retrieval import route_with_retrieval
+    return await route_with_retrieval(state, runtime.context, route_before_reply)
 
 
 def route_after_pre_reply(state):

@@ -631,6 +631,8 @@ async def _prepare_chat_stream(
         saw_done = False
         saw_error = False
         first_visible_at = None
+        first_body_at = None
+        body_completed_at = None
         lead_metrics = {}
         reply_mode = "standard"
         turn_lock = await store.get_turn_lock(session_id)
@@ -716,6 +718,8 @@ async def _prepare_chat_stream(
                         if kind == "delta":
                             if event.get("text") and first_visible_at is None:
                                 first_visible_at = perf_counter()
+                            if event.get("phase") != "lead" and str(event.get("text", "")).strip() and first_body_at is None:
+                                first_body_at = perf_counter()
                             reply_parts.append(event.get("text", ""))
                         elif kind == "reasoning_delta":
                             reasoning_parts.append(event.get("text", ""))
@@ -724,6 +728,7 @@ async def _prepare_chat_stream(
                             streamed_router_model = str(event.get("model", ""))
                         elif kind == "done":
                             saw_done = True
+                            body_completed_at = perf_counter()
                         elif kind == "error":
                             saw_error = True
                         elif kind == "reply_wait" and event.get("waiting"):
@@ -905,7 +910,11 @@ async def _prepare_chat_stream(
                 metrics["execution_timeline"] = [*(metrics.get("execution_timeline") or []), {
                     "stage": "response_display", "start_ms": metrics["time_to_first_visible_content_ms"],
                     "duration_ms": 0, "status": "released", "after_display": False}]
+                for key, stamp in [('time_to_first_body_content_ms', first_body_at), ('body_completed_ms', body_completed_at)]:
+                    if stamp is not None:
+                        metrics[key] = round((stamp-state['turn_started_monotonic'])*1000, 3)
                 final_state["telemetry"] = metrics
+            persistence_started = perf_counter()
             async with get_sessionmaker()() as final_db:
                 assistant_message_id = await _persist_assistant_message(
                     final_db,
@@ -951,6 +960,12 @@ async def _prepare_chat_stream(
 
             # Unlike graph "done", this acknowledges the durable transcript.
             # Clients may stop reading here even if a mobile proxy holds EOF.
+            transport_metrics = {
+                'transcript_saved_ms': round((perf_counter()-state['turn_started_monotonic'])*1000, 3),
+                'persistence_duration_ms': round((perf_counter()-persistence_started)*1000, 3),
+                **{key: (final_state or {}).get('telemetry', {}).get(key) for key in
+                   ['time_to_first_visible_content_ms', 'time_to_first_body_content_ms', 'body_completed_ms']}}
+            logger.info('reply_completion_timing %s', transport_metrics)
             yield _sse("persisted", {"saved": assistant_message_id is not None})
 
     return StreamingResponse(

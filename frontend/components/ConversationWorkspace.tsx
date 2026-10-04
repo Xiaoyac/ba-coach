@@ -67,6 +67,7 @@ type ConversationTurn = {
   error: string | null;
   notice: string | null;
   replyWaiting: boolean;
+  replyComplete: boolean;
   replyWaitPhase: "awaiting" | "waiting" | "closed";
 };
 
@@ -109,6 +110,7 @@ export default function ConversationWorkspace({
   const [conversationRoutingMode, setConversationRoutingMode] = useState<ConversationRoutingMode>("router_code");
   const [conversationReplyMode, setConversationReplyMode] = useState<ConversationReplyMode>("standard");
   const [replyWaiting, setReplyWaiting] = useState(false);
+  const [replyComplete, setReplyComplete] = useState(false);
   const [mediatorEnabled, setMediatorEnabled] = useState(true);
   const [mediatorSavingSessions, setMediatorSavingSessions] = useState<string[]>([]);
   const mediatorSaveRef = useRef(new Set<string>());
@@ -216,6 +218,7 @@ export default function ConversationWorkspace({
     setError(turn.error);
     setGenerationNotice(turn.notice);
     setReplyWaiting(turn.replyWaiting);
+    setReplyComplete(turn.replyComplete);
     setStopping(turn.stopRequested);
     busyRef.current = true;
     setBusy(true);
@@ -746,11 +749,12 @@ export default function ConversationWorkspace({
         role: "assistant", content: "", reasoning_content: "", model_name: null,
         routing_reasoning_content: "", router_model_name: null,
       }],
-      routing: { ...routing }, error: null, notice: null, replyWaiting: false, replyWaitPhase: "awaiting",
+      routing: { ...routing }, error: null, notice: null, replyWaiting: false, replyComplete: false, replyWaitPhase: "awaiting",
     };
     turns.current.set(sourceId, turn);
     pendingFloors.current.set(sourceId, baseline + 2);
     publishTurn(turn);
+    let terminalAcknowledged = false;
     let recovered = false;
     let recoveredDetail: ConversationDetail | null = null;
     let checking = false;
@@ -800,13 +804,16 @@ export default function ConversationWorkspace({
             turn.replyWaitPhase = value.waiting ? "waiting" : "closed";
             publishTurn(turn);
           },
+          onPersisted: () => { terminalAcknowledged = true; },
           onDone: () => {
             if (!ownsTask()) return;
+            turn.replyComplete = !turn.cancelled;
             turn.replyWaiting = false;
             turn.replyWaitPhase = "closed";
             publishTurn(turn);
           },
           onCancelled: () => {
+            terminalAcknowledged = true;
             turn.cancelled = true;
             turn.replyWaiting = false;
             turn.replyWaitPhase = "closed";
@@ -828,6 +835,7 @@ export default function ConversationWorkspace({
             else publishTurn(turn);
           },
           onDelta: (delta, phase) => {
+            if (delta.trim()) turn.replyComplete = false;
             if (phase !== "lead" && delta.trim() && turn.replyWaitPhase === "waiting") {
               turn.replyWaiting = false;
               turn.replyWaitPhase = "closed";
@@ -877,11 +885,24 @@ export default function ConversationWorkspace({
         turn.notice = partialReply ? "已停止生成，已显示的内容会保留。你可以继续发送消息。" : "已停止生成，未完成的回复未保存。你可以继续发送消息。";
         if (turn.messages.at(-1)?.role === "assistant" && !partialReply) turn.messages = turn.messages.slice(0, -1);
       }
+      // The save/cancel SSE receipt releases the turn immediately. A subsequent
+      // best-effort history GET must not hold the composer or generation state.
+      if (terminalAcknowledged && ownsTask()) {
+        publishTurn(turn);
+        turns.current.delete(sourceId);
+        pendingFloors.current.delete(sourceId);
+        if (mountedRef.current && activeSessionIdRef.current === sourceId) {
+          busyRef.current = false;
+          setBusy(false);
+          setStopping(false);
+          setReplyWaiting(false);
+        }
+      }
       let detail: ConversationDetail | null = recoveredDetail;
       if (!detail) {
         // A hidden/deleted task does not need another network read. The live
         // snapshot/revision path will reconcile it when the room is revisited.
-        if (ownsTask()) {
+        if (ownsTask() || terminalAcknowledged) {
           try { detail = await fetchConversation(sourceId, AbortSignal.timeout(10000)); }
           catch { /* Live sync retries, without changing a different chat. */ }
         }
@@ -1137,6 +1158,7 @@ export default function ConversationWorkspace({
           replyEffortOptions={replyEffortOptions ?? []}
           replyEffortBusy={replyEffortSaving}
           onReplyEffortChange={isAdmin && sessionId && conversationReplyMode === "ack_deep" && replyEffortOptions?.length ? handleReplyEffortChange : undefined}
+          replyComplete={replyComplete}
           generationStartedAt={sessionId ? turns.current.get(sessionId)?.startedAt : undefined}
           loading={loadingConversation}
           error={error}

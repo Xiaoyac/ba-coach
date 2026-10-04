@@ -139,6 +139,8 @@ class GraphContext:
     store: SessionStore
     knowledge_base: KnowledgeBase
     settings: Settings
+    # A single request-owned result, consumed only after exact state matching.
+    prepared_retrieval: Any = None
     # None when MEMOS_BASE_URL / MEMOS_API_KEY aren't configured — every call
     # site treats that the same as "no long-term memory available" rather
     # than erroring.

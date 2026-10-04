@@ -47,6 +47,7 @@ export default function Chat({
   messages,
   routing,
   busy,
+  replyComplete = false,
   loading,
   error,
   onSend,
@@ -93,6 +94,7 @@ export default function Chat({
   messages: ChatMessage[];
   routing: Partial<RoutingMeta>;
   busy: boolean;
+  replyComplete?: boolean;
   /** A past conversation is being fetched — swap the log for a spinner. */
   loading: boolean;
   error: string | null;
@@ -159,7 +161,7 @@ export default function Chat({
     const el = logRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages, replyWaiting]);
+  }, [messages, replyWaiting, replyComplete]);
 
   // Close the account menu on any outside click. Registered only while it is
   // open, so the app isn't carrying a document-level listener for a popup that
@@ -498,7 +500,7 @@ export default function Chat({
           )}
           <MessageFeedbackProvider key={sessionId} sessionId={sessionId}>
           {messages.map((m, i) => {
-            const pending = busy && i === messages.length - 1;
+            const pending = busy && !replyComplete && !error && i === messages.length - 1;
             // A turn that failed before its first delta leaves an empty
             // assistant message behind. Drop it rather than render an empty
             // bubble next to the error banner.
@@ -522,6 +524,7 @@ export default function Chat({
             );
           })}
           </MessageFeedbackProvider>
+          {busy && replyComplete && !error && <p role="status" className="px-4 py-2 text-xs text-ink-muted">回复已生成，正在确认保存结果…</p>}
         </div>
       )}
 

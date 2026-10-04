@@ -135,6 +135,7 @@ export interface StreamHandlers {
   onRoutingReasoning?: (text: string, model: string) => void;
   onDelta?: (text: string, phase?: "lead" | "body") => void;
   onDone?: () => void;
+  onPersisted?: (saved: boolean) => void;
   onError?: (message: string) => void;
 }
 
@@ -216,6 +217,7 @@ export async function streamChat(
           break;
         case "persisted":
           handlers.onDone?.();
+          handlers.onPersisted?.(payload.saved === true);
           if (payload.saved === false) {
             if (replyReceived) {
               const saveError = "回复已生成，但保存失败，请先复制回复后再刷新。";

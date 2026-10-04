@@ -8,7 +8,7 @@ LEAD='没走成让你有些失落。我们可以看看当时的困难。'
 BODY='当时是什么让你没能出门？'
 
 @pytest.mark.parametrize('repeated', [False, True])
-def test_member_sse_handoff_and_durable_history(client, auth_headers, provider, monkeypatch, repeated):
+def test_member_sse_handoff_and_durable_history(client, auth_headers, provider, monkeypatch, repeated, caplog):
     from app.config import get_settings
     monkeypatch.setattr(get_settings(),'reply_lead_character_seconds',.01)
     async def fast(**kwargs):
@@ -41,3 +41,11 @@ def test_member_sse_handoff_and_durable_history(client, auth_headers, provider, 
     saved=client.get('/api/conversations/'+sid,headers=auth_headers).json()
     assert saved['messages'][-1]['content']==LEAD+'\n\n'+BODY
     assert saved['messages'][-2]['content']=='昨天没去散步，有点失落'
+    import ast
+    timing = [ast.literal_eval(r.getMessage().split('reply_completion_timing ', 1)[1])
+              for r in caplog.records if r.getMessage().startswith('reply_completion_timing ')]
+    assert len(timing) == 1
+    t = timing[0]
+    assert 0 <= t['time_to_first_visible_content_ms'] < t['time_to_first_body_content_ms']
+    assert t['time_to_first_body_content_ms'] <= t['body_completed_ms'] <= t['transcript_saved_ms']
+    assert t['persistence_duration_ms'] >= 0
