@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cancelGeneration, sameMessageTiming, streamChat, type ChatMessage, type RoutingMeta } from "@/lib/api";
 import { hasDurableReplyForTurn } from "@/lib/replyBinding";
+import { readConversationSelection, rememberConversationSelection, forgetConversationSelection } from "@/lib/conversationSelection";
 import {
   createConversation,
+  ConversationRequestError,
   deleteConversation,
   fetchConversation,
   fetchConversationRevision,
@@ -86,6 +88,7 @@ function sortConversations(list: ConversationSummary[]): ConversationSummary[] {
 export default function ConversationWorkspace({
   displayName,
   accountUsername,
+  accountId,
   displayIdentity,
   accountRole,
   accountEmail,
@@ -96,6 +99,7 @@ export default function ConversationWorkspace({
 }: {
   displayName: string;
   accountUsername: string;
+  accountId: string;
   displayIdentity: string | null;
   accountRole: "user" | "admin";
   accountEmail: string | null;
@@ -187,6 +191,9 @@ export default function ConversationWorkspace({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      // Invalidate the latest navigation epoch, including requests begun after setup.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      viewGenerationRef.current++;
       for (const turn of turns.current.values()) turn.controller.abort();
       turns.current.clear();
     };
@@ -210,6 +217,7 @@ export default function ConversationWorkspace({
   // resolves. Mark locally initiated deletions so only one code path chooses
   // the next conversation (and therefore only one blank draft can be made).
   const deletingSessionIdsRef = useRef(new Set<string>());
+  const unavailableSessionIdsRef = useRef(new Set<string>());
 
   function publishTurn(turn: ConversationTurn) {
     if (activeSessionIdRef.current !== turn.sessionId || turns.current.get(turn.sessionId) !== turn) return;
@@ -240,6 +248,8 @@ export default function ConversationWorkspace({
   }, []);
 
   function showConversation(detail: ConversationDetail) {
+    if (!mountedRef.current) return;
+    if (isAdmin) rememberConversationSelection(accountId, detail.session_id);
     activeSessionIdRef.current = detail.session_id;
     setSessionId(detail.session_id);
     setConversationRoutingMode(detail.routing_mode ?? "router_code");
@@ -377,7 +387,7 @@ export default function ConversationWorkspace({
 
   async function refreshConversations(): Promise<ConversationSummary[] | null> {
     try {
-      const list = await listConversations();
+      const list = (await listConversations()).filter(item => !unavailableSessionIdsRef.current.has(item.session_id));
       setConversations(list);
       return list;
     } catch {
@@ -401,6 +411,7 @@ export default function ConversationWorkspace({
 
   async function beginConversation(mode?: ConversationRoutingMode, replyMode: ConversationReplyMode = "standard", effort?: ConversationReplyEffort): Promise<ConversationDetail | null> {
     if (isAdmin && mode === undefined) {
+      viewGenerationRef.current++;
       setModeChooserError(null);
       setModeChooserOpen(true);
       setSidebarOpen(false);
@@ -469,6 +480,9 @@ export default function ConversationWorkspace({
    * that self-healing rather than permanent.
    */
   function dropMissingConversation(targetSessionId: string) {
+    if (!mountedRef.current) return;
+    forgetConversationSelection(accountId, targetSessionId);
+    unavailableSessionIdsRef.current.add(targetSessionId);
     setConversations((prev) =>
       prev.filter((c) => c.session_id !== targetSessionId),
     );
@@ -478,8 +492,9 @@ export default function ConversationWorkspace({
     pendingFloors.current.delete(targetSessionId);
     deletedTurn?.controller.abort();
     if (targetSessionId === activeSessionIdRef.current) {
+      const generation = ++viewGenerationRef.current;
       clearReplyWaiting();
-      setError("这条对话已经不存在了，已从列表中移除。");
+      setError("这条对话已不可访问，已从列表中移除。");
       activeSessionIdRef.current = null;
       setMessages([]);
       setSessionId(null);
@@ -492,8 +507,10 @@ export default function ConversationWorkspace({
           return;
         }
         const remaining = await refreshConversations();
+        if (!mountedRef.current || generation !== viewGenerationRef.current) return;
         if (remaining === null) {
           setError("对话已移除，但暂时无法刷新记录，请稍后重试。");
+          setLoadingConversation(false);
         } else if (remaining.length) {
           await loadConversation(remaining[0].session_id);
         } else {
@@ -526,7 +543,7 @@ export default function ConversationWorkspace({
       showConversation(detail);
     } catch (err) {
       if (generation !== viewGenerationRef.current) return;
-      if (isMissing(err)) dropMissingConversation(targetSessionId);
+      if (isMissing(err) || (err instanceof ConversationRequestError && err.status === 403)) dropMissingConversation(targetSessionId);
       else setError(err instanceof Error ? err.message : String(err));
     } finally {
       if (generation === viewGenerationRef.current) {
@@ -537,6 +554,7 @@ export default function ConversationWorkspace({
 
   useEffect(() => {
     let cancelled = false;
+    const generation = viewGenerationRef.current;
     (async () => {
       if (!isAdmin) {
         await beginConversation();
@@ -544,16 +562,22 @@ export default function ConversationWorkspace({
         return;
       }
       const list = await refreshConversations();
-      if (cancelled) return;
+      if (cancelled || generation !== viewGenerationRef.current) return;
       if (list === null) {
         setError("对话暂时加载失败，请刷新重试。已保存的对话会继续保留。");
         setLoadingConversation(false);
         return;
       }
       if (list.length > 0) {
-        // Keep the administrator's existing pinned/recent list order.
-        await loadConversation(list[0].session_id);
+        // Validate against the authenticated list, then let the detail API
+        // enforce access again. Never restore cached conversation content.
+        const saved = readConversationSelection(accountId);
+        const target = saved && list.some(item => item.session_id === saved) ? saved : list[0].session_id;
+        if (saved && saved !== target) forgetConversationSelection(accountId, saved);
+        await loadConversation(target);
       } else {
+        const saved = readConversationSelection(accountId);
+        if (saved) forgetConversationSelection(accountId, saved);
         await beginConversation();
       }
     })();
@@ -1013,17 +1037,21 @@ export default function ConversationWorkspace({
     );
     try {
       await deleteConversation(targetSessionId);
+      if (!mountedRef.current) return;
+      forgetConversationSelection(accountId, targetSessionId);
       const deletedTurn = turns.current.get(targetSessionId);
       turns.current.delete(targetSessionId);
       pendingFloors.current.delete(targetSessionId);
       deletedTurn?.controller.abort();
       setProgramRefreshKey((value) => value + 1);
       if (activeSessionIdRef.current === targetSessionId) {
+        const generation = ++viewGenerationRef.current;
         activeSessionIdRef.current = null;
         setMessages([]);
         setSessionId(null);
         setRouting({});
         const remaining = await refreshConversations();
+        if (!mountedRef.current || generation !== viewGenerationRef.current) return;
         if (remaining === null) {
           setError("对话已删除，但暂时无法刷新记录，请稍后重试。");
         } else if (remaining.length) {
