@@ -2,7 +2,14 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ChatMessage, RoutingMeta } from "@/lib/api";
+import { type ConversationReplyEffort, type ConversationReplyMode } from "@/lib/conversations";
 import MessageRow from "@/components/MessageRow";
+import { ReplyEffortSlider, SettingHelp } from "@/components/ConversationControls";
+import { MessageFeedbackProvider } from "@/components/MessageFeedback";
+import ContextUsageRing from "@/components/ContextUsageRing";
+import DailyRecordEntry from "@/components/DailyRecordEntry";
+import { restoreFailedText, type FailedChatSend } from "@/lib/chatRecovery";
+import GoalFormulationPanel from "@/components/GoalFormulationPanel";
 import ThemeToggle from "@/components/ThemeToggle";
 import {
   ArrowUpMark,
@@ -12,6 +19,7 @@ import {
   KeyMark,
   MenuMark,
   NotebookMark,
+  PinMark,
   PromptMark,
   ReportMark,
   SandboxMark,
@@ -37,9 +45,11 @@ function formatModuleLabel(module: string): string {
 }
 
 export default function Chat({
+  sessionId,
   messages,
   routing,
   busy,
+  replyComplete = false,
   loading,
   error,
   onSend,
@@ -49,12 +59,24 @@ export default function Chat({
   generationStartedAt,
   onOpenSidebar,
   onShareConversation,
-  onToggleThinking,
-  thinkingEnabled = true,
-  thinkingBusy = false,
+  onToggleMediator,
+  mediatorEnabled = true,
+  mediatorBusy = false,
+  replyMode = "standard",
+  replyEffort = "low",
+  replyEffortOptions = [],
+  replyEffortBusy = false,
+  onReplyEffortChange,
+  replyWaiting = false,
   headerContent,
   sidebarExpanded = true,
   onOpenAssessment,
+  onOpenAssessmentHistory,
+  assessmentRefreshKey = 0,
+  onOpenGoals,
+  onOpenCoreGoals,
+  onSendGoalCard,
+  onGoalCardUpdated,
   onOpenPushSettings,
   displayName,
   accountUsername,
@@ -70,10 +92,14 @@ export default function Chat({
   onOpenAdminDailyRecords,
   onReportIssue,
   reportPreparing = false,
+  failedSends = [],
+  onDismissFailedSend,
 }: {
+  sessionId?: string;
   messages: ChatMessage[];
   routing: Partial<RoutingMeta>;
   busy: boolean;
+  replyComplete?: boolean;
   /** A past conversation is being fetched — swap the log for a spinner. */
   loading: boolean;
   error: string | null;
@@ -84,13 +110,25 @@ export default function Chat({
   generationStartedAt?: number;
   onOpenSidebar: () => void;
   onShareConversation?: () => void;
-  onToggleThinking?: () => void;
-  thinkingEnabled?: boolean;
-  thinkingBusy?: boolean;
+  onToggleMediator?: () => void;
+  mediatorEnabled?: boolean;
+  mediatorBusy?: boolean;
+  replyMode?: ConversationReplyMode;
+  replyEffort?: ConversationReplyEffort;
+  replyEffortOptions?: ConversationReplyEffort[];
+  replyEffortBusy?: boolean;
+  onReplyEffortChange?: (effort: ConversationReplyEffort) => void;
+  replyWaiting?: boolean;
   headerContent?: React.ReactNode;
   sidebarExpanded?: boolean;
   /** Opens the daily record on demand — nothing here waits on it. */
   onOpenAssessment: () => void;
+  onOpenAssessmentHistory?: () => void;
+  assessmentRefreshKey?: number;
+  onOpenGoals: () => void;
+  onOpenCoreGoals?: () => void;
+  onSendGoalCard: (text: string, metadata?: Record<string, string>) => Promise<void>;
+  onGoalCardUpdated?: () => void;
   onOpenPushSettings?: () => void;
   /** Nickname, falling back to username — whom this session belongs to. */
   displayName: string;
@@ -109,9 +147,24 @@ export default function Chat({
   onOpenAdminDailyRecords?: () => void;
   onReportIssue?: () => void;
   reportPreparing?: boolean;
+  failedSends?: FailedChatSend[];
+  onDismissFailedSend?: (id: string) => void;
 }) {
   const [input, setInput] = useState("");
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [headerExpanded, setHeaderExpanded] = useState(false);
+  const [composerFocused, setComposerFocused] = useState(false);
+  const [viewportHeight, setViewportHeight] = useState<number>();
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const resize = () => {
+      const top = workspaceRef.current?.getBoundingClientRect().top ?? 0;
+      setViewportHeight(Math.max(160, (viewport?.height ?? window.innerHeight) - Math.max(0, top - (viewport?.offsetTop ?? 0))));
+    };
+    resize(); viewport?.addEventListener("resize", resize); window.addEventListener("resize", resize);
+    return () => { viewport?.removeEventListener("resize", resize); window.removeEventListener("resize", resize); };
+  }, []);
   const logRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
@@ -129,7 +182,7 @@ export default function Chat({
     const el = logRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [messages]);
+  }, [messages, replyWaiting, replyComplete]);
 
   // Close the account menu on any outside click. Registered only while it is
   // open, so the app isn't carrying a document-level listener for a popup that
@@ -158,21 +211,24 @@ export default function Chat({
     const el = composerRef.current;
     if (!el) return;
     el.style.height = "0px";
-    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
-  }, [input]);
+    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_HEIGHT, (viewportHeight ?? 640) / 4)}px`;
+  }, [input, viewportHeight]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const text = input.trim();
-    if (!text || busy || loading || thinkingBusy) return;
+    if (!text || busy || loading || replyEffortBusy || mediatorBusy) return;
     setInput("");
     onSend(text);
   }
 
-  const canSend = input.trim().length > 0 && !busy && !loading && !thinkingBusy;
+  const canSend = input.trim().length > 0 && !busy && !loading && !mediatorBusy && !replyEffortBusy;
   const replyModule = routing.reply_module;
   const nextModule = routing.next_module;
   const displayedModule = nextModule ?? replyModule;
+  const compactHeader = Boolean(displayedModule && displayedModule !== "module_1");
+  useEffect(() => { setHeaderExpanded(false); setAccountMenuOpen(false); }, [displayedModule]);
+  const showDailyRecords = !loading && displayedModule === "module_3";
   const moduleChanged = Boolean(
     replyModule && nextModule && replyModule !== nextModule,
   );
@@ -182,8 +238,11 @@ export default function Chat({
     // to shrink below its content. Without it a long transcript pushes this
     // box past h-full and the composer walks off the bottom of the screen.
     //
-    <div className="workspace-card relative z-10 flex h-full min-h-0 w-full flex-col overflow-clip">
-      <header className="workspace-card-header relative z-20 flex min-h-[76px] shrink-0 items-center gap-2 px-3 py-3 sm:gap-4 sm:px-6">
+    <div ref={workspaceRef} style={{ maxHeight: viewportHeight }} className="workspace-card relative z-10 flex h-full min-h-0 w-full flex-col overflow-clip">
+      {compactHeader && <button type="button" aria-expanded={headerExpanded} aria-controls="chat-header-tools" onClick={() => setHeaderExpanded(value => !value)} className="flex min-h-9 shrink-0 items-center justify-between gap-2 px-4 text-xs text-ink-muted hover:bg-raised sm:px-6">
+        <span>专心聊，目标、记录和档案都在这里</span><span className="flex items-center gap-1 whitespace-nowrap">{headerExpanded ? "收起" : "展开"}<ChevronDownMark className={`h-3.5 w-3.5 transition-transform ${headerExpanded ? "rotate-180" : ""}`} /></span>
+      </button>}
+      <header id="chat-header-tools" hidden={compactHeader && !headerExpanded} className={`workspace-card-header relative z-20 min-h-[76px] shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-3 sm:gap-4 sm:px-6 ${compactHeader && !headerExpanded ? "hidden" : "flex"}`}>
         {accountRole === "admin" && <button
           type="button"
           onClick={onOpenSidebar}
@@ -198,21 +257,25 @@ export default function Chat({
           {headerContent ?? <h1 className="truncate text-[0.92rem] font-semibold tracking-[0.02em] text-ink">对话</h1>}
         </div>
 
+        {accountRole !== "admin" && (
+          <nav aria-label="个人快捷入口" className="order-last flex w-full items-center justify-end gap-1 sm:order-none sm:w-auto">
+            <button type="button" onClick={onOpenCoreGoals ?? onOpenGoals} className="inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-full bg-raised/60 px-2.5 text-[0.7rem] text-ink-muted transition-colors hover:bg-raised hover:text-accent-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+              <PinMark className="h-3.5 w-3.5 shrink-0" /><span>核心目标</span>
+            </button>
+            <button type="button" onClick={onOpenAssessment} disabled={loading} className="inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-full bg-raised/60 px-2.5 text-[0.7rem] text-ink-muted transition-colors hover:bg-raised hover:text-accent-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50">
+              <NotebookMark className="h-3.5 w-3.5 shrink-0" /><span>每日记录</span>
+            </button>
+            <button type="button" onClick={onOpenProfile} className="inline-flex min-h-9 items-center gap-1.5 whitespace-nowrap rounded-full bg-raised/60 px-2.5 text-[0.7rem] text-ink-muted transition-colors hover:bg-raised hover:text-accent-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+              <IdCardMark className="h-3.5 w-3.5 shrink-0" /><span>我的档案</span>
+            </button>
+          </nav>
+        )}
+
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {onShareConversation && (
             <button type="button" onClick={onShareConversation} aria-label="分享当前对话" title="分享当前对话" className="inline-flex h-11 min-w-11 items-center justify-center gap-1.5 rounded-full px-2 text-xs text-ink-muted transition-colors hover:bg-raised hover:text-ink sm:px-3">
               <ShareMark className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">分享</span>
             </button>
-          )}
-          {accountRole !== "admin" && (
-            <>
-              <button type="button" onClick={onOpenAssessment} className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-xs text-ink-muted transition-colors hover:bg-raised hover:text-ink sm:px-3">
-                <NotebookMark className="h-4 w-4 shrink-0" /><span>每日记录</span>
-              </button>
-              <button type="button" onClick={onOpenProfile} className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-xs text-ink-muted transition-colors hover:bg-raised hover:text-ink sm:px-3">
-                <IdCardMark className="h-4 w-4 shrink-0" /><span>我的档案</span>
-              </button>
-            </>
           )}
           {accountRole === "admin" && displayedModule && (
             <span
@@ -405,18 +468,40 @@ export default function Chat({
           </div>
         </div>
       </header>
-      {accountRole === "admin" && onToggleThinking && <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-4 py-2 sm:px-6">
-        <p className="text-xs leading-5 text-ink-muted">当前对话 · 全流程生效</p>
-        <button type="button" role="switch" aria-checked={thinkingEnabled} aria-label="深度思考"
-          onClick={onToggleThinking} disabled={busy || loading || thinkingBusy}
-          title={busy ? "回复结束后可切换" : "统一控制当前对话的回复、路由、知识筛选与信息提取的深度思考"}
-          className={`inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-edge disabled:cursor-not-allowed disabled:opacity-50 ${thinkingEnabled ? "bg-accent-wash text-accent-ink" : "bg-raised text-ink-muted"}`}>
-          <span>深度思考 · {thinkingBusy ? "保存中…" : thinkingEnabled ? "开" : "关"}</span>
-          <span aria-hidden="true" className={`flex h-5 w-9 items-center rounded-full px-0.5 ${thinkingEnabled ? "justify-end bg-accent" : "justify-start bg-ink-faint"}`}>
-            <span className="h-4 w-4 rounded-full bg-panel" />
-          </span>
-        </button>
-      </div>}
+      {accountRole === "admin" && (onToggleMediator || (replyMode === "ack_deep" && onReplyEffortChange && replyEffortOptions.length > 0)) && (
+        <div className="relative flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-1 border-b border-line px-3 py-1.5 sm:gap-x-5 sm:px-6" data-testid="conversation-controls" aria-busy={replyEffortBusy || mediatorBusy}>
+          {replyMode === "ack_deep" && onReplyEffortChange && replyEffortOptions.length > 0 && <div className="flex items-center gap-1">
+            <label htmlFor="conversation-reply-effort" className="hidden text-xs text-ink sm:block">思考强度</label>
+            <ReplyEffortSlider key={sessionId} value={replyEffort} options={replyEffortOptions}
+              disabled={busy || loading || replyEffortBusy || mediatorBusy} onChange={onReplyEffortChange} />
+            <SettingHelp key={sessionId} id="reply-effort-details" label="思考强度说明">
+              <p>主回复思考强度：low 更快，high 更充分，xhigh 为最高强度。界面的 xhigh 对应 K3 API 的 max。</p>
+              <p className="mt-2">控制思考强度，不是秒数或字数上限。仅修改当前对话，保存后从下一轮生效。</p>
+            </SettingHelp>
+          </div>}
+          {onToggleMediator && <div className="flex items-center gap-1">
+            <span id="knowledge-retrieval-label" className="text-xs text-ink"><span className="hidden sm:inline">是否使用</span>新架构</span>
+            <button id="knowledge-retrieval-mode" type="button" role="switch" aria-label="是否使用新架构" aria-checked={!mediatorEnabled}
+              onClick={onToggleMediator} disabled={busy || loading || replyEffortBusy || mediatorBusy}
+              className={`relative h-6 w-10 rounded-full border transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-wait disabled:opacity-50 ${mediatorEnabled ? "border-line bg-raised" : "border-accent bg-accent"}`}>
+              <span aria-hidden="true" className={`absolute left-0.5 top-0.5 h-[18px] w-[18px] rounded-full bg-panel shadow-sm transition-transform motion-reduce:transition-none ${mediatorEnabled ? "translate-x-0" : "translate-x-4"}`} />
+            </button>
+            <SettingHelp key={sessionId} id="knowledge-retrieval-details" label="知识检索架构说明">
+              <p>关闭 · 老架构：目录检索后，由知识中介整理材料，再交给主回复。</p>
+              <p className="mt-2">开启 · 新架构：混合检索与重排后，由快速知识中介筛选材料、说明用法，再交给主回复。中介独立使用关闭思考或最低思考配置，最多等待 8 秒。</p>
+              <p className="mt-2">仅修改当前对话，保存后从下一轮生效。</p>
+            </SettingHelp>
+          </div>}
+          <span role="status" className="sr-only">{replyEffortBusy || mediatorBusy ? "保存中…" : ""}</span>
+        </div>
+      )}
+
+      <GoalFormulationPanel key={`${accountUsername}:${sessionId ?? "new"}`} sessionId={sessionId}
+        confirmationResult={routing.goal_card_confirmation}
+        compactArchive={accountRole !== "admin"} composerFocused={composerFocused}
+        accountKey={accountUsername} module={routing.next_module ?? routing.reply_module} busy={busy} loading={loading}
+        refreshKey={`${messages.length}:${messages.at(-1)?.id ?? ""}:${busy}`}
+        onSend={onSendGoalCard} onOpenGoals={onOpenGoals} onUpdated={onGoalCardUpdated} />
 
       {loading ? (
         <div className="flex flex-1 items-center justify-center" aria-busy="true">
@@ -445,8 +530,9 @@ export default function Chat({
               </p>
             </div>
           )}
+          <MessageFeedbackProvider key={sessionId} sessionId={sessionId}>
           {messages.map((m, i) => {
-            const pending = busy && i === messages.length - 1;
+            const pending = busy && !replyComplete && !error && i === messages.length - 1;
             // A turn that failed before its first delta leaves an empty
             // assistant message behind. Drop it rather than render an empty
             // bubble next to the error banner.
@@ -461,6 +547,7 @@ export default function Chat({
                 key={i}
                 message={m}
                 pending={pending}
+                replyWaiting={pending && replyWaiting}
                 generationStartedAt={pending ? generationStartedAt : undefined}
                 routingPending={i === messages.length - 1 && routing.routing_pending === true}
                 animate={busy && i >= messages.length - 2}
@@ -468,6 +555,8 @@ export default function Chat({
               />
             );
           })}
+          </MessageFeedbackProvider>
+          {busy && replyComplete && !error && <p role="status" className="px-4 py-2 text-xs text-ink-muted">回复已生成，正在确认保存结果…</p>}
         </div>
       )}
 
@@ -478,28 +567,21 @@ export default function Chat({
       )}
 
       <div className="mx-auto w-full max-w-[58rem] shrink-0 px-4 pb-3 pt-3 sm:px-7 sm:pb-5">
-        {displayedModule === "module_3" && (
-          <section
-            aria-label="每日记录快捷入口"
-            className="mb-3 flex flex-wrap items-center gap-3 rounded-2xl border border-accent-edge bg-accent-wash p-3 sm:px-4"
-          >
-            <div className="flex min-w-0 flex-1 items-center gap-3">
-              <NotebookMark aria-hidden="true" className="hidden h-6 w-6 shrink-0 text-accent-ink sm:block" />
-              <div>
-                <p className="text-sm font-semibold text-ink">每日记录</p>
-                <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">记下活动与心情，也可补记或修改</p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={onOpenAssessment}
-              aria-haspopup="dialog"
-              className="flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-on-accent transition-colors hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-            >
-              打开每日记录
-            </button>
-          </section>
-        )}
+        {showDailyRecords && <DailyRecordEntry onOpen={onOpenAssessment} onHistory={onOpenAssessmentHistory ?? onOpenAssessment} refreshKey={assessmentRefreshKey} />}
+        {failedSends.filter(item => item.sessionId === sessionId).map(item => <details key={item.id} className="mb-3 rounded-2xl border border-alert-edge bg-alert-wash px-4 py-3 text-sm text-ink">
+          <summary className="cursor-pointer font-medium">原文已保留 · {item.userMessageId === null ? "发送状态待核实" : "问题已收到，尚未同步到回复"}</summary>
+          <p className="mt-2 text-xs leading-6 text-ink-muted">{item.userMessageId === null
+            ? "连接异常时可能已经送达。请先核对对话记录，再决定是否手动重试；不会自动重发。"
+            : "已确认收到这条问题。请稍后查看回复，不需要再次发送；这里保留原文供你核对。"}</p>
+          <p className="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-6" data-failed-send-text>{item.text}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {item.userMessageId === null && <button type="button" disabled={busy || loading || Boolean(input)}
+              onClick={() => { setInput(current => restoreFailedText(current, item, sessionId)); composerRef.current?.focus(); }}
+              className="min-h-10 rounded-xl border border-line px-3 text-xs disabled:opacity-50">放回输入框（不发送）</button>}
+            <button type="button" onClick={() => onDismissFailedSend?.(item.id)} className="min-h-10 px-3 text-xs text-ink-muted">移除这份原文副本</button>
+          </div>
+          {item.userMessageId === null && input && <p className="mt-1 text-xs text-ink-muted">输入框已有内容，恢复原文不会覆盖它。</p>}
+        </details>)}
         <form
           onSubmit={handleSubmit}
           className="composer-shell flex items-end gap-2 rounded-3xl py-2 pl-5 pr-2 transition-all duration-300 focus-within:ring-2 focus-within:ring-accent-edge"
@@ -507,6 +589,8 @@ export default function Chat({
           <textarea
             ref={composerRef}
             value={input}
+            onFocus={() => { setComposerFocused(true); setHeaderExpanded(false); setAccountMenuOpen(false); }}
+            onBlur={() => setComposerFocused(false)}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) handleSubmit(e);
@@ -548,9 +632,15 @@ export default function Chat({
 
         {generationNotice && <p role="status" className="mt-2 text-center text-xs leading-relaxed text-ink-muted">{generationNotice}</p>}
 
-        <p className="mt-1.5 text-center text-[0.68rem] leading-relaxed text-ink-faint">
-          内容由 AI 生成，仅供参考，不能替代专业建议。
-        </p>
+        <div className="mt-1.5 flex items-center gap-2">
+          <span className="w-8 shrink-0" aria-hidden="true" />
+          <p className="flex-1 text-center text-[0.68rem] leading-relaxed text-ink-faint">
+            内容由 AI 生成，仅供参考，不能替代专业建议。
+          </p>
+          <ContextUsageRing key={sessionId ?? "new"} sessionId={sessionId} busy={busy || loading}
+            version={`${messages.length}:${messages.at(-1)?.id ?? ""}:${messages.at(-1)?.content.length ?? 0}`}
+            draft={input} />
+        </div>
       </div>
     </div>
   );

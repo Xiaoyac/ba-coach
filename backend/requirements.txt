@@ -48,3 +48,9 @@ redis>=5.2.0
 
 # Standards-based, encrypted opt-in browser notifications (separate worker).
 pywebpush>=2.0.0,<3
+
+# Local CPU hybrid retrieval (no paid embedding/chat requests).
+fastembed==0.7.4
+faiss-cpu==1.12.0
+rank-bm25==0.2.2
+jieba==0.42.1

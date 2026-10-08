@@ -9,7 +9,7 @@ LangGraph injects it via `Runtime[GraphContext]`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, TypedDict
 
@@ -106,6 +106,12 @@ class AgentState(TypedDict, total=False):
     reply_held: bool
     # Present only after the chat transaction has actually committed consent.
     confirmation_receipt: dict
+    pa_tools_used: bool
+    # Native PA operations belong to the detached background worker.
+    pa_background_pending: bool
+    pa_operations_completed: bool
+    pa_operation_displays: list[str]
+    structured_goal_action_handled: bool
 
     # ---- Output -------------------------------------------------------
     final_response: str
@@ -135,6 +141,8 @@ class GraphContext:
     store: SessionStore
     knowledge_base: KnowledgeBase
     settings: Settings
+    # A single request-owned result, consumed only after exact state matching.
+    prepared_retrieval: Any = None
     # None when MEMOS_BASE_URL / MEMOS_API_KEY aren't configured — every call
     # site treats that the same as "no long-term memory available" rather
     # than erroring.
@@ -156,3 +164,17 @@ class GraphContext:
     # An isolated evaluation can freeze effective prompts without enabling DB side effects.
     prompt_snapshot: dict[str, str] | None = None
     generation: GenerationControl | None = None
+    # Set before any native write so interrupted streams cannot persist a stale graph cache.
+    pa_tools_started: bool = False
+    # Server-owned transport metadata, never model instructions or business state.
+    generation_id: str | None = None
+    reply_progress: dict[str, Any] = field(default_factory=dict)
+    reply_lead_prompt: str | None = None
+    reply_lead_context: Any | None = None
+    # Owned by the SSE wrapper. Main generation awaits this bounded task so
+    # its continuation knows the exact opening that will precede it.
+    reply_lead_task: Any | None = None
+    # Authorized from an owned admin preference each turn, never client metadata.
+    # Historic name: true selects admin hybrid retrieval + fast mediation.
+    # It no longer bypasses the mediator; kept for existing request builders.
+    knowledge_mediator_bypass: bool = False

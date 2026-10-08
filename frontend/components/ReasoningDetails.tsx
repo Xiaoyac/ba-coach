@@ -68,7 +68,7 @@ export default function ReasoningDetails({ message, replyPending, routingPending
       <section id={`${id}-requests-panel`} role="region" aria-labelledby={`${id}-requests-button`}
         hidden={active !== "requests"}
         className="zen-scroll mt-2 max-h-96 overflow-y-auto rounded-xl bg-panel/60 px-3 py-3 text-[0.78rem] leading-[1.75] text-ink-muted [overflow-wrap:anywhere]">
-        {expanded && active === "requests" && <RequestRecordDetails message={message} snapshot={knowledgeSource?.kind === "snapshot"} pending={replyPending} />}
+        {expanded && active === "requests" && <RequestRecordDetails message={message} snapshot={knowledgeSource?.kind === "snapshot"} pending={replyPending || routingPending} />}
       </section>
       {channels.map(channel => (
         <section key={channel.key} id={`${id}-${channel.key}-panel`} role="region"

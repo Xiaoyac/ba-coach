@@ -279,7 +279,7 @@ ActivitySocial = Literal["独自", "一对一", "群体", "都可以"]
 ActivityIntensity = Literal["安静", "热闹", "都可以"]
 ModelProvider = Literal["deepseek", "doubao"]
 PromptKey = Literal[
-    "global", "module_1", "module_2", "module_3", "module_4", "router_agent", "knowledge_mediator"
+    "global", "module_1", "module_2", "module_3", "module_4", "router_agent", "knowledge_mediator", "reply_lead"
 ]
 
 
@@ -719,6 +719,8 @@ class ConversationCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     routing_mode: Literal["router_code", "router_only"] = "router_code"
+    reply_mode: Literal["standard", "ack_deep"] = "standard"
+    reply_effort: Literal["low", "high", "max"] = "low"
 
 
 class ConversationSummary(BaseModel):
@@ -741,6 +743,21 @@ class ConversationMessageDetail(Message):
     id: int | None = None
     reply_to_message_id: int | None = None
     timing: MessageTiming | None = None
+    reply_status: Literal["interrupted", "incomplete"] | None = None
+
+
+class ConversationThinkingUpdate(BaseModel):
+    enabled: bool = Field(strict=True)
+
+
+class ConversationMediatorUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = Field(strict=True)
+
+
+class ConversationReplyEffortUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    effort: Literal["low", "high", "max"]
 
 
 class ConversationThinkingUpdate(BaseModel):
@@ -752,6 +769,11 @@ class ConversationDetail(ConversationSummary):
 
     revision: int = 0
     thinking_enabled: bool | None = None
+    knowledge_mediator_enabled: bool = True
+    knowledge_mode: Literal["legacy_mediator", "astrbot_hybrid"] = "legacy_mediator"
+    reply_mode: Literal["standard", "ack_deep"] = "standard"
+    reply_effort: Literal["low", "high", "max"] | None = None
+    reply_effort_options: list[Literal["low", "high", "max"]] = Field(default_factory=list)
     messages: list[ConversationMessageDetail] = Field(default_factory=list)
     # Durable pointer for the next turn. This is deliberately not called
     # `module`: the latest assistant reply may belong to the previous module.

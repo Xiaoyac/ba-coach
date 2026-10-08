@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import AssessmentTrends from "@/components/AssessmentTrends";
+import DailyTermHelp, { DAILY_TERM_HELP } from "@/components/DailyTermHelp";
 import { ChevronDownMark, HistoryMark } from "@/components/icons";
 import type { AssessmentRecord, StoredActivityLog } from "@/lib/assessment";
 
@@ -59,6 +61,7 @@ export default function AssessmentHistory({
   onLoadMore,
   onRetry,
   onEdit,
+  showTrends = false,
 }: {
   records: AssessmentRecord[];
   loading: boolean;
@@ -68,6 +71,7 @@ export default function AssessmentHistory({
   onLoadMore: () => void;
   onRetry: () => void;
   onEdit?: (record: AssessmentRecord) => void;
+  showTrends?: boolean;
 }) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const choseInitial = useRef(false);
@@ -89,7 +93,7 @@ export default function AssessmentHistory({
         </span>
         <h3 className="mt-4 text-[0.95rem] font-medium text-ink">还没有历史记录</h3>
         <p className="mt-1.5 max-w-xs text-[0.8rem] leading-relaxed text-ink-faint">
-          保存行为记录后，它会安静地保存在这里，方便以后回看。
+          保存后可以在这里查看当天回顾；积累多次新版记录后，还能查看心情、身体活动和完成程度的变化。
         </p>
       </div>
     );
@@ -109,6 +113,8 @@ export default function AssessmentHistory({
           </button>
         </div>
       )}
+
+      {showTrends && <AssessmentTrends records={records} hasMore={hasMore} />}
 
       {records.map((record) => {
         const expanded = expandedId === record.id;
@@ -160,7 +166,7 @@ export default function AssessmentHistory({
                       key={key}
                       className="rounded-xl border border-line bg-canvas/35 px-1.5 py-2 text-center"
                     >
-                      <p className="text-[0.62rem] text-ink-faint">{label}</p>
+                      <div className="flex flex-wrap items-center justify-center text-xs text-ink-muted"><span>{label}</span><DailyTermHelp label={label} explanation={modern ? DAILY_TERM_HELP[key] : DAILY_TERM_HELP[key].replace(/5 表示/g, "10 表示")} /></div>
                       <p className="mt-0.5 text-[0.82rem] font-medium tabular-nums text-ink">
                         {key === "completion_rate" && record.completion_not_applicable ? "不适用" : <>{record[key] ?? "—"}
                         <span className="ml-0.5 text-[0.58rem] font-normal text-ink-faint">/{maximum}</span></>}
@@ -224,9 +230,9 @@ function ActivityHistoryCard({ activity }: { activity: StoredActivityLog }) {
       </div>
       <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1.5 border-t border-line pt-2.5">
         {ACTIVITY_LABELS.map(({ key, label }) => (
-          <span key={key} className="text-[0.68rem] text-ink-faint">
-            {label} <strong className="font-medium tabular-nums text-ink-muted">{activity[key] == null ? "未填写" : `${activity[key]}/5`}</strong>
-          </span>
+          <div key={key} className="flex items-center gap-1 text-xs text-ink-muted">
+            {label} <strong className="font-medium tabular-nums text-ink-muted">{activity[key] == null ? "未填写" : `${activity[key]}/5`}</strong><DailyTermHelp label={label} explanation={DAILY_TERM_HELP[key]} />
+          </div>
         ))}
       </div>
     </section>

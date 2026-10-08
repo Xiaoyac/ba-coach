@@ -1,4 +1,6 @@
 import { apiHeaders, checkAuthentication } from "@/lib/http";
+import { chatRequestError, safeGenerationError } from "@/lib/chatRecovery";
+import type { GoalCardConfirmationResult } from "@/lib/goal-card";
 
 /**
  * Where the backend lives, from the browser's point of view.
@@ -20,11 +22,21 @@ export const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 export type Role = "user" | "assistant";
 
+export interface ModelRequestInfo {
+  stage: string;
+  model: string | null;
+  request_id: string | null;
+  provider?: string | null;
+  // Older snapshots kept only IDs and model names; absent details stay unknown.
+  recorded_at?: string | null;
+  duration_ms?: number | null;
+  error_code?: string | null;
+}
+
 export interface MessageRequests {
   user_sent_at: string | null;
   assistant_created_at: string | null;
-  requests: { stage: string; model: string | null; request_id: string | null;
-    recorded_at: string | null; duration_ms: number | null; error_code: string | null }[];
+  requests: ModelRequestInfo[];
 }
 
 export interface ChatMessage {
@@ -34,6 +46,7 @@ export interface ChatMessage {
   role: Role;
   created_at?: string | null;
   content: string;
+  reply_status?: "interrupted" | "incomplete" | null;
   /** Provider-supplied thinking, disclosed separately from the final answer. */
   reasoning_content?: string | null;
   model_name?: string | null;
@@ -86,13 +99,13 @@ export async function sendChat(body: ChatRequest): Promise<ChatResponse> {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`Chat request failed (${res.status}): ${detail}`);
+    throw new Error(chatRequestError(res.status));
   }
   return res.json();
 }
 
 export interface RoutingMeta {
+  goal_card_confirmation?: GoalCardConfirmationResult;
   session_id: string;
   user_message_id: number;
   user_created_at?: string;
@@ -108,6 +121,8 @@ export interface RoutingMeta {
 }
 
 export interface StreamHandlers {
+  /** Pause between the visible opening and its continuation in one reply. */
+  onReplyWait?: (value: { waiting: boolean; generation_id: string }) => void;
   onCancelled?: () => void;
   /**
    * Fired one or more times before the deltas start. The stream emits meta in
@@ -120,8 +135,9 @@ export interface StreamHandlers {
   onMeta?: (meta: Partial<RoutingMeta>) => void;
   onReasoningDelta?: (text: string) => void;
   onRoutingReasoning?: (text: string, model: string) => void;
-  onDelta?: (text: string) => void;
+  onDelta?: (text: string, phase?: "lead" | "body") => void;
   onDone?: () => void;
+  onPersisted?: (saved: boolean) => void;
   onError?: (message: string) => void;
 }
 
@@ -143,7 +159,18 @@ export async function streamChat(
   checkAuthentication(res);
 
   if (!res.ok || !res.body) {
-    handlers.onError?.(`Chat request failed (${res.status})`);
+    let message = chatRequestError(res.status);
+    if (body.metadata?.goal_card_action === "confirm") {
+      if (res.status === 409) {
+        const result = await res.json().catch(() => null);
+        if (typeof result?.detail === "string") message = result.detail;
+      }
+      handlers.onMeta?.({goal_card_confirmation: {
+        card_id: body.metadata.goal_card_id, revision: Number(body.metadata.goal_card_revision),
+        user_message_id: null, request_id: body.generation_id, saved: false, message,
+      }});
+    }
+    handlers.onError?.(message);
     return;
   }
 
@@ -174,13 +201,21 @@ export async function streamChat(
 
       const payload = JSON.parse(dataLines.join("\n"));
       switch (event) {
+        case "reply_wait":
+          if (typeof payload.waiting === "boolean" && typeof payload.generation_id === "string") {
+            handlers.onReplyWait?.(payload);
+          }
+          break;
         case "done":
+          handlers.onMeta?.(payload as Partial<RoutingMeta>);
+          handlers.onDone?.();
+          break;
         case "meta":
           handlers.onMeta?.(payload as Partial<RoutingMeta>);
           break;
         case "delta":
           if (typeof payload.text === "string" && payload.text.trim()) replyReceived = true;
-          handlers.onDelta?.(payload.text);
+          handlers.onDelta?.(payload.text, payload.phase === "lead" ? "lead" : "body");
           break;
         case "reasoning_delta":
           handlers.onReasoningDelta?.(payload.text);
@@ -189,12 +224,12 @@ export async function streamChat(
           handlers.onRoutingReasoning?.(payload.text, payload.model ?? "");
           break;
         case "error":
-          generationError = typeof payload.detail === "string" && payload.detail.trim()
-            ? payload.detail as string : "模型生成失败，请稍后重试或切换模型。";
+          generationError = safeGenerationError(payload.detail);
           handlers.onError?.(generationError);
           break;
         case "persisted":
           handlers.onDone?.();
+          handlers.onPersisted?.(payload.saved === true);
           if (payload.saved === false) {
             if (replyReceived) {
               const saveError = "回复已生成，但保存失败，请先复制回复后再刷新。";
@@ -227,9 +262,10 @@ export async function cancelGeneration(generationId: string): Promise<{ status: 
   return res.json();
 }
 
-/** Timing can arrive after identical streamed text; don't drop that enrichment. */
+/** Timing/status can arrive after identical streamed text; keep that enrichment. */
 export function sameMessageTiming(a: ChatMessage, b: ChatMessage): boolean {
   return (a.id ?? null) === (b.id ?? null)
+    && (a.reply_status ?? null) === (b.reply_status ?? null)
     && (a.timing?.reply_thinking_ms ?? null) === (b.timing?.reply_thinking_ms ?? null)
     && (a.timing?.reply_generation_ms ?? null) === (b.timing?.reply_generation_ms ?? null)
     && (a.timing?.router_processing_ms ?? null) === (b.timing?.router_processing_ms ?? null);

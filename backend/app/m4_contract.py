@@ -10,7 +10,9 @@ from sqlalchemy import select
 from .clinical_fields import Spec
 from .evidence_quotes import literal_span
 
-VERSION = "m4-20260917-v1"
+VERSION = "m4-20261008-positive-feedback"
+LEGACY_VERSION = "m4-20261001-attempt-closure"
+POSITIVE_FEEDBACK_TYPES = frozenset({"emotion", "physical", "achievement", "self_view", "action_willingness"})
 STEPS = ("execution_reviewed", "abc_chain_completed", "barriers_identified",
          "coping_strategy_selected", "review_decision_made")
 
@@ -124,15 +126,19 @@ def _decision_quote_position(raw_quote, messages, *, after_position=-1):
 SPEC = Spec("m4_contract", "json", '''当前周期焦点PA的完整证据快照，不沿用上周期；未知null。
 对象：phase_a_quote、phase_b_quote、phase_c_quote（分别支持本次ABC实际事实的用户连续原话），
 emotion_improved(true/false/null)、emotion_quote（情绪改善/未改善的用户原话），
+positive_feedback(true/false/null)、positive_feedback_quote（本次核心PA实际发生后积极反馈或明确没有积极反馈的用户连续原话），
+positive_feedback_types（已明确的类别数组：emotion=情绪改善，physical=身体感觉改善，achievement=成就感或满足感，self_view=对自身状态的积极认识，action_willingness=本次体验促进之后行动意愿；未区分时[]，不要逐类追问），
+积极反馈与执行、情绪分别记录：实际执行且有身体改善/成就等可positive_feedback=true而emotion_improved=false或null。情绪未改善不等于没有其他积极反馈；用户自然整体评价“没什么收获”等可以支持false，无需五类逐项排除；未知null。未执行的期待、假设、一般益处、教练推测不算本次实际积极反馈；旧意愿或仅愿意下一次尝试不等于本次体验促进意愿。引用要包含实际发生及评价的上下文，不能截去“希望/如果/没有”等限定。后续更正或撤回优先，不能继续引用失效的旧反馈。
 pre_action_barrier(true/false/null)、barrier_quote（未开始前有/无障碍的用户原话），
 window_closed(true/false/null)、window_quote（本次执行窗口已经过去的用户原话），
+final_non_execution(true/false/null)、final_non_execution_quote（用户最终明确本轮不执行的原话；犹豫、不想做、讨论困难、稍后再试都不能认定最终不执行），
 summary_quote（教练让用户核对的ABC事件分析完整原文，与ai_abc_chain_summary一致；应在confirmation_quote之前，绝不能用最后复盘收尾替代已核对的ABC），
 chain_status(unconfirmed/confirmed/corrected)、confirmation_quote（该总结之后用户认可/纠正的原话），
 education_quote（ABC确认之后已实际提供的BA教育原文），understanding_quote（之后用户基本理解的原话），
 core_questions_resolved(true仅没有未答核心疑问)，
 difficulty_status(present/none/unknown)、difficulty_quote（用户确认本次困难或无需处理的原话），
 strategy_quote（教育之后用户共同选择原目标应对的原话；需与next_coping_strategy一致），
-decision_quote（用户明确下一步方向的原话，与review_decision及review_followup一致），
+decision_quote（可选，仅记录用户主动表达的下一步意向；M4不要求决定保留/替换目标，也不据此变更目标），
 同一后续决定被重复表达且没有撤回或改变时，decision_quote保留本周期首次仍有效且发生在理解之后的决定，不因后来的重复确认让既有收尾摘要过期。若用户实质改变方向或撤回，必须改用新决定，旧总结不能完成新决定。
 review_followup.source_quote必须来自decision_quote所指的同一条用户发言，action对应同一个决定；不能分别选取不同轮次或已撤回的方向。
 review_summary_quote（教练实际给出的复盘总结原文，review_summary必须为这段原文）。
@@ -182,10 +188,153 @@ def _materially_changed(previous, candidate):
     return previous is not None and candidate is not None and previous != candidate
 
 
+_EXPECTED_FEEDBACK_RE = re.compile(
+    r"^(?:(?:我|原来|之前)(?:只是|还)?)?(?:如果|假如|要是|希望|但愿|期待|估计|也许|还没|尚未|未曾)|"
+    r"^(?:做完|完成|走完|执行)(?:以后|之后|后)?(?:应该|可能|也许|会|能)"
+)
+_OUTCOME_REVISION_RE = re.compile(
+    r"(?:撤回|收回|更正|纠正|说错|不对|不准确).{0,32}(?:情绪|心情|身体|成就|满足|动力|反馈|收获|好处|感受|状态|体验|认识|评价)|"
+    r"(?:情绪|心情|身体|成就|满足|动力|反馈|收获|好处|感受|体验|评价).{0,20}(?:不准确|说错|有误|撤回|收回)|"
+    r"(?:撤回|收回)刚才(?:的话|反馈|说法)|"
+    r"(?:其实|实际上)(?:我)?(?:并)?(?:没有|没|并不).{0,12}(?:成就感|满足感|收获|好处|改善|变好)"
+)
+
+
+def _has_actual_outcome_clause(content):
+    for clause in re.split(r"[，,。；;！？!?\n]", content):
+        clause = re.sub(r"^(?:但(?:是)?|不过|然而)\s*", "", clause.strip())
+        if re.match(r"实际(?:上|是)", clause):
+            return True
+        completed = re.match(r"(?:这次|本次)(?:走完|做完|完成|执行)(?:了|之后|以后|后)?", clause)
+        if completed and not re.match(r"(?:应该|可能|也许|会|能|希望|期待)", clause[completed.end():]):
+            return True
+    return False
+
+
+def _is_outcome_revision(content):
+    # A question about a future withdrawal is not a withdrawal now. Keep this
+    # scoped to outcome evidence; the existing ABC correction gate is intact.
+    for statement in re.split(r"[。；;！？!?\n]", content or ""):
+        if (_OUTCOME_REVISION_RE.search(statement)
+                and (not _EXPECTED_FEEDBACK_RE.search(statement.strip())
+                     or _has_actual_outcome_clause(statement))):
+            return True
+    return False
+
+
+def _current_outcome_source(source, messages):
+    """Recheck old and new user provenance, explicit expectations/retractions.
+
+    This is a conservative exclusion guard, not a semantic entailment model.
+    The extractor still identifies which real, current PA event is described.
+    """
+    if not isinstance(source, dict):
+        return False
+    message = next((m for m in messages if m.role == "user"
+        and m.id == source.get("message_id") and m.position == source.get("position")), None)
+    span = literal_span(source.get("quote"), message.content) if message else None
+    if not span:
+        return False
+    start = message.content.find(span)
+    # Include the clause surrounding a short quote, so an extractor cannot
+    # make "希望会有成就感" factual by quoting only "有成就感".
+    # An unrelated future condition after a comma does not erase past results.
+    prefix = re.split(r"[，,。；;！？!?\n]", message.content[:start])[-1]
+    suffix = re.split(r"[，,。；;！？!?\n]", message.content[start + len(span):])[0]
+    context = (prefix + span + suffix).strip()
+    if _EXPECTED_FEEDBACK_RE.search(context) and not _has_actual_outcome_clause(context):
+        return False
+    if re.search(r"^(?:assistant|system|教练|AI|系统)\s*[:：]|^(?:你|教练|AI|他|她)(?:刚才)?说", context, re.I):
+        return False
+    return not any(m.role == "user" and m.position > message.position
+        and _is_outcome_revision(m.content) for m in messages)
+
+
+def _outcome_values(raw, evidence, messages, *, occurred):
+    emotion = raw.get("emotion_improved")
+    emotion = emotion if type(emotion) is bool and _current_outcome_source(
+        evidence.get("emotion_quote"), messages) else None
+    if emotion is None:
+        evidence.pop("emotion_quote", None)
+    positive = raw.get("positive_feedback")
+    positive = positive if type(positive) is bool and occurred and _current_outcome_source(
+        evidence.get("positive_feedback_quote"), messages) else None
+    kinds = raw.get("positive_feedback_types")
+    kinds = kinds if isinstance(kinds, list) else []
+    if any(not isinstance(kind, str) or kind not in POSITIVE_FEEDBACK_TYPES for kind in kinds):
+        positive, kinds = None, []
+    if positive is None:
+        evidence.pop("positive_feedback_quote", None)
+    kinds = list(dict.fromkeys(kinds)) if positive is True else []
+    if occurred and emotion is True:
+        if positive is not True:
+            evidence["positive_feedback_quote"] = dict(evidence["emotion_quote"])
+        positive = True
+        kinds = list(dict.fromkeys([*kinds, "emotion"]))
+    return {"emotion_improved": emotion, "positive_feedback": positive,
+            "positive_feedback_types": kinds, "legacy_mood_only": False}
+
+
+def _verified_outcome_change(old_contract, candidate, evidence, messages, *, previous_scenario=None):
+    """A new result needs review; recategorizing an approved quote does not."""
+    previous = dict(old_contract.get("outcomes") or {})
+    if old_contract.get("version") == LEGACY_VERSION and previous_scenario in {"A", "C"}:
+        previous.setdefault("emotion_improved", previous_scenario == "A")
+        if previous_scenario == "A":
+            previous.setdefault("positive_feedback", True)
+            previous.setdefault("positive_feedback_types", ["emotion"])
+    old_evidence = old_contract.get("evidence") or {}
+    prior_c = old_evidence.get("phase_c_quote") or {}
+    for field, key in (("emotion_improved", "emotion_quote"),
+                       ("positive_feedback", "positive_feedback_quote")):
+        value = candidate.get(field)
+        if value is None:
+            continue
+        changed = previous.get(field) != value
+        if field == "positive_feedback" and value is True:
+            changed = changed or set(candidate["positive_feedback_types"]) != set(previous.get("positive_feedback_types") or [])
+        if not changed:
+            continue
+        source = evidence.get(key) or {}
+        if not _current_outcome_source(source, messages):
+            continue
+        # Same literal outcome already present in the confirmed ABC snapshot:
+        # widening the category definition alone is not a user correction.
+        if source.get("message_id") == prior_c.get("message_id"):
+            if literal_span(source.get("quote"), prior_c.get("quote")):
+                continue
+            # Older phase C excerpts could be narrower than the user facts
+            # already covered by the confirmed ABC. Recheck both anchors,
+            # and require literal coverage (only a leading "我" may differ).
+            summary = old_evidence.get("summary_quote") or {}
+            confirmation = old_evidence.get("confirmation_quote") or {}
+            source_summary = next((m for m in messages if m.role == "assistant"
+                and m.id == summary.get("message_id") and m.position == summary.get("position")), None)
+            source_confirmation = next((m for m in messages if m.role == "user"
+                and m.id == confirmation.get("message_id") and m.position == confirmation.get("position")), None)
+            covered = re.sub(r"^我", "", source.get("quote") or "")
+            summary_quote = summary.get("quote") or ""
+            covered_at = summary_quote.find(covered) if covered else -1
+            summary_prefix = re.split(r"[，,。；;！？!?\n]", summary_quote[:covered_at])[-1]
+            # Literal substring matching must not read "没有成就感" or
+            # "希望有成就感" as confirmation of "有成就感".
+            qualified = bool(re.search(r"(?:不|没|未|并非|不是|希望|期待)$", summary_prefix)
+                             or _EXPECTED_FEEDBACK_RE.search(summary_prefix.strip()))
+            if (source_summary and source_confirmation
+                    and source["position"] < source_summary.position < source_confirmation.position
+                    and literal_span(summary.get("quote"), source_summary.content)
+                    and literal_span(confirmation.get("quote"), source_confirmation.content)
+                    and covered_at >= 0 and not qualified
+                    and literal_span(covered, summary_quote)):
+                continue
+        return True
+    return False
+
+
 def contract_for(record):
     value = record.get("phase_c") if record else None
     value = value.get("_m4_contract") if isinstance(value, dict) else None
-    return value if isinstance(value, dict) and value.get("version") == VERSION else {}
+    return value if isinstance(value, dict) and value.get("version") in {VERSION, LEGACY_VERSION} else {}
 
 
 async def cycle_messages(db, messages):
@@ -204,7 +353,7 @@ async def cycle_messages(db, messages):
 
 
 def normalize(data, messages, *, session_id, cycle_id, assistant_message_id, existing=None,
-              cycle_status=None):
+              cycle_status=None, tool_closing_summary=None):
     raw = data.get("m4_contract")
     raw = raw if isinstance(raw, dict) else {}
     evidence = {}
@@ -240,9 +389,9 @@ def normalize(data, messages, *, session_id, cycle_id, assistant_message_id, exi
                     return msg.position
         return -1
 
-    for key in ("phase_a_quote", "phase_b_quote", "phase_c_quote", "emotion_quote", "barrier_quote",
+    for key in ("phase_a_quote", "phase_b_quote", "phase_c_quote", "emotion_quote", "positive_feedback_quote", "barrier_quote",
                 "window_quote", "confirmation_quote", "understanding_quote", "difficulty_quote",
-                "strategy_quote", "decision_quote"):
+                "strategy_quote", "decision_quote", "final_non_execution_quote"):
         quote(key, "user")
     for key in ("summary_quote", "education_quote", "review_summary_quote"):
         quote(key, "assistant")
@@ -280,6 +429,11 @@ def normalize(data, messages, *, session_id, cycle_id, assistant_message_id, exi
     if old_chain_snapshot:
         previous_overt = ((existing or {}).get("phase_b") or {}).get("overt", {}) if isinstance((existing or {}).get("phase_b"), dict) else {}
         candidate_overt = (values.get("phase_b") or {}).get("overt", {}) if isinstance(values.get("phase_b"), dict) else {}
+        observed_overt = candidate_overt or previous_overt
+        candidate_evidence = dict(evidence)
+        candidate_outcomes = _outcome_values(raw, candidate_evidence, messages,
+            occurred=observed_overt.get("action_taken") is True
+            and observed_overt.get("completion_status") in {"complete", "partial"})
         candidate_fact_change = any((
             _materially_changed(previous_overt.get("activity"), candidate_overt.get("activity")),
             previous_overt.get("action_taken") is not None and candidate_overt.get("action_taken") is not None
@@ -289,12 +443,15 @@ def normalize(data, messages, *, session_id, cycle_id, assistant_message_id, exi
             previous_overt.get("actual_duration_minutes") is not None
             and candidate_overt.get("actual_duration_minutes") is not None
             and previous_overt.get("actual_duration_minutes") != candidate_overt.get("actual_duration_minutes"),
+            _verified_outcome_change(old_contract, candidate_outcomes, candidate_evidence, messages,
+                                     previous_scenario=(existing or {}).get("scenario_type")),
         ))
         confirmation_position = int(old_confirmation.get("position", -1))
         correction_after_approval = candidate_fact_change or any(
             message.role == "user"
             and message.position > confirmation_position
-            and _ABC_CORRECTION_RE.search((message.content or "").replace("我刚才实际说的是", ""))
+            and (_ABC_CORRECTION_RE.search((message.content or "").replace("我刚才实际说的是", ""))
+                 or _is_outcome_revision(message.content))
             for message in messages
         )
         old_decision_position = int((old_evidence.get("decision_quote") or {}).get("position", -1))
@@ -347,29 +504,63 @@ def normalize(data, messages, *, session_id, cycle_id, assistant_message_id, exi
     elif not_started:
         duration_ok = duration is None or (type(duration) in {int, float} and duration == 0)
     actual_ok = bool(_text(overt.get("activity"))) and duration_ok and (occurred or not_started)
-    emotion = raw.get("emotion_improved") if pos("emotion_quote") >= 0 else None
+    outcomes = _outcome_values(raw, evidence, messages, occurred=occurred and actual_ok)
+    emotion = outcomes["emotion_improved"]
+    positive = outcomes["positive_feedback"]
     barrier = raw.get("pre_action_barrier") if pos("barrier_quote") >= 0 else None
     closed = raw.get("window_closed") is True and pos("window_quote") >= 0
     if old_chain_snapshot and not correction_after_approval:
         # Recover classification flags from the committed snapshot when the
         # latest extractor omitted their boolean fields/quotes.
         prior_scenario = (existing or {}).get("scenario_type")
-        if emotion is None and prior_scenario in {"A", "C"} and occurred:
-            emotion = prior_scenario == "A"
+        prior_outcomes = old_contract.get("outcomes") or {}
+        old_emotion_source = old_evidence.get("emotion_quote")
+        if emotion is None and _current_outcome_source(old_emotion_source, messages):
+            if type(prior_outcomes.get("emotion_improved")) is bool:
+                emotion = prior_outcomes["emotion_improved"]
+                evidence["emotion_quote"] = dict(old_emotion_source)
+            elif old_contract.get("version") == LEGACY_VERSION and prior_scenario in {"A", "C"} and occurred:
+                emotion = prior_scenario == "A"
+                evidence["emotion_quote"] = dict(old_emotion_source)
+        old_positive_source = old_evidence.get("positive_feedback_quote")
+        if (positive is None and type(prior_outcomes.get("positive_feedback")) is bool
+                and occurred and _current_outcome_source(old_positive_source, messages)):
+            positive = prior_outcomes["positive_feedback"]
+            outcomes["positive_feedback_types"] = list(prior_outcomes.get("positive_feedback_types") or [])
+            evidence["positive_feedback_quote"] = dict(old_positive_source)
+        elif (positive is not None and positive == prior_outcomes.get("positive_feedback")
+                and set(outcomes["positive_feedback_types"]) == set(prior_outcomes.get("positive_feedback_types") or [])
+                and _current_outcome_source(old_positive_source, messages)):
+            # Repeating the same feedback does not move its approval anchor.
+            evidence["positive_feedback_quote"] = dict(old_positive_source)
+        if occurred and emotion is True:
+            if positive is not True and isinstance(evidence.get("emotion_quote"), dict):
+                evidence["positive_feedback_quote"] = dict(evidence["emotion_quote"])
+            positive = True
+            outcomes["positive_feedback_types"] = list(dict.fromkeys([
+                *outcomes["positive_feedback_types"], "emotion"]))
+        if (positive is None and prior_scenario == "C" and occurred
+                and (old_contract.get("version") == LEGACY_VERSION or prior_outcomes.get("legacy_mood_only"))
+                and _current_outcome_source(old_evidence.get("phase_c_quote"), messages)):
+            # Preserve the historical category without inventing an assessment
+            # of benefits the older schema never asked for.
+            outcomes["legacy_mood_only"] = True
         if barrier is None and prior_scenario in {"B", "C"} and not_started:
             barrier = prior_scenario == "B"
         if not closed and prior_scenario == "C":
             closed = True
     scenario = None
     if actual_ok:
-        if occurred and emotion is True:
+        if occurred and positive is True:
             scenario = "A"
         elif not_started and barrier is True:
             scenario = "B"
-        elif closed and ((occurred and emotion is False) or (not_started and barrier is False)):
+        elif closed and ((occurred and (positive is False or outcomes["legacy_mood_only"]))
+                         or (not_started and barrier is False)):
             scenario = "C"
     result = (1 if status == "complete" else 4 if occurred else 3 if barrier is True else 2) if actual_ok else None
     values.update(scenario_type=scenario, execution_result=result)
+    outcomes.update(emotion_improved=emotion, positive_feedback=positive)
     # Later education/intent is not a correction of the earlier event. In
     # particular long_term.action_willingness may only emerge after education.
     # Stable core facts and the exact ABC wording invalidate real revisions,
@@ -469,7 +660,8 @@ def normalize(data, messages, *, session_id, cycle_id, assistant_message_id, exi
     if re.search(r"不对|不符合|不认可|不同意|不准确|有误|有错误|说错|纠正|更正|不是这样|不完全", str(raw.get("confirmation_quote") or "")):
         chain_ok = False
     # Facts occurring after the alleged approval invalidate it.
-    if chain_ok and max(pos(k) for k in ("phase_a_quote", "phase_b_quote", "phase_c_quote")) > pos("confirmation_quote"):
+    outcome_keys = (["emotion_quote"] if emotion is not None else []) + (["positive_feedback_quote"] if positive is not None else [])
+    if chain_ok and max(pos(k) for k in ("phase_a_quote", "phase_b_quote", "phase_c_quote", *outcome_keys)) > pos("confirmation_quote"):
         chain_ok = False
     values["chain_confirmation_status"] = "confirmed" if chain_ok else "unconfirmed"
     values["confirmation_message_id"] = confirmation_id if (chain_ok or raw.get("chain_status") == "corrected") else None
@@ -587,7 +779,12 @@ def normalize(data, messages, *, session_id, cycle_id, assistant_message_id, exi
         strategy_ok = True
     if not strategy_ok:
         values["next_coping_strategy"] = None
-    coping_ok = edu_ok and (decision in {2, 3, 4} or no_difficulty or (has_difficulty and strategy_ok))
+    final_non_execution = (not_started and raw.get("final_non_execution") is True
+                           and pos("final_non_execution_quote") >= 0)
+    # Reluctance before trying is not a final outcome. Never create a new
+    # attempt merely because we discussed barriers to this one.
+    attempt_ended = bool(occurred or (not_started and (closed or final_non_execution)))
+    coping_ok = edu_ok and (final_non_execution or decision in {2, 3, 4} or no_difficulty or (has_difficulty and strategy_ok))
     if (prior_decision_reuse and pos("review_summary_quote") < 0
             and isinstance(old_evidence.get("review_summary_quote"), dict)):
         evidence["review_summary_quote"] = dict(old_evidence["review_summary_quote"])
@@ -611,8 +808,22 @@ def normalize(data, messages, *, session_id, cycle_id, assistant_message_id, exi
             and bool(_text(values.get("review_summary")))
             and pos("review_summary_quote") > max(pos("understanding_quote"), pos("decision_quote"))):
         summary_final = True
+    # A native closing operation may publish its own assistant-authored summary.
+    # This is NOT a fabricated conversation/user quote. Only the tool executor
+    # supplies this parameter; every clinical/consent gate above still uses real
+    # messages. The receipt and displayed summary remain separately auditable.
+    if (tool_closing_summary and isinstance(tool_closing_summary, dict)
+            and tool_closing_summary.get("call_id")
+            and _text(tool_closing_summary.get("text"))
+            and chain_ok and edu_ok and coping_ok and attempt_ended):
+        values["review_summary"] = tool_closing_summary["text"]
+        evidence["review_summary_quote"] = {
+            "source": "assistant_tool", "tool_call_id": tool_closing_summary["call_id"],
+            "boundary_message_id": assistant_message_id, "quote": values["review_summary"],
+        }
+        summary_final = True
     gates = [bool(scenario and result), chain_ok, edu_ok, coping_ok,
-             bool(summary_final and decision and pos("decision_quote") >= pos("understanding_quote"))]
+             bool(summary_final and attempt_ended)]
     completed = []
     for key, ok in zip(STEPS, gates):
         if not ok:
@@ -620,8 +831,8 @@ def normalize(data, messages, *, session_id, cycle_id, assistant_message_id, exi
         completed.append(key)
     contract = {"version": VERSION, "session_id": session_id, "cycle_id": cycle_id,
                 "assistant_message_id": assistant_message_id, "facts_hash": facts_hash,
-                "completed_steps": completed, "missing_fields": ["m4_milestone_" + str(i + 1) for i, key in enumerate(STEPS) if key not in completed],
-                "evidence": evidence}
+                "attempt_ended": attempt_ended, "completed_steps": completed, "missing_fields": ["m4_milestone_" + str(i + 1) for i, key in enumerate(STEPS) if key not in completed],
+                "evidence": evidence, "outcomes": outcomes}
     values["phase_c"] = {**(values["phase_c"] or {}), "schema_version": 1, "_m4_contract": contract}
     return values
 
@@ -631,6 +842,8 @@ def missing_fields(record, *, session_id=None, cycle_id=None):
     if not contract or (session_id and contract.get("session_id") != session_id) or (cycle_id and contract.get("cycle_id") != cycle_id):
         return ["m4_evidence_refresh"]
     missing = list(contract.get("missing_fields", ["m4_evidence_refresh"]))
+    if contract.get("version") not in {VERSION, LEGACY_VERSION} or not contract.get("attempt_ended"):
+        missing.append("m4_attempt_closure_refresh")
     if record.get("chain_confirmation_status") != "confirmed" or not record.get("confirmation_message_id"):
         missing.append("chain_confirmation_status")
     if record.get("scenario_type") not in {"A", "B", "C"}:

@@ -68,14 +68,15 @@ class ClaudeProvider(LLMProvider):
             blocks.append(block)
         return blocks
 
-    def _request_kwargs(self, system: SystemPrompt, messages: list[Message]) -> dict:
+    def _request_kwargs(self, system: SystemPrompt, messages: list[Message], *, main_reply: bool = True) -> dict:
         return {
             "model": self.model,
-            "max_tokens": self._settings.claude_max_tokens,
+            "max_tokens": self._main_max_tokens() if main_reply else self._settings.claude_max_tokens,
             "system": self._system_blocks(system),
             # Adaptive thinking: Claude decides per turn how much to reason.
             # Depth/cost is tuned with `effort`, not a token budget.
-            **({"thinking": {"type": "disabled"}} if self.thinking_override is False else {
+            **(self._main_thinking_options(messages) if main_reply and self.deep_reply_enabled else
+               {"thinking": {"type": "disabled"}} if self.thinking_override is False else {
                 "thinking": {"type": "adaptive"},
                 "output_config": {"effort": self._settings.claude_effort},
             }),
@@ -86,17 +87,15 @@ class ClaudeProvider(LLMProvider):
         self, *, system: SystemPrompt, messages: list[Message]
     ) -> Completion:
         try:
-            timeout_seconds = getattr(
-                self._settings, "provider_request_timeout_seconds", 60.0
-            )
+            timeout_seconds = self._main_timeout_seconds()
             async with timeout(timeout_seconds):
-                response = await self._client.messages.create(
+                response = await self._main_client().messages.create(
                     **self._request_kwargs(system, messages)
                 )
         except (TimeoutError, asyncio.TimeoutError, anthropic.APITimeoutError) as exc:
             raise ProviderError(
                 "Claude request timed out after "
-                f"{getattr(self._settings, 'provider_request_timeout_seconds', 60.0):g}s"
+                f"{self._main_timeout_seconds():g}s"
             ) from exc
         except anthropic.APIStatusError as exc:  # 4xx / 5xx from the API
             raise ProviderError(f"Claude API error {exc.status_code}: {exc.message}") from exc
@@ -128,11 +127,9 @@ class ClaudeProvider(LLMProvider):
         self, *, system: SystemPrompt, messages: list[Message]
     ) -> AsyncIterator[StreamDelta]:
         try:
-            timeout_seconds = getattr(
-                self._settings, "provider_request_timeout_seconds", 60.0
-            )
+            timeout_seconds = self._main_timeout_seconds()
             async with timeout(timeout_seconds):
-                async with self._client.messages.stream(
+                async with self._main_client().messages.stream(
                     **self._request_kwargs(system, messages)
                 ) as stream:
                     async for chunk in stream.text_stream:
@@ -143,7 +140,7 @@ class ClaudeProvider(LLMProvider):
         except (TimeoutError, asyncio.TimeoutError, anthropic.APITimeoutError) as exc:
             raise ProviderError(
                 "Claude stream timed out after "
-                f"{getattr(self._settings, 'provider_request_timeout_seconds', 60.0):g}s"
+                f"{self._main_timeout_seconds():g}s"
             ) from exc
         except anthropic.APIStatusError as exc:
             raise ProviderError(f"Claude API error {exc.status_code}: {exc.message}") from exc
@@ -176,7 +173,7 @@ class ClaudeProvider(LLMProvider):
                 if self.thinking_override is True:
                     # The fast router model may not support adaptive thinking.
                     # Use the configured thinking-capable conversational model.
-                    request = self._request_kwargs(system, [Message(role="user", content=user)])
+                    request = self._request_kwargs(system, [Message(role="user", content=user)], main_reply=False)
                     request["max_tokens"] = max(max_tokens or 0, 4096)
                 else:
                     request = dict(model=self._settings.claude_router_model,

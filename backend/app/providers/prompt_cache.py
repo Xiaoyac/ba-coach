@@ -9,6 +9,27 @@ from urllib.parse import urlsplit
 from .base import SystemPrompt, as_segments, as_text
 
 
+def ordered_messages(system: SystemPrompt, messages: list[dict]) -> list[dict]:
+    """Preserve trusted system placement through plain and native-tool calls.
+
+    The insertion point is the final user turn, not the final message: tool
+    continuation frames must stay after it and retain their exact ordering.
+    No tags in user text are interpreted as transport instructions.
+    """
+    segments = as_segments(system)
+    prefix = [s for s in segments if not s.after_history]
+    tail = [s for s in segments if s.after_history]
+    if not tail:
+        return [{"role": "system", "content": as_text(system)}, *messages]
+    boundary = next((i for i in range(len(messages) - 1, -1, -1)
+                     if messages[i]["role"] == "user"), None)
+    if boundary is None:
+        raise ValueError("tail system requires a current user turn")
+    return [*([{"role": "system", "content": as_text(prefix)}] if prefix else []),
+            *messages[:boundary], {"role": "system", "content": as_text(tail)},
+            *messages[boundary:]]
+
+
 def system_messages(system: SystemPrompt, *, settings, model: str) -> list[dict]:
     # Enable only the official endpoint/model combination verified in production.
     # Other compatible gateways keep their original string payload.

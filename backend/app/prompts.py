@@ -35,6 +35,12 @@ class SystemPromptSegment:
 
     text: str
     cacheable: bool = True
+    # Request-only placement. Never infer placement from user-controlled text.
+    after_history: bool = False
+    literal: bool = False
+    # Current committed state / execution instructions must stay close to the
+    # user turn even when unchanged. Do not freeze them into a baseline.
+    always_current: bool = False
 
 # ---------------------------------------------------------------------------
 # Global prompt — applies to every module.
@@ -81,7 +87,7 @@ def _session_context(metadata: dict[str, str] | None) -> str:
 # Keep them in runtime memory for routing/extraction, never in reply context.
 _INTERNAL_MEMORY_KEYS = frozenset({
     "last_user_message", "last_module", "turn_count", "fresh_m1",
-    "routing_mode", "sandbox_mode", "sandbox_start_module", "dialogue_draft",
+    "routing_mode", "sandbox_mode", "sandbox_start_module", "dialogue_draft", "m3_dialogue_progress",
     "module_extraction_freshness", "current_transition_evidence",
     "current_module", "next_module", "phase", "current_phase", "current_step",
     "module_steps",
@@ -328,21 +334,30 @@ def build_system_segments(
         ),
     ]
     segments.append(SystemPromptSegment(_workflow_state_block(module_name), cacheable=True))
+    if module_name == "module_2":
+        from .goal_card_interaction import M2_SCHEDULE_POLICY
+        segments.append(SystemPromptSegment(M2_SCHEDULE_POLICY, cacheable=True))
 
-    volatile = "\n\n".join(
+    reference = "\n\n".join(
         block
         for block in (
             _profile_block(profile_context),
             _clinical_block(clinical_context, history),
-            format_memos_for_prompt(long_term_memory or []),
             _memory_block(memory, history),
-            _knowledge_block(knowledge),
-            _session_context(metadata).lstrip("\n"),
         )
         if block
     )
-    if volatile:
-        segments.append(SystemPromptSegment(volatile, cacheable=False))
+    if reference:
+        segments.append(SystemPromptSegment(reference, cacheable=False))
+    # Retrieval results and runtime metadata belong only to this request.
+    # They must not become a frozen historical fact in the cache baseline.
+    current = "\n\n".join(block for block in (
+        format_memos_for_prompt(long_term_memory or []),
+        _knowledge_block(knowledge),
+        _session_context(metadata).lstrip("\n"),
+    ) if block)
+    if current:
+        segments.append(SystemPromptSegment(current, cacheable=False, always_current=True))
     return segments
 
 

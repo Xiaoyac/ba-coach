@@ -16,6 +16,9 @@ from ..ai_telemetry import request_event_scope
 
 import json
 import logging
+import asyncio
+import anyio
+from contextlib import aclosing
 from uuid import uuid4
 from time import perf_counter
 from datetime import datetime
@@ -68,6 +71,7 @@ CLIENT_EVENTS = {
     "routing_reasoning",
     "done",
     "error",
+    "reply_wait",
 }
 
 
@@ -82,6 +86,7 @@ async def _persist_user_message(
     session_id: str,
     user_text: str,
     created_at: datetime | None = None,
+    metadata: dict | None = None,
 ) -> int | None:
     """Best-effort immediate write of the user's message.
 
@@ -93,17 +98,42 @@ async def _persist_user_message(
     """
     if not subject_id:
         return None
+    if metadata:
+        from ..goal_card_interaction import validate_card_action
+        await validate_card_action(db, session_id=session_id, user_id=subject_id,
+                                   metadata=metadata, text=user_text)
     try:
-        return await start_turn(
+        message_id = await start_turn(
             db,
             subject_id=subject_id,
             session_id=session_id,
             user_text=user_text,
             created_at=created_at,
         )
+        if get_settings().goal_card_ui_enabled:
+            try:
+                from ..goal_card_workspace import bind_submission
+                from ..goal_card_interaction import bind_card_action
+                from ..v2_workflow import runtime_for
+                conversation, _ = await runtime_for(db, session_id)
+                await bind_submission(db, conversation, message_id)
+                await bind_card_action(db, conversation, message_id, metadata or {})
+                await db.commit()
+            except Exception:
+                # start_turn already committed: retain the real message ID.
+                # Missing card linkage will block confirmation, not lose input.
+                await db.rollback()
+                logger.exception('failed to bind goal card input for %s', session_id)
+                if (metadata or {}).get('goal_card_action') == 'confirm':
+                    raise HTTPException(409, '这次确认操作未能保存，目标卡仍保留，请重新读取后重试。') from None
+        return message_id
+    except HTTPException:
+        raise
     except Exception:  # noqa: BLE001
         await db.rollback()
         logger.exception("failed to persist user message for session %s", session_id)
+        if (metadata or {}).get('goal_card_action') == 'confirm':
+            raise HTTPException(503, '确认暂时无法提交，目标卡仍保留，请稍后重试。') from None
         return None
 
 
@@ -143,11 +173,13 @@ async def _persist_assistant_message(
             finish_reason=metrics.get("finish_reason"),
             error_code=metrics.get("error_code") or "empty_reply",
             prompt_version=metrics.get("prompt_version"),
+            event_metadata={"user_message_id":user_message_id,"pa_tools":metrics.get("pa_tools"),
+                            "main_input":metrics.get("main_input")},
         )
         await db.commit()
         return None
     try:
-        return await finish_turn(
+        assistant_id = await finish_turn(
             db,
             session_id=session_id,
             user_message_id=user_message_id,
@@ -160,20 +192,71 @@ async def _persist_assistant_message(
             router_model_name=router_model_name,
             telemetry=telemetry,
         )
+        return assistant_id
     except Exception:  # noqa: BLE001
         await db.rollback()
         logger.exception("failed to persist assistant message for session %s", session_id)
         return None
 
 
+async def _finalize_pa_display(db, *, store, session_id, subject_id, assistant_message_id):
+    # Reply persistence already succeeded. A display-marker failure must not
+    # change that receipt or overwrite tool-committed business state.
+    from ..pa_card_tools import finalize_tool_display
+    from ..v2_workflow import runtime_for
+    try:
+        await finalize_tool_display(db, session_id=session_id, user_id=subject_id,
+                                    assistant_message_id=assistant_message_id)
+        if get_settings().goal_card_ui_enabled:
+            from ..goal_card_interaction import finalize_ui_display
+            await finalize_ui_display(db, session_id=session_id, user_id=subject_id,
+                                      assistant_message_id=assistant_message_id)
+        await db.commit()
+        _, fresh = await runtime_for(db, session_id)
+        await store.set_module(session_id, fresh['current_module'])
+        await store.set_memory(session_id, fresh['memory'] or {})
+    except Exception:
+        await db.rollback()
+        logger.exception('failed to finalize PA display for session %s', session_id)
+
+
 async def _apply_conversation_thinking(context, *, session_id, subject_id, state):
+    from ..conversation_reply_mode import effective_reply_mode, effective_reply_effort, ACK_DEEP
+    requested_effort = None
     async with get_sessionmaker()() as preference_db:
         enabled = await effective_thinking(preference_db, session_id=session_id, subject_id=subject_id)
+        from ..conversation_knowledge import mediator_enabled_for_conversation
+        context.knowledge_mediator_bypass = not await mediator_enabled_for_conversation(
+            preference_db, session_id=session_id, subject_id=subject_id)
+        if context.knowledge_mediator_bypass:
+            from ..retrieval import get_hybrid_knowledge_base
+            context.knowledge_base = get_hybrid_knowledge_base()
+        reply_mode = await effective_reply_mode(preference_db, session_id=session_id, subject_id=subject_id)
+        if reply_mode == ACK_DEEP:
+            requested_effort = await effective_reply_effort(preference_db,
+                session_id=session_id, subject_id=subject_id)
+            from ..prompt_store import effective_reply_lead_prompt
+            context.reply_lead_prompt = await effective_reply_lead_prompt(preference_db)
     context.provider = context.provider.with_thinking(enabled)
     context.router_provider = context.router_provider.with_thinking(enabled)
     if hasattr(context.knowledge_base, "with_thinking"):
         context.knowledge_base = context.knowledge_base.with_thinking(enabled)
-    state["telemetry"] = {**(state.get("telemetry") or {}), "conversation_thinking_enabled": enabled}
+    if reply_mode == ACK_DEEP:
+        # A request may choose a different provider from the account preference.
+        # Apply saved effort only on its verified wire protocol, never metadata.
+        applied_effort = (requested_effort
+            if requested_effort in context.provider.reply_effort_options() else None)
+        context.provider = context.provider.with_deep_reply(effort=applied_effort)
+    state["telemetry"] = {**(state.get("telemetry") or {}), "conversation_thinking_enabled": enabled,
+        "knowledge_mode": "astrbot_hybrid" if context.knowledge_mediator_bypass else "legacy_mediator",
+        "reply_mode": reply_mode,
+        "main_thinking_enabled": True if reply_mode == ACK_DEEP else enabled}
+    if reply_mode == ACK_DEEP:
+        state["telemetry"]["deep_reply_policy"] = context.provider.deep_reply_policy()
+        state["telemetry"]["deep_reply_policy"].update(
+            requested_reply_effort=requested_effort,
+            applied_reply_effort=applied_effort)
+    return reply_mode
 
 
 async def _resolve_provider(
@@ -292,7 +375,7 @@ async def _initial_state(
     received_at = received_at or utc_now()
     session = await _resume_or_create(request, store, db, subject_id=subject_id)
     if request.metadata:
-        session.metadata.update(request.metadata)
+        session.metadata.update({k: v for k, v in request.metadata.items() if not k.startswith('goal_card_')})
 
     state: AgentState = {
         "session_id": session.session_id,
@@ -369,6 +452,7 @@ async def chat(
         session_id=session_id,
         user_text=request.message,
         created_at=state["user_created_at"],
+        metadata=request.metadata,
     )
     state["user_message_id"] = user_message_id
     state["turn_started_monotonic"] = request_started
@@ -402,13 +486,16 @@ async def chat(
             telemetry=final_state.get("telemetry"),
         )
         live = await store.get(session_id)
-        if subject_id and live is not None:
+        if subject_id and live is not None and not context.pa_tools_started:
             await save_runtime_state(
                 db,
                 session_id=session_id,
                 module=live.module,
                 memory=live.memory,
             )
+        if context.pa_tools_started:
+            await _finalize_pa_display(db, store=store, session_id=session_id, subject_id=subject_id,
+                                       assistant_message_id=assistant_message_id)
         schedule_background_routing(
             final_state,
             context,
@@ -448,8 +535,10 @@ async def chat_stream(
     subject_id: str | None = Depends(optional_subject_id),
 ) -> StreamingResponse:
     received_at = utc_now()
+    if request.generation_id is None:
+        request = request.model_copy(update={"generation_id": uuid4()})
     try:
-        control = generations.begin(subject_id, str(request.generation_id or uuid4()))
+        control = generations.begin(subject_id, str(request.generation_id))
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
@@ -510,6 +599,7 @@ async def _prepare_chat_stream(
         session_id=session_id,
         user_text=request.message,
         created_at=state["user_created_at"],
+        metadata=request.metadata,
     )
     state["user_message_id"] = user_message_id
     state["turn_started_monotonic"] = request_started
@@ -517,6 +607,7 @@ async def _prepare_chat_stream(
         provider, store, stream=True, router_prompt=router_prompt
     )
     context.generation = control
+    context.generation_id = str(request.generation_id or "")
     # The request-scoped dependency survives as long as StreamingResponse, but
     # the model may think for minutes. End the setup transaction now so that
     # idle time does not pin a MySQL connection; final writes use a fresh,
@@ -546,68 +637,145 @@ async def _prepare_chat_stream(
         saw_done = False
         saw_error = False
         first_visible_at = None
+        first_body_at = None
+        body_completed_at = None
+        lead_metrics = {}
+        reply_mode = "standard"
         turn_lock = await store.get_turn_lock(session_id)
         async with turn_lock, request_event_scope(session_id, user_message_id):
+            async def preserve_interrupted(code):
+                """Only B-mode bytes already released become an interrupted row."""
+                text = "".join(reply_parts)
+                if reply_mode != "ack_deep" or not text:
+                    return False
+                metrics = {**(state.get("telemetry") or {}),
+                    **(context.reply_progress.get("telemetry") or {}),
+                    "error_code": code, "reply_held": True,
+                    "reply_lead": {k: v for k, v in lead_metrics.items() if k != "usage"},
+                    "reply_trace": {"visible_reply": text, "display_source": "interrupted_parallel_reply"}}
+                live = await store.get(session_id)
+                messages = live.messages if live else []
+                already_appended = (len(messages) >= 2 and messages[-1].role == "assistant"
+                    and messages[-2].role == "user" and messages[-2].created_at == state["user_created_at"])
+                existing_reply = messages[-1] if already_appended else None
+                created_at = utc_now()
+                async with get_sessionmaker()() as partial_db:
+                    saved = await _persist_assistant_message(partial_db, subject_id=subject_id,
+                        session_id=session_id, user_message_id=user_message_id, reply_text=text,
+                        created_at=created_at, model_name=provider.model, provider_name=provider.name,
+                        telemetry=metrics)
+                if saved is not None:
+                    if existing_reply is not None:
+                        await store.replace_last_reply(session_id, expected=existing_reply, content=text)
+                    else:
+                        last = messages[-1] if messages else None
+                        if not (last and last.role == "user" and last.created_at == state["user_created_at"]):
+                            await store.append(session_id, Message(role="user", content=request.message,
+                                created_at=state["user_created_at"]))
+                        await store.append(session_id, Message(role="assistant", content=text, created_at=created_at))
+                return saved is not None
+
             try:
-                await _apply_conversation_thinking(context, session_id=session_id, subject_id=subject_id, state=state)
+                reply_mode = await _apply_conversation_thinking(context, session_id=session_id, subject_id=subject_id, state=state)
                 # Ask for the running state as well as custom token events.
                 # LangGraph 1.2.11 can complete a graph while yielding no
                 # custom events in some production runtimes. The final values
                 # stream is therefore the durable fallback: it guarantees a
                 # completed model reply is still sent and persisted instead
                 # of silently disappearing after the initial meta event.
-                async for item in control.iterate(get_graph().astream(
+                graph_events = control.iterate(get_graph().astream(
                     state, context=context, stream_mode=["custom", "values"]
-                )):
-                    if (
-                        isinstance(item, tuple)
-                        and len(item) == 2
-                        and item[0] in {"custom", "values"}
-                    ):
-                        mode, event = item
-                    else:
-                        # Compatibility with graph/test doubles that emit the
-                        # original custom-only shape.
-                        mode, event = "custom", item
+                ))
+                if reply_mode == "ack_deep":
+                    from ..provisional_reply import with_natural_lead
+                    graph_events = with_natural_lead(graph_events, provider=provider,
+                        user_input=request.message, generation_id=str(request.generation_id or ""),
+                        session_id=session_id, subject_id=subject_id, maker=get_sessionmaker(),
+                        metrics=lead_metrics, prompt=context.reply_lead_prompt,
+                        user_created_at=state["user_created_at"],
+                        max_history_messages=context.settings.max_history_messages,
+                        context=context)
+                # A disconnect can close this generator while it is yielding a
+                # receipt. Wait for graph/receipt cleanup before releasing the
+                # turn lock; async-for alone defers child closure to GC.
+                async with aclosing(graph_events):
+                    async for item in graph_events:
+                        if (
+                            isinstance(item, tuple)
+                            and len(item) == 2
+                            and item[0] in {"custom", "values"}
+                        ):
+                            mode, event = item
+                        else:
+                            # Compatibility with graph/test doubles that emit the
+                            # original custom-only shape.
+                            mode, event = "custom", item
 
-                    if mode == "values":
-                        if isinstance(event, dict):
-                            final_state = event
-                        continue
-                    if not isinstance(event, dict):
-                        continue
-                    kind = event.get("type")
-                    if kind == "trace":
-                        logger.debug("graph trace: %s", event)
-                        continue
-                    if kind == "delta":
-                        if event.get("text") and first_visible_at is None:
-                            first_visible_at = perf_counter()
-                        reply_parts.append(event.get("text", ""))
-                    elif kind == "reasoning_delta":
-                        reasoning_parts.append(event.get("text", ""))
-                    elif kind == "routing_reasoning":
-                        streamed_routing_reasoning = str(event.get("text", ""))
-                        streamed_router_model = str(event.get("model", ""))
-                    elif kind == "done":
-                        saw_done = True
-                    elif kind == "error":
-                        saw_error = True
-                    if kind in CLIENT_EVENTS:
-                        payload = {k: v for k, v in event.items() if k != "type"}
-                        yield _sse(kind, payload)
+                        if mode == "values":
+                            if isinstance(event, dict):
+                                final_state = event
+                            continue
+                        if not isinstance(event, dict):
+                            continue
+                        kind = event.get("type")
+                        if kind == "trace":
+                            logger.debug("graph trace: %s", event)
+                            continue
+                        if kind == "delta":
+                            if event.get("text") and first_visible_at is None:
+                                first_visible_at = perf_counter()
+                            if event.get("phase") != "lead" and str(event.get("text", "")).strip() and first_body_at is None:
+                                first_body_at = perf_counter()
+                            reply_parts.append(event.get("text", ""))
+                        elif kind == "reasoning_delta":
+                            reasoning_parts.append(event.get("text", ""))
+                        elif kind == "routing_reasoning":
+                            streamed_routing_reasoning = str(event.get("text", ""))
+                            streamed_router_model = str(event.get("model", ""))
+                        elif kind == "done":
+                            saw_done = True
+                            body_completed_at = perf_counter()
+                        elif kind == "error":
+                            saw_error = True
+                        elif kind == "reply_wait" and event.get("waiting"):
+                            lead_metrics["time_to_visible_ms"] = round(
+                                (perf_counter() - state["turn_started_monotonic"]) * 1000, 3)
+                        if kind in CLIENT_EVENTS:
+                            payload = {k: v for k, v in event.items() if k != "type"}
+                            yield _sse(kind, payload)
             except GenerationStopped:
                 # The user row is already durable. Do not save unvalidated
                 # partial output, advance memory, or start the background router.
-                await store.append(session_id, Message(role="user", content=request.message, created_at=state["user_created_at"]))
-                yield _sse("cancelled", {"cancelled": True, "session_id": session_id})
+                saved = await preserve_interrupted("generation_cancelled")
+                if not saved:
+                    await store.append(session_id, Message(role="user", content=request.message, created_at=state["user_created_at"]))
+                if reply_mode == "ack_deep":
+                    yield _sse("reply_wait", {"waiting": False, "generation_id": context.generation_id})
+                yield _sse("cancelled", {"cancelled": True, "session_id": session_id,
+                    **({"partial_saved": saved} if reply_mode == "ack_deep" else {})})
                 return
+            except (asyncio.CancelledError, GeneratorExit):
+                # aclosing above synchronously stops both agents before this
+                # short persistence step and before the turn lock is released.
+                with anyio.CancelScope(shield=True):
+                    await preserve_interrupted("client_disconnected")
+                raise
             except Exception as exc:  # noqa: BLE001
                 # Headers are already sent, so a raised exception would just
                 # sever the connection. Report it in-band instead.
                 logger.exception("graph run failed for session %s", session_id)
+                if reply_mode == "ack_deep" and reply_parts:
+                    saved = await preserve_interrupted("continuation_error")
+                    yield _sse("reply_wait", {"waiting": False, "generation_id": context.generation_id})
+                    yield _sse("error", {"detail": str(exc)})
+                    yield _sse("persisted", {"saved": saved})
+                    return
+                if reply_mode == "ack_deep":
+                    yield _sse("reply_wait", {"waiting": False, "generation_id": context.generation_id})
                 yield _sse("error", {"detail": str(exc)})
                 saw_error = True
+                if reply_mode == "ack_deep":
+                    final_state = {**(final_state or state), "error": str(exc), "reply_held": True}
 
             streamed_reply = "".join(reply_parts)
             streamed_reasoning = "".join(reasoning_parts)
@@ -616,6 +784,27 @@ async def _prepare_chat_stream(
                 if final_state is not None
                 else streamed_reply
             )
+            if final_state is None and lead_metrics.get("displayed"):
+                prefix = lead_metrics["text"]
+                final_reply = final_reply[len(prefix):].removeprefix("\n\n") if final_reply.startswith(prefix) else final_reply
+            deep_reply = final_reply
+            if lead_metrics.get("displayed"):
+                from ..provisional_reply import combined_reply
+                final_reply = combined_reply(lead_metrics["text"], final_reply)
+                if final_state is not None:
+                    final_state["final_response"] = final_reply
+                    if final_state.get("error"):
+                        metrics = dict(final_state.get("telemetry") or {})
+                        original_error = metrics.get("error_code")
+                        metrics["continuation_error_code"] = original_error
+                        metrics["error_code"] = (
+                            "reply_length_limit" if original_error == "reply_length_limit" else
+                            "continuation_timeout" if original_error == "provider_timeout" else
+                            "continuation_protocol" if original_error == "invalid_protocol_completion" else
+                            "continuation_empty" if original_error in {"empty_completion", "reasoning_budget_exhausted"}
+                            else "continuation_error")
+                        metrics["reply_held"] = True
+                        final_state.update(telemetry=metrics, reply_held=True)
             final_error = (
                 str(final_state.get("error") or "")
                 if final_state is not None
@@ -703,6 +892,24 @@ async def _prepare_chat_stream(
             # The user row was committed before generation. Appending the
             # reply before releasing the turn lock means the next device reads
             # a complete first turn from the live session and the database.
+            if final_state is not None and lead_metrics:
+                final_state["telemetry"] = {**(final_state.get("telemetry") or {}),
+                    "reply_lead": {k: v for k, v in lead_metrics.items() if k != "usage"}}
+                trace = final_state["telemetry"].get("reply_trace")
+                if trace:
+                    final_state["telemetry"]["reply_trace"] = {**trace, "visible_reply": final_reply}
+            if final_state is not None and lead_metrics.get("displayed"):
+                replaced = await store.replace_last_reply(session_id,
+                    expected=Message(role="assistant", content=deep_reply,
+                        created_at=final_state.get("assistant_created_at")), content=final_reply)
+                if not replaced and not deep_reply and final_reply:
+                    live = await store.get(session_id)
+                    last = live.messages[-1] if live and live.messages else None
+                    if not (last and last.role == "user" and last.created_at == state["user_created_at"]):
+                        await store.append(session_id, Message(role="user", content=request.message,
+                            created_at=state["user_created_at"]))
+                    await store.append(session_id, Message(role="assistant", content=final_reply,
+                        created_at=final_state.get("assistant_created_at")))
             if final_state is not None and first_visible_at is not None:
                 metrics = dict(final_state.get("telemetry") or {})
                 metrics["time_to_first_visible_content_ms"] = round((first_visible_at - state["turn_started_monotonic"]) * 1000, 3)
@@ -710,7 +917,11 @@ async def _prepare_chat_stream(
                 metrics["execution_timeline"] = [*(metrics.get("execution_timeline") or []), {
                     "stage": "response_display", "start_ms": metrics["time_to_first_visible_content_ms"],
                     "duration_ms": 0, "status": "released", "after_display": False}]
+                for key, stamp in [('time_to_first_body_content_ms', first_body_at), ('body_completed_ms', body_completed_at)]:
+                    if stamp is not None:
+                        metrics[key] = round((stamp-state['turn_started_monotonic'])*1000, 3)
                 final_state["telemetry"] = metrics
+            persistence_started = perf_counter()
             async with get_sessionmaker()() as final_db:
                 assistant_message_id = await _persist_assistant_message(
                     final_db,
@@ -734,7 +945,7 @@ async def _prepare_chat_stream(
                     ),
                 )
                 live = await store.get(session_id)
-                if subject_id and live is not None:
+                if subject_id and live is not None and not context.pa_tools_started:
                     await save_runtime_state(
                         final_db,
                         session_id=session_id,
@@ -742,7 +953,12 @@ async def _prepare_chat_stream(
                         memory=live.memory,
                     )
 
-            if final_state is not None:
+                if context.pa_tools_started:
+                    await _finalize_pa_display(final_db, store=store, session_id=session_id, subject_id=subject_id,
+                                               assistant_message_id=assistant_message_id)
+
+            if final_state is not None and not (reply_mode == "ack_deep" and (
+                    final_state.get("error") or final_state.get("reply_held"))):
                 schedule_background_routing(
                     final_state,
                     context,
@@ -751,6 +967,12 @@ async def _prepare_chat_stream(
 
             # Unlike graph "done", this acknowledges the durable transcript.
             # Clients may stop reading here even if a mobile proxy holds EOF.
+            transport_metrics = {
+                'transcript_saved_ms': round((perf_counter()-state['turn_started_monotonic'])*1000, 3),
+                'persistence_duration_ms': round((perf_counter()-persistence_started)*1000, 3),
+                **{key: (final_state or {}).get('telemetry', {}).get(key) for key in
+                   ['time_to_first_visible_content_ms', 'time_to_first_body_content_ms', 'body_completed_ms']}}
+            logger.info('reply_completion_timing %s', transport_metrics)
             yield _sse("persisted", {"saved": assistant_message_id is not None})
 
     return StreamingResponse(

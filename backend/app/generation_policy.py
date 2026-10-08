@@ -1,6 +1,7 @@
 """Local per-request compute budget, never a consent or workflow decision."""
 import re
 import unicodedata
+from urllib.parse import urlparse
 
 FAST_ACKS = frozenset({"好", "好的", "好呀", "嗯", "嗯嗯", "可以", "行", "收到", "谢谢", "谢谢你",
                       "明白了", "我明白了", "知道了", "我知道了", "愿意", "我愿意", "同意", "我同意",
@@ -19,13 +20,17 @@ def native_thinking_options(settings, provider: str, *, enabled: bool, model: st
     """Use the selected model's wire format for both on and off requests."""
     model_name = str(model or getattr(settings, f"{provider}_model", "") or "").casefold()
     base_url = str(getattr(settings, f"{provider}_base_url", "") or "").casefold()
-    # DashScope Kimi accepts the thinking switch but rejects Qwen's budget.
-    if "dashscope.aliyuncs.com" in base_url and model_name.startswith("kimi"):
-        return {"enable_thinking": enabled}
+    if is_ark_kimi(settings, provider, model=model):
+        # K3 on Ark Coding always reasons. An old "off" preference means
+        # minimum effort, never an unsupported thinking/enable_thinking flag.
+        return {"reasoning_effort": "low"}
     # DashScope's OpenAI-compatible Qwen endpoints do not use DeepSeek's
     # ``thinking: {type: ...}`` extension.  They require the Qwen wire field
     # ``enable_thinking``. In particular, Qwen3.8 defaults to thinking, so an
     # unrecognised off switch can consume a classifier's entire output budget.
+    # DashScope Kimi rejects Qwen-specific thinking_budget.
+    if "dashscope.aliyuncs.com" in base_url and model_name.startswith("kimi"):
+        return {"enable_thinking": enabled}
     qwen_compatible = model_name.startswith("qwen") or "dashscope.aliyuncs.com" in base_url
     if qwen_compatible:
         options = {"enable_thinking": enabled}
@@ -45,6 +50,9 @@ def main_thinking_options(settings, provider: str, messages, *, enabled_override
     configured_effort = getattr(settings, f"{provider}_reasoning_effort", None)
     explicitly_disabled = configured_effort == "disabled"
     enabled = enabled_override if enabled_override is not None else not (fast or explicitly_disabled)
+    if is_ark_kimi(settings, provider):
+        effort = configured_effort if enabled else None
+        return {"reasoning_effort": ark_kimi_effort(effort)}
     options = native_thinking_options(settings, provider, enabled=enabled)
     # Keep the same model, full system prompt/history/profile, and all guards.
     # This controls native hidden reasoning only; it never fabricates a reply.
@@ -54,6 +62,77 @@ def main_thinking_options(settings, provider: str, messages, *, enabled_override
     if ("enable_thinking" not in options and enabled
             and effort and effort not in {"provider_default", "disabled"}):
         options["reasoning_effort"] = effort
+    return options
+
+
+def is_ark_kimi(settings, provider: str, *, model: str | None = None) -> bool:
+    url = urlparse(str(getattr(settings, f"{provider}_base_url", "") or ""))
+    name = str(model or getattr(settings, f"{provider}_model", "") or "").casefold()
+    return (provider in {"deepseek", "doubao"} and name == "kimi-k3"
+            and url.hostname == "ark.cn-beijing.volces.com"
+            and url.path.rstrip("/") == "/api/coding/v3")
+
+
+def ark_kimi_effort(effort: str | None) -> str:
+    if effort in {None, "provider_default", "disabled"}:
+        return "low"
+    if effort not in {"low", "high", "max"}:
+        raise ValueError("Ark Kimi-K3 supports low, high or max reasoning effort")
+    return effort
+
+
+def auxiliary_output_budget(settings, provider: str, model: str, requested: int) -> int:
+    # max_tokens includes mandatory reasoning on this channel. Leave room for
+    # the routing JSON / lead reply as well; do not extend request deadlines.
+    return max(requested, 2048) if is_ark_kimi(settings, provider, model=model) else requested
+
+
+def reply_effort_options(settings, provider: str, *, model: str) -> tuple[str, ...]:
+    """Only advertise effort levels verified on this exact model/channel."""
+    host = urlparse(str(getattr(settings, f"{provider}_base_url", "") or "")).hostname
+    if (provider in {"deepseek", "doubao"} and model.casefold() == "kimi-k3"
+            and (host == "dashscope.aliyuncs.com" or is_ark_kimi(settings, provider, model=model))):
+        return ("low", "high", "max")
+    return ()
+
+
+def deep_reply_thinking_options(settings, provider: str, *, model: str,
+                                effort: str | None = None) -> dict:
+    """Native main-reply compute only; never a router or intervention policy.
+
+    The deployed ``kimi-k3`` defaults to ``low``; an authorized per-conversation
+    selection can override it only on the verified channel.
+    This is an effort preference, not a wall-clock reasoning deadline.
+    Other K3 aliases and Qwen3.8-Max retain their separate policies; provider
+    channels can expose different supported effort levels.
+    Qwen3.8 rejects reasoning_effort together with thinking_budget. For other
+    Qwen models, omit our normal short budget and let the native default apply;
+    do not invent an effort parameter for models that do not support one.
+    """
+    if effort is not None and effort not in reply_effort_options(settings, provider, model=model):
+        raise ValueError("Unsupported main reply effort for this model/channel")
+    if is_ark_kimi(settings, provider, model=model):
+        return {"reasoning_effort": ark_kimi_effort(effort)}
+    name = model.casefold()
+    if provider == "claude":
+        configured = getattr(settings, "claude_effort", "high")
+        effort = configured if configured in {"xhigh", "max"} else "high"
+        return {"thinking": {"type": "adaptive"}, "output_config": {"effort": effort}}
+    options = native_thinking_options(settings, provider, enabled=True, model=model)
+    if "enable_thinking" in options:
+        options.pop("thinking_budget", None)
+        if name == "kimi-k3":
+            options["reasoning_effort"] = effort or "low"
+        elif name.startswith("kimi-k3-") or name == "kimi/kimi-k3":
+            options["reasoning_effort"] = "max"
+        elif name == "qwen3.8-max" or name.startswith("qwen3.8-max-"):
+            options["reasoning_effort"] = "xhigh"
+    else:
+        configured = getattr(settings, f"{provider}_reasoning_effort", None)
+        # These providers already accept this setting in their normal path.
+        # Unknown endpoints keep the known native enabled flag only.
+        if provider == "doubao" or configured in {"low", "medium", "high"}:
+            options["reasoning_effort"] = "high"
     return options
 
 

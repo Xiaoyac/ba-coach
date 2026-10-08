@@ -218,7 +218,11 @@ def summary_present(module, text, record):
                for barrier in record["potential_barriers"]
                for clause in _barrier_clauses(barrier)):
             return False
-        if any(compact(x["plan"]) not in body for x in record["barrier_coping_plan"]):
+        from .plan_contract import no_coping_required, NO_COPING_NEEDED
+        if no_coping_required(record):
+            if compact(NO_COPING_NEEDED) not in body:
+                return False
+        elif any(compact(x["plan"]) not in body for x in record["barrier_coping_plan"]):
             return False
         return _schedule_visible(record, body)
     if not confirmation_fields_complete("module_3", record):
@@ -251,6 +255,9 @@ def render_confirmation_summary(module, record, *, question=True):
         freq = frequency.get("text") if isinstance(frequency, Mapping) else frequency
         barriers = record.get("potential_barriers") or []
         coping = record.get("barrier_coping_plan") or []
+        from .plan_contract import no_coping_required, NO_COPING_NEEDED
+        coping_text = NO_COPING_NEEDED if no_coping_required(record) else "；".join(
+            f"{item.get('barrier', '')}：{item.get('plan', '')}" for item in coping)
         lines.extend([
             f"活动：{record['activity_content']}",
             f"时间：{record.get('schedule_text') or _format_schedule(record.get('scheduled_start_at'))}",
@@ -264,9 +271,7 @@ def render_confirmation_summary(module, record, *, question=True):
         lines.extend([
             f"执行难度（自评）：{record['difficulty_rating']}/10",
             f"潜在障碍：{'、'.join(str(item) for item in barriers) or '暂未发现'}",
-            "应对方案：" + "；".join(
-                f"{item.get('barrier', '')}：{item.get('plan', '')}" for item in coping
-            ) if coping else "应对方案：暂未约定",
+            "应对方案：" + coping_text if coping_text else "应对方案：暂未约定",
         ])
     else:
         return None
@@ -379,19 +384,21 @@ async def advance_from_dialogue(db, *, session_id, user_id, assistant_message_id
             accepted = (isinstance(quote, str) and bool(quote) and quote in user.content
                         and consent_is_current(turns, latest_index))
     elif module == "module_4":
-        from .m4_contract import contract_for, repeated_decision_matches
-        evidence = contract_for(pending).get("evidence", {}).get("decision_quote", {})
-        accepted = evidence.get("message_id") == user.id
-        if not accepted and evidence.get("position", -1) < user.position:
-            # The contract keeps the first still-effective decision as the
-            # audit anchor. A later explicit repetition is still a valid
-            # confirmation after a summary/recovery turn; requiring the
-            # original quote to be the immediately preceding user row makes
-            # normal retries stall in M4 with a draft review forever.
-            details = schema.tables["pa_review_details"]
-            action = (await db.execute(select(details.c.action).where(
-                details.c.review_id == pending["id"]))).scalar_one_or_none()
-            accepted = repeated_decision_matches(user.content, action)
+        from .m4_contract import contract_for, missing_fields
+        contract = contract_for(pending)
+        acknowledgement = (contract.get("evidence") or {}).get("confirmation_quote") or {}
+        # The final summary closes the review; future-goal choice belongs to
+        # M2. The confirmed ABC source remains the review's audit anchor.
+        source = (await db.execute(select(ConversationMessage).where(
+            ConversationMessage.id == acknowledgement.get("message_id"),
+            ConversationMessage.conversation_id == conversation.id,
+            ConversationMessage.role == "user"))).scalar_one_or_none()
+        accepted = bool(source and acknowledgement.get("quote")
+            and acknowledgement["quote"] in source.content
+            and contract.get("assistant_message_id") == assistant_message_id
+            and not missing_fields(pending, session_id=session_id, cycle_id=state["active_cycle_id"]))
+        if accepted:
+            user = source
     else:
         previous = memory.get("dialogue_draft", {})
         # Bind this turn to the exact card displayed previously.  The normal
@@ -460,7 +467,8 @@ async def advance_from_dialogue(db, *, session_id, user_id, assistant_message_id
 
 
 async def precommit_user_confirmation(db, *, session_id, user_id,
-                                      user_message_id, confirmation_provider=None):
+                                      user_message_id, confirmation_provider=None,
+                                      following_assistant_message_id=None, confirmation_evidence=None):
     """Commit an M2/M3 confirmation before the next reply is generated.
 
     Ordinary routing remains asynchronous.  A user confirmation is different:
@@ -503,10 +511,13 @@ async def precommit_user_confirmation(db, *, session_id, user_id,
         return None
     semantic = False
     if not affirmative(user.content):
-        from .confirmation_intent import semantic_confirmation
-        semantic = await semantic_confirmation(confirmation_provider,
-            user_text=user.content, assistant_text=previous.content,
-            module=state['current_module'])
+        if confirmation_evidence is not None:
+            semantic = confirmation_evidence.matches(user=user, assistant=previous, module=state['current_module'])
+        else:
+            from .confirmation_intent import semantic_confirmation
+            semantic = await semantic_confirmation(confirmation_provider,
+                user_text=user.content, assistant_text=previous.content,
+                module=state['current_module'])
         if not semantic:
             return None
     payload = SimpleNamespace(
@@ -534,9 +545,23 @@ async def precommit_user_confirmation(db, *, session_id, user_id,
                 ConversationMessage.conversation_id == conversation.id).order_by(
                     ConversationMessage.position.desc(), ConversationMessage.id.desc())
                 .limit(1).with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
-            if latest is None or latest.id != user.id or latest.role != "user":
-                return None
-            user = latest
+            if following_assistant_message_id is not None:
+                if (latest is None or latest.id != following_assistant_message_id
+                        or latest.role != "assistant" or latest.position != user.position + 1):
+                    return None
+                # Re-read the source under the same lock after semantic intent
+                # classification. The generated reply is a boundary, not consent.
+                user = (await db.execute(select(ConversationMessage).where(
+                    ConversationMessage.id == user_message_id,
+                    ConversationMessage.conversation_id == conversation.id,
+                    ConversationMessage.role == "user").with_for_update()
+                    .execution_options(populate_existing=True))).scalar_one_or_none()
+                if user is None or latest.position != user.position + 1:
+                    return None
+            else:
+                if latest is None or latest.id != user.id or latest.role != "user":
+                    return None
+                user = latest
             rt = schema.tables['conversation_runtime_states']
             state = (await db.execute(select(rt).where(
                 rt.c.conversation_id == conversation.id).with_for_update())).mappings().one()
@@ -545,6 +570,7 @@ async def precommit_user_confirmation(db, *, session_id, user_id,
                 session_id=session_id, payload=payload,
                 extraction_assistant_message_id=previous.id,
                 confirmation_user_message_id=user.id,
+                following_assistant_message_id=following_assistant_message_id,
             )
             return await commit_confirmation(
                 db, conversation=conversation, state=state, user_id=user_id,

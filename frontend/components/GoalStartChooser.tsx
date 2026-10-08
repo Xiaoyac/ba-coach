@@ -26,19 +26,20 @@ export default function GoalStartChooser({ open, sessionId, busy = false, refres
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
-    setError(""); setLoading(true); setCurrent(null);
+    setError(""); setLoading(true); setCurrent(null); setGoals([]); setM1(false);
     void (async () => {
       try {
-        const overviewResponse = await fetch(`${API_BASE}/api/program/goals/overview`, { headers: apiHeaders(), signal: controller.signal, cache: "no-store" });
+        const overviewResponse = await fetch(`${API_BASE}/api/program/goals/overview${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""}`, { headers: apiHeaders(), signal: controller.signal, cache: "no-store" });
         checkAuthentication(overviewResponse);
         if (!overviewResponse.ok) throw new Error("目标暂时无法加载。");
         const overview = await overviewResponse.json() as Overview;
+        if (controller.signal.aborted) return;
         setEnabled(overview.enabled); setM1(overview.m1_reusable);
         setGoals((overview.goals ?? []).filter((goal) => ["draft", "active", "paused"].includes(goal.status)));
         if (sessionId) {
           const sessionResponse = await fetch(`${API_BASE}/api/program/${encodeURIComponent(sessionId)}`, { headers: apiHeaders(), signal: controller.signal, cache: "no-store" });
           checkAuthentication(sessionResponse);
-          if (sessionResponse.ok) setCurrent((await sessionResponse.json() as { runtime?: { active_goal_id?: string | null } }).runtime?.active_goal_id ?? null);
+          if (sessionResponse.ok) { const state = await sessionResponse.json() as { runtime?: { active_goal_id?: string | null } }; if (!controller.signal.aborted) setCurrent(state.runtime?.active_goal_id ?? null); }
         }
       } catch (err) { if ((err as Error).name !== "AbortError") setError(err instanceof Error ? err.message : "加载失败。"); }
       finally { if (!controller.signal.aborted) setLoading(false); }
@@ -63,7 +64,7 @@ export default function GoalStartChooser({ open, sessionId, busy = false, refres
       {loading && <p role="status" className="mt-5 text-sm text-ink-muted">正在读取你的目标…</p>}
       {!loading && !enabled && <p className="mt-5 rounded-xl border border-line bg-raised p-3 text-sm text-ink-muted">V2 目标功能尚未开启。</p>}
       {enabled && !m1 && <p className="mt-5 rounded-xl border border-line bg-raised p-3 text-sm text-ink-muted">请先完成 M1，之后才能选择或讨论新目标。</p>}
-      {groups.map((kind) => { const matching = goals.filter((goal) => kindOf(goal) === kind); if (!matching.length) return null; return <section key={kind} className="mt-6"><h3 className="mb-2 text-xs font-semibold tracking-[.08em] text-ink-muted">{goalKindLabel[kind]}</h3><div className="space-y-2">{matching.map((goal) => <button key={goal.id} type="button" disabled={disabled} onClick={() => void select(goal.id)} className="w-full rounded-xl border border-line bg-raised/35 px-4 py-3 text-left transition-colors hover:border-accent-edge hover:bg-accent-wash disabled:cursor-not-allowed disabled:opacity-45"><span className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1"><span className="font-medium">{goal.title}</span><span className="text-xs text-accent-ink">继续这个目标 · {status[goal.status] ?? goal.status}</span></span>{goal.long_term_direction && <span className="mt-1 block text-xs leading-5 text-ink-muted">方向：{goal.long_term_direction}</span>}</button>)}</div></section>; })}
+      {groups.map((kind) => { const matching = goals.filter((goal) => kindOf(goal) === kind); if (!matching.length) return null; return <section key={kind} className="mt-6"><h3 className="mb-2 text-xs font-semibold tracking-[.08em] text-ink-muted">{goalKindLabel[kind]}</h3><div className="space-y-2">{matching.map((goal) => <button key={goal.id} type="button" disabled={disabled} onClick={() => void select(goal.id)} className="w-full rounded-xl border border-line bg-raised/35 px-4 py-3 text-left transition-colors hover:border-accent-edge hover:bg-accent-wash disabled:cursor-not-allowed disabled:opacity-45"><span className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1"><span className="font-medium">{goal.title}</span><span className="text-xs text-accent-ink">继续这个目标 · {goal.latest_cycle?.status === "completed" ? "上一轮已结束" : status[goal.status] ?? goal.status}</span></span>{goal.long_term_direction && <span className="mt-1 block text-xs leading-5 text-ink-muted">方向：{goal.long_term_direction}</span>}</button>)}</div></section>; })}
       {enabled && m1 && <><div className="my-6 flex items-center gap-3"><span className="h-px flex-1 bg-line" /><span className="text-xs text-ink-faint">或</span><span className="h-px flex-1 bg-line" /></div><button type="button" disabled={disabled} onClick={onDiscussNew} className="primary-action min-h-12 w-full rounded-xl px-4 font-semibold disabled:opacity-45">和 Agent 讨论新目标</button><p className="mt-3 text-sm leading-6 text-ink-muted">一个想法不会被自动创建成目标。Agent 会先协助你澄清活动和方向，等你明确选择后才保存草稿。</p></>}
     </div>
   </dialog>;

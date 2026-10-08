@@ -24,6 +24,7 @@ from sqlalchemy.orm import selectinload
 
 from ..db import get_db
 from ..identity import require_subject_id
+from ..activity_prefill import ActivityCandidates, read_activity_candidates
 from ..models import STATUS_COMPLETED, STATUS_SKIPPED, ActivityLog, AssessmentEntry, AssessmentRevision
 from ..schemas import (
     AssessmentOut,
@@ -38,6 +39,20 @@ from ..schemas import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/assessment", tags=["assessment"])
+
+@router.get("/activity-candidates", response_model=ActivityCandidates)
+async def activity_candidates(
+    response: Response,
+    session_id: str = Query(min_length=1, max_length=64),
+    local_date: date = Query(),
+    timezone_name: str = Query(default="Asia/Shanghai", alias="timezone", max_length=64),
+    subject_id: str = Depends(require_subject_id),
+    db: AsyncSession = Depends(get_db),
+):
+    response.headers["Cache-Control"] = "private, no-store"
+    on, _ = resolve_record_date(local_date, timezone_name)
+    zone, _ = resolve_timezone(timezone_name)
+    return await read_activity_candidates(db, subject_id=subject_id, session_id=session_id, on=on, zone=zone)
 
 # Status/skip requests retain their current-day clock-skew tolerance.
 # Completed records use resolve_record_date, which also allows backfilling.

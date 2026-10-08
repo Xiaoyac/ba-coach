@@ -25,6 +25,9 @@ export type GoalPlan = {
 };
 
 export type ProgramGoal = {
+  card_id?: string;
+  goal_status?: string;
+  execution_outcome?: "completed" | "partial" | "not_started" | null;
   id: string;
   title: string;
   status: string;
@@ -60,8 +63,8 @@ export type GoalHistory = {
   totals: { plans: number; cycles: number; activities: number }; page: number; page_size: number;
 };
 
-export async function fetchGoalHistory(goalId: string, page: number, signal?: AbortSignal): Promise<GoalHistory> {
-  const response = await fetch(`${API_BASE}/api/program/goals/${encodeURIComponent(goalId)}/history?page=${page}&page_size=12`, {
+export async function fetchGoalHistory(goalId: string, page: number, signal?: AbortSignal, sessionId?: string | null): Promise<GoalHistory> {
+  const response = await fetch(`${API_BASE}/api/program/goals/${encodeURIComponent(goalId)}/history?page=${page}&page_size=12${sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : ""}`, {
     headers: apiHeaders(), cache: "no-store", signal,
   });
   checkAuthentication(response);

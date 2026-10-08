@@ -22,6 +22,7 @@ from .workflow_state import normalise_completed_steps
 logger = logging.getLogger(__name__)
 
 ROUTER_RUNTIME_CONTRACT = """# 路由接口边界
+本轮 M4 复盘收尾后回 M2，再讨论保持或替换目标，不直接到 M3。last_reviewed_cycle 仅表示上轮已结束，不代表下一目标已经选择。
 在生成本轮回复之前判断；输入只有当前用户发言、此前对话与已提交状态。
 不要生成用户可见文案，不根据字段空缺创造追问任务，不把模型建议当作已保存状态。
 离开 M1 后不返回 M1；后续模块内的 BA 理解问题由当前模块澄清，暂停具体目标推进。
@@ -30,11 +31,13 @@ knowledge_task只根据当前用户问题选择知识所需事实范围，不根
 正式模块迁移需要后台提交成功；失败保留实际已提交模块。
 """
 ROUTER_ONLY_RUNTIME_CONTRACT = """# 路由接口边界：仅 Router 模式
+本轮 M4 复盘收尾后回 M2，再讨论保持或替换目标，不直接到 M3。last_reviewed_cycle 仅表示上轮已结束，不代表下一目标已经选择。
 在生成本轮回复之前判断；输入只有当前用户发言、此前对话与已提交状态。
 依据上方网页 Router 提示词选择本轮回复所属模块，输出 JSON {"target_module":"1","knowledge_task":"general"}。
-沿用网页 Router 提示词的模块业务含义及对话完成标准；其中等待后台提交或数据库已确认才允许跳转等执行前置在此模式停用。
-根据真实对话中计划的展示、用户确认及实际执行反馈独立判定，不把缺少数据库确认状态作为额外停留条件。
-target_module 必须是1、2、3、4之一；服务器接受任何合法模块编号，不额外施加相邻跳转、目标卡、完成步骤或字段齐全门槛。
+沿用网页 Router 提示词的模块业务含义及对话完成标准；不额外施加相邻跳转、完成步骤或字段齐全门槛。
+进入或停留模块3/4必须有本会话真实绑定的、属于当前用户和当前执行周期的有效已确认计划，以execution_plan_binding.ready为准；对话中的展示、同意或历史卡片不能替代成功确认事务。
+未通过该核验时，当前模块1/2保持原阶段；历史上已处模块3/4却缺少有效计划时回模块2核对。缺少保存记录不代表用户未表达，不重复索要已有信息，不自动确认计划。
+target_module 必须是1、2、3、4之一；除上述执行计划真实性边界，Router独立选择模块，原有卡片工具仍负责确认/收尾等业务提交。
 数据库状态作为真实事实参考，模块编号变化不表示目标、契约或复盘已确认，不得据此虚构保存状态。
 不生成用户可见文案，不根据字段空缺创造追问任务；knowledge_task只根据当前用户问题选择知识所需事实范围。
 仅最终完整输出作为模块决定；无效输出或请求失败保留当前模块。
@@ -94,10 +97,10 @@ def format_routing_reasoning(decision, current, applied_target=None, *, diagnost
     notices = []
     router_only = bool(diagnostics and diagnostics.get("policy") == "router_only")
     if router_only:
-        notices.append("本对话使用仅 Router 模式；模块按 Router 的合法输出切换，未自动确认目标、记录约定或复盘。")
+        notices.append("本对话使用仅 Router 模式；执行或复盘阶段须绑定真实已确认计划，卡片工具保留原有业务提交职责，未自动确认目标、记录约定或复盘。")
     if decision.error_code:
         notices.append(f"路由判断未成功（{decision.error_code}），模型没有提供可用决定；"
-                       + ("保留当前模块。" if router_only else "最终阶段由服务器契约核验，不将失败标记为正常判断。"))
+                       + ("保留有效阶段；历史执行阶段仍须通过计划绑定核验。" if router_only else "最终阶段由服务器契约核验，不将失败标记为正常判断。"))
     if decision.json_recovery:
         notices.append("路由首次输出达到长度上限；已进行一次限时的结构化判断恢复，状态："
                        + decision.json_recovery["status"] + "。该恢复不额外生成深度思考。")

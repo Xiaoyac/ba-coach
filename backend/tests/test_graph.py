@@ -110,6 +110,7 @@ def test_graph_has_expected_nodes() -> None:
         "recall_memory",
         "risk_gate",
         "pre_reply_router",
+        "prepare_pa_reply",
         "crisis",
         "module_1",
         "module_2",
@@ -124,8 +125,9 @@ def test_graph_has_expected_nodes() -> None:
 
 def test_every_module_branches_from_intent_and_converges() -> None:
     edges = [(e.source, e.target, e.conditional) for e in get_graph().get_graph().edges]
+    assert ("pre_reply_router", "prepare_pa_reply", False) in edges
     for module in MODULE_PROMPTS:
-        assert ("pre_reply_router", module, True) in edges, f"{module} not routed to"
+        assert ("prepare_pa_reply", module, True) in edges, f"{module} not routed to"
         assert (module, "route_next_module", False) in edges, (
             f"{module} does not converge on route_next_module"
         )
@@ -340,7 +342,11 @@ async def test_extract_memory_loads_history_for_later_turns(context, provider) -
     await run({"user_input": "two", "session_id": session_id, "metadata": {}}, context)
 
     # Turn 2's model call sees: user "one", assistant reply, user "two".
-    assert [m.content for m in provider.seen[-1]] == ["one", "saw 1 messages", "<user_message>two</user_message>"]
+    from xml.etree.ElementTree import fromstring
+    seen = provider.seen[-1]
+    assert [m.role for m in seen] == ['user', 'assistant', 'user']
+    assert [fromstring(seen[0].content).text, seen[1].content, fromstring(seen[2].content).text] == ['one', 'saw 1 messages', 'two']
+    assert all(fromstring(seen[i].content).tag == 'message' and fromstring(seen[i].content).get('datetime') for i in (0, 2))
 
 
 async def test_state_carries_the_documented_fields(context) -> None:
@@ -806,7 +812,8 @@ async def test_memory_is_fed_back_into_the_prompt(context, provider) -> None:
     assert "我该怎么办？" in system  # Early background anchor remains.
     assert "turn_count" not in system
     assert "last_user_message" not in system
-    assert provider.seen[-1][-1].content == "<user_message>再说说</user_message>"
+    from xml.etree.ElementTree import fromstring
+    assert fromstring(provider.seen[-1][-1].content).text == '再说说'
 
 
 async def test_long_user_message_is_truncated_in_memory(context) -> None:

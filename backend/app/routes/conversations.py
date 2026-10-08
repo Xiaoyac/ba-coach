@@ -26,7 +26,11 @@ from ..conversation_store import create_conversation_with_opening
 from ..db import get_db, get_sessionmaker
 from ..identity import CallerIdentity, require_caller, require_subject_id, require_admin
 from ..conversation_thinking import effective_thinking
+from ..conversation_knowledge import mediator_enabled_for_conversation
+from ..conversation_reply_mode import (effective_reply_mode, effective_reply_effort,
+                                      configured_reply_effort_options)
 from ..knowledge_references import KnowledgeReferences
+from ..request_diagnostics import MessageRequests
 from ..graph.nodes import wait_for_pending_routing
 from ..models import (
     AIExecutionEvent,
@@ -34,7 +38,11 @@ from ..models import (
     ClinicalRecordCycleLink,
     Conversation,
     ConversationMessage,
+    MessageFeedback,
     ConversationReplySettings,
+    ConversationKnowledgeSettings,
+    ConversationResponseMode,
+    ConversationReplyEffort,
     ConversationModuleProgress,
     ConversationRuntimeState,
     PACycle,
@@ -46,6 +54,8 @@ from ..session import SessionStore, get_session_store
 from ..schemas import (
     ConversationCreate,
     ConversationThinkingUpdate,
+    ConversationReplyEffortUpdate,
+    ConversationMediatorUpdate,
     ConversationDetail,
     ConversationMessageDetail,
     MessageTiming,
@@ -90,7 +100,10 @@ def _summary(c: Conversation) -> ConversationSummary:
 
 
 def _detail(c: Conversation, *, next_module: str | None = None,
-            routing_mode: str = "router_code", thinking_enabled: bool | None = None) -> ConversationDetail:
+            routing_mode: str = "router_code", thinking_enabled: bool | None = None,
+            reply_mode: str = "standard", reply_effort: str | None = None,
+            reply_effort_options: tuple[str, ...] = (),
+            knowledge_mediator_enabled: bool = True) -> ConversationDetail:
     # Replies occupy the odd slot reserved by start_turn for that user row.
     # Do not infer ownership from adjacent list indices or repeated text.
     users_by_position: dict[int, list[int]] = {}
@@ -128,6 +141,10 @@ def _detail(c: Conversation, *, next_module: str | None = None,
             routing_reasoning_content=message.routing_reasoning_content,
             router_model_name=message.router_model_name,
             timing=timing,
+            reply_status=("incomplete" if message.error_code == "reply_length_limit" else "interrupted" if message.error_code in {
+                "generation_cancelled", "client_disconnected", "continuation_error",
+                "continuation_timeout", "continuation_empty", "continuation_protocol",
+            } else None),
         )
 
     return ConversationDetail(
@@ -140,6 +157,11 @@ def _detail(c: Conversation, *, next_module: str | None = None,
         next_module=next_module,
         routing_mode=routing_mode,
         thinking_enabled=thinking_enabled,
+        knowledge_mediator_enabled=knowledge_mediator_enabled,
+        knowledge_mode="legacy_mediator" if knowledge_mediator_enabled else "astrbot_hybrid",
+        reply_mode=reply_mode,
+        reply_effort=reply_effort,
+        reply_effort_options=list(reply_effort_options),
     )
 
 
@@ -151,9 +173,19 @@ async def _detail_with_runtime(
     from ..routing_modes import effective_routing_mode
     mode = await effective_routing_mode(db, conversation=conversation,
         state={"memory": runtime.memory if runtime else {}}, user_id=conversation.subject_id)
+    efforts = await configured_reply_effort_options(db, subject_id=conversation.subject_id)
+    member_policy = await db.scalar(select(AccountSettings.role).join(
+        UserAccount, UserAccount.id == AccountSettings.account_id).where(
+        UserAccount.profile_uuid == conversation.subject_id)) == "user"
     return _detail(
         conversation, next_module=runtime.module if runtime else None, routing_mode=mode,
-        thinking_enabled=await effective_thinking(db, session_id=conversation.session_id, subject_id=conversation.subject_id)
+        thinking_enabled=await effective_thinking(db, session_id=conversation.session_id, subject_id=conversation.subject_id),
+        reply_mode=await effective_reply_mode(db, session_id=conversation.session_id, subject_id=conversation.subject_id),
+        reply_effort=(await effective_reply_effort(db, session_id=conversation.session_id,
+            subject_id=conversation.subject_id)) if efforts or member_policy else None,
+        reply_effort_options=efforts,
+        knowledge_mediator_enabled=await mediator_enabled_for_conversation(
+            db, session_id=conversation.session_id, subject_id=conversation.subject_id),
     )
 
 
@@ -176,12 +208,26 @@ async def create_conversation(
         .join(UserAccount, UserAccount.id == AccountSettings.account_id)
         .where(UserAccount.profile_uuid == subject_id))).scalar_one_or_none()
     mode = payload.routing_mode if payload else "router_code"
+    reply_mode = payload.reply_mode if payload else "standard"
+    if reply_mode != "standard" and role != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以创建快速回应加深度处理模式对话")
+    if payload and "reply_effort" in payload.model_fields_set:
+        if role != "admin":
+            raise HTTPException(status_code=403, detail="只有管理员可以设置主回复思考强度")
+        if reply_mode != "ack_deep":
+            raise HTTPException(status_code=409, detail="思考强度仅适用于快速接话加深度回复模式")
+        if payload.reply_effort not in await configured_reply_effort_options(db, subject_id=subject_id):
+            raise HTTPException(status_code=409, detail="当前模型不支持选择思考强度")
     if mode == "router_only":
         if role != "admin":
             raise HTTPException(status_code=403, detail="只有管理员可以创建仅 Router 模式对话")
         from ..v2_profile import enabled as v2_enabled
         if not v2_enabled():
             raise HTTPException(status_code=409, detail="当前数据库版本不支持仅 Router 模式")
+    if role == "user":
+        # Product defaults are server-owned. Existing member conversations
+        # receive the same effective policy without resetting their progress.
+        mode, reply_mode = "router_only", "ack_deep"
     session = await store.get_or_create(None)
     await store.append(session.session_id, OPENING_MESSAGE)
     try:
@@ -191,6 +237,8 @@ async def create_conversation(
             session_id=session.session_id,
             start_from_m1=role == "admin",
             routing_mode=mode,
+            reply_mode=reply_mode,
+            reply_effort=payload.reply_effort if payload and role == "admin" else "low",
         )
     except Exception:
         await db.rollback()
@@ -300,7 +348,7 @@ async def get_conversation(
     return await _detail_with_runtime(db, conversation)
 
 
-@router.get("/messages/{message_id}/requests")
+@router.get("/messages/{message_id}/requests", response_model=MessageRequests)
 async def message_request_records(
     message_id: int, response: Response,
     caller: CallerIdentity = Depends(require_admin),
@@ -315,7 +363,7 @@ async def message_request_records(
             Conversation.subject_id == caller.subject_id))).scalar_one_or_none()
     if conversation is None:
         raise HTTPException(status_code=404, detail="Message not found")
-    return (await request_records(db, conversation))[message_id]
+    return (await request_records(db, conversation, message_id=message_id))[message_id]
 
 
 @router.get("/messages/{message_id}/knowledge", response_model=KnowledgeReferences)
@@ -341,6 +389,27 @@ async def message_knowledge_references(
         .order_by(AIExecutionEvent.id.desc()).limit(1))).scalar_one_or_none()
     snapshot = (metadata or {}).get("knowledge_references")
     return KnowledgeReferences.model_validate(snapshot) if snapshot else KnowledgeReferences()
+
+
+@router.get("/{session_id}/context")
+async def get_context_usage(
+    session_id: str, response: Response,
+    subject_id: str = Depends(require_subject_id),
+    db: AsyncSession = Depends(get_db),
+):
+    from ..config import get_settings
+    from ..context_usage import history_usage
+    from ..generation_policy import is_ark_kimi
+    from ..models import UserAccount
+    conversation = await _owned_or_404(db, session_id=session_id, subject_id=subject_id)
+    settings = get_settings()
+    selected = await db.scalar(select(AccountSettings.preferred_provider).join(
+        UserAccount, UserAccount.id == AccountSettings.account_id).where(UserAccount.profile_uuid == subject_id))
+    selected = selected or settings.default_provider
+    epoch_enabled = settings.main_prefix_cache_enabled and selected == "deepseek" and is_ark_kimi(
+        settings, selected, model=str(getattr(settings, f"{selected}_model", "")))
+    response.headers["Cache-Control"] = "private, no-store"
+    return await history_usage(db, conversation.id, settings=settings, epoch_enabled=epoch_enabled)
 
 
 @router.get("/{session_id}/revision", response_model=dict[str, int])
@@ -434,6 +503,66 @@ async def conversation_events(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.patch("/{session_id}/reply-effort", response_model=ConversationDetail)
+async def update_conversation_reply_effort(
+    session_id: str, payload: ConversationReplyEffortUpdate,
+    caller: CallerIdentity = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+    store: SessionStore = Depends(get_session_store),
+) -> ConversationDetail:
+    # Ownership is checked before busy status, so probing someone else's id
+    # cannot reveal whether their generation is running.
+    await _owned_or_404(db, session_id=session_id, subject_id=caller.subject_id)
+    turn_lock = await store.get_turn_lock(session_id)
+    if turn_lock.locked():
+        raise HTTPException(status_code=409, detail="回复正在生成，请结束后再调整思考强度。")
+    async with turn_lock:
+        conversation = (await db.execute(select(Conversation).where(
+            Conversation.session_id == session_id, Conversation.subject_id == caller.subject_id)
+            .with_for_update())).scalar_one_or_none()
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="对话不存在")
+        if await effective_reply_mode(db, session_id=session_id, subject_id=caller.subject_id) != "ack_deep":
+            raise HTTPException(status_code=409, detail="思考强度仅适用于快速接话加深度回复模式")
+        if payload.effort not in await configured_reply_effort_options(db, subject_id=caller.subject_id):
+            raise HTTPException(status_code=409, detail="当前模型不支持选择思考强度")
+        preference = await db.get(ConversationReplyEffort, conversation.id)
+        if preference is None:
+            preference = ConversationReplyEffort(conversation_id=conversation.id)
+            db.add(preference)
+        preference.effort = payload.effort
+        conversation.revision += 1
+        await db.commit()
+        return await _detail_with_runtime(db, conversation)
+
+
+@router.patch("/{session_id}/knowledge-mediator", response_model=ConversationDetail)
+async def update_conversation_mediator(
+    session_id: str, payload: ConversationMediatorUpdate,
+    caller: CallerIdentity = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+    store: SessionStore = Depends(get_session_store),
+) -> ConversationDetail:
+    await _owned_or_404(db, session_id=session_id, subject_id=caller.subject_id)
+    turn_lock = await store.get_turn_lock(session_id)
+    if turn_lock.locked():
+        raise HTTPException(status_code=409, detail="回复正在生成，请结束后再切换知识检索模式。")
+    async with turn_lock:
+        conversation = (await db.execute(select(Conversation).where(
+            Conversation.session_id == session_id, Conversation.subject_id == caller.subject_id)
+            .with_for_update())).scalar_one_or_none()
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="对话不存在")
+        preference = await db.get(ConversationKnowledgeSettings, conversation.id)
+        if preference is None:
+            preference = ConversationKnowledgeSettings(conversation_id=conversation.id)
+            db.add(preference)
+        preference.mediator_enabled = payload.enabled
+        conversation.revision += 1
+        await db.commit()
+        return await _detail_with_runtime(db, conversation)
 
 
 @router.patch("/{session_id}/thinking", response_model=ConversationDetail)
@@ -549,6 +678,15 @@ async def delete_conversation(
         )
         await db.execute(delete(ConversationReplySettings).where(
             ConversationReplySettings.conversation_id == conversation.id))
+        await db.execute(delete(ConversationKnowledgeSettings).where(
+            ConversationKnowledgeSettings.conversation_id == conversation.id))
+        await db.execute(delete(ConversationResponseMode).where(
+            ConversationResponseMode.conversation_id == conversation.id))
+        await db.execute(delete(ConversationReplyEffort).where(
+            ConversationReplyEffort.conversation_id == conversation.id))
+        await db.execute(delete(MessageFeedback).where(MessageFeedback.message_id.in_(
+            select(ConversationMessage.id).where(ConversationMessage.conversation_id == conversation.id)
+        )))
         from ..v2_profile import enabled as v2_enabled
         if v2_enabled():
             from ..v2_deletion import detach_conversation
@@ -576,6 +714,9 @@ async def delete_conversation(
         # Explicit child deletes make the endpoint deterministic even in local
         # SQLite where foreign-key cascades may be disabled. The externally
         # owned unlinked clinical rows are retained because their source is unknown.
+        from ..models import ConversationContextCheckpoint
+        await db.execute(delete(ConversationContextCheckpoint).where(
+            ConversationContextCheckpoint.conversation_id == conversation.id))
         await db.execute(
             delete(ClinicalRecordCycleLink).where(
                 ClinicalRecordCycleLink.cycle_id.in_(cycle_ids)

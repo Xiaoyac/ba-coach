@@ -6,9 +6,9 @@ confirmations may refresh the same schema before a business transaction.
 
 The prompts are built from `clinical_fields`, so the field list the model is
 asked for is literally the same tuple `clinical_store.coerce` validates
-against. Output is parsed defensively — a model that returns prose, a fenced
-code block, or nothing at all yields `{}` rather than an exception, because
-the caller is a detached task with no request left to fail.
+against. Detailed module extraction reports invalid output separately from an
+empty record, so a failed extraction cannot erase an earlier snapshot or make
+old confirmation evidence appear current.
 """
 
 from __future__ import annotations
@@ -94,6 +94,51 @@ def _as_dict(parsed: Any) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _close_outer_object(candidate: str) -> dict[str, Any] | None:
+    """Accept only one missing outer brace, without discarding any text.
+
+    Parsing the entire string plus exactly one brace proves that every nested
+    object, array, string and key/value pair was already complete. Reject an
+    unclosed numeric token: e.g. a final `1` might be the beginning of `100`.
+    Existing schema/source validation still applies to the resulting object.
+    """
+    if not candidate.startswith("{"):
+        return None
+    if not (candidate.endswith(('"', "}", "]"))
+            or candidate.endswith(("true", "false", "null"))):
+        return None
+    try:
+        parsed = json.loads(candidate + "}")
+    except (ValueError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _parse_strict_completion(completion: Completion) -> dict[str, Any]:
+    """Keep strict module parsing separate from the legacy tail salvage."""
+    completion.extraction_error_code = None
+    completion.extraction_repair = None
+    candidate = completion.text.strip()
+    if not candidate:
+        completion.extraction_error_code = "empty_completion"
+        return {}
+    fenced = _FENCE_RE.match(candidate)
+    if fenced:
+        candidate = fenced.group(1).strip()
+    try:
+        parsed = json.loads(candidate)
+    except (ValueError, TypeError):
+        parsed = _close_outer_object(candidate) if completion.finish_reason == "stop" else None
+        if parsed is None:
+            completion.extraction_error_code = "extraction_invalid_json"
+            return {}
+        completion.extraction_repair = "closed_outer_object"
+    if not isinstance(parsed, dict):
+        completion.extraction_error_code = "extraction_not_object"
+        return {}
+    return parsed
+
+
 def _salvage_truncated(text: str) -> dict[str, Any]:
     """Recover the complete leading fields of a cut-off JSON object.
 
@@ -174,14 +219,7 @@ async def _extract_detailed(
         system=rendered, user=transcript, max_tokens=max_tokens
     )
     if strict:
-        candidate = completion.text.strip()
-        fenced = _FENCE_RE.match(candidate)
-        if fenced:
-            candidate = fenced.group(1).strip()
-        try:
-            return _as_dict(json.loads(candidate)), completion
-        except (ValueError, TypeError):
-            return {}, completion
+        return _parse_strict_completion(completion), completion
     return _parse_json_object(completion.text), completion
 
 
@@ -218,8 +256,8 @@ async def extract_module_record_detailed(
         from .m4_contract import SPEC
         specs = specs + (SPEC,)
     if module in {"module_2", "module_4"}:
-        from .goal_contract import GOAL_SPEC, PLAN_SPEC, M2_CONTEXT_SPEC, ACTIVITY_SPEC, REVIEW_SPEC, CORRECTION_SPEC
-        specs = specs + ((GOAL_SPEC, PLAN_SPEC, M2_CONTEXT_SPEC, ACTIVITY_SPEC, CORRECTION_SPEC) if module == "module_2" else (ACTIVITY_SPEC, REVIEW_SPEC, CORRECTION_SPEC))
+        from .goal_contract import GOAL_SPEC, CHOICE_SPEC, PLAN_SPEC, M2_CONTEXT_SPEC, ACTIVITY_SPEC, REVIEW_SPEC, CORRECTION_SPEC
+        specs = specs + ((GOAL_SPEC, CHOICE_SPEC, PLAN_SPEC, M2_CONTEXT_SPEC, ACTIVITY_SPEC, CORRECTION_SPEC) if module == "module_2" else (ACTIVITY_SPEC, REVIEW_SPEC, CORRECTION_SPEC))
     return await _extract_detailed(
         provider,
         system=_EXTRACTION_PROMPT,

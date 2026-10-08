@@ -4,7 +4,7 @@ from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from app.database_v2_schema import metadata
-from app.models import Conversation, ConversationMessage
+from app.models import AccountSettings, UserAccount, Conversation, ConversationMessage
 from app.v2_repository import (V2Conflict, V2NotFound, active_memories, append_memory,
     append_plan_draft, can_reuse_m1, confirm_plan, create_goal, initial_module,
     owned_goal, start_cycle, transition_cycle)
@@ -15,6 +15,8 @@ async def db():
     engine = create_async_engine("sqlite+aiosqlite://")
     async with engine.begin() as connection:
         await connection.run_sync(metadata.create_all)
+        await connection.run_sync(UserAccount.__table__.create)
+        await connection.run_sync(AccountSettings.__table__.create)
         await connection.run_sync(Conversation.__table__.create)
         await connection.run_sync(ConversationMessage.__table__.create)
     maker = async_sessionmaker(engine, expire_on_commit=False)

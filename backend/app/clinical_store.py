@@ -325,8 +325,11 @@ async def load_profile_context(
     if enabled():
         async with sessionmaker() as db:
             profile = await read(db, user_id)
+            # Module progress belongs to this turn's routed workflow state,
+            # not the registration profile loaded before routing. Keep the
+            # API/UI projection intact, but never send its stale copy to LLMs.
             return ["用户档案（用户填写的限制和话题边界必须尊重，未知值不要推断）：" +
-                    json.dumps(profile.model_dump(exclude={"available_providers", "preferred_provider", "tag", "display_id", "birth_date"}), ensure_ascii=False)]
+                    json.dumps(profile.model_dump(exclude={"available_providers", "preferred_provider", "tag", "display_id", "birth_date", "current_module"}), ensure_ascii=False)]
     lines: list[str] = []
     async with sessionmaker() as db:
         profile = (

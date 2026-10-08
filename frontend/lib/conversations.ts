@@ -2,6 +2,7 @@
 
 import { API_BASE, type ChatMessage, type MessageRequests } from "@/lib/api";
 import { apiHeaders, checkAuthentication } from "@/lib/http";
+import { chatRequestError } from "@/lib/chatRecovery";
 
 export interface ConversationSummary {
   session_id: string;
@@ -16,12 +17,27 @@ export const routingModeLabels: Record<ConversationRoutingMode, string> = {
   router_only: "仅 Router",
 };
 
+export type ConversationReplyMode = "standard" | "ack_deep";
+export type ConversationReplyEffort = "low" | "high" | "max";
+export const replyEffortLabels: Record<ConversationReplyEffort, string> = {
+  low: "低（更快）", high: "高（更充分）", max: "最高（更慢）",
+};
+export const replyModeLabels: Record<ConversationReplyMode, string> = {
+  standard: "现有回复",
+  ack_deep: "自然接话＋深度回复",
+};
+
 export interface ConversationDetail extends ConversationSummary {
   revision?: number;
   thinking_enabled?: boolean | null;
+  knowledge_mediator_enabled?: boolean;
+  knowledge_mode?: "legacy_mediator" | "astrbot_hybrid";
   messages: ChatMessage[];
   next_module: string | null;
   routing_mode?: ConversationRoutingMode;
+  reply_mode?: ConversationReplyMode;
+  reply_effort?: ConversationReplyEffort | null;
+  reply_effort_options?: ConversationReplyEffort[];
 }
 
 export interface ReferenceChunk {
@@ -36,10 +52,13 @@ export interface KnowledgeReferences {
   available: boolean;
   module: string | null;
   retrieval_outcome: string | null;
+  retrieval_mode?: string | null;
   gate_reason: string | null;
   mediator_status: string | null;
   mediator_reason: string | null;
   mediator_reasoning_content: string | null;
+  mediator_response_content?: string | null;
+  mediator_note?: string | null;
   mediator_guidance?: string | null;
   mediator_cautions?: string[];
   mediator_model: string | null;
@@ -81,20 +100,27 @@ export function isMissing(error: unknown): boolean {
 async function parse<T>(res: Response, what: string): Promise<T> {
   checkAuthentication(res);
   if (!res.ok) {
-    const detail = await res.text();
     throw new ConversationRequestError(
-      `${what} failed (${res.status}): ${detail}`,
+      chatRequestError(res.status),
       res.status,
     );
   }
-  return res.json() as Promise<T>;
+  try { return await res.json() as T; }
+  catch { throw new ConversationRequestError("对话数据暂时无法读取，请稍后重试。", 502); }
 }
 
-export async function setConversationThinking(sessionId: string, enabled: boolean): Promise<ConversationDetail> {
-  const res = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}/thinking`, {
+export async function setConversationMediator(sessionId: string, enabled: boolean): Promise<ConversationDetail> {
+  const res = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}/knowledge-mediator`, {
     method: "PATCH", headers: apiHeaders({ json: true }), body: JSON.stringify({ enabled }),
   });
-  return parse(res, "保存深度思考设置");
+  return parse(res, "保存知识中介设置");
+}
+
+export async function setConversationReplyEffort(sessionId: string, effort: ConversationReplyEffort): Promise<ConversationDetail> {
+  const res = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}/reply-effort`, {
+    method: "PATCH", headers: apiHeaders({ json: true }), body: JSON.stringify({ effort }),
+  });
+  return parse(res, "保存主回复思考强度");
 }
 
 export async function listConversations(
@@ -110,12 +136,15 @@ export async function listConversations(
 /** Create the durable opening turn and receive its server-owned session id. */
 export async function createConversation(
   routingMode: ConversationRoutingMode,
+  replyMode: ConversationReplyMode = "standard",
+  replyEffort?: ConversationReplyEffort,
   signal?: AbortSignal,
 ): Promise<ConversationDetail> {
   const res = await fetch(`${API_BASE}/api/conversations`, {
     method: "POST",
     headers: apiHeaders({ json: true }),
-    body: JSON.stringify({ routing_mode: routingMode }),
+    body: JSON.stringify({ routing_mode: routingMode, reply_mode: replyMode,
+      ...(replyMode === "ack_deep" && replyEffort ? { reply_effort: replyEffort } : {}) }),
     signal,
   });
   return parse(res, "Starting a conversation");
@@ -138,9 +167,9 @@ export async function fetchConversation(
   sessionId: string,
   signal?: AbortSignal,
 ): Promise<ConversationDetail> {
-  const res = await fetch(
+  const res = await fetchHistory(
     `${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}`,
-    { headers: apiHeaders(), signal, cache: "no-store" },
+    signal,
   );
   return parse(res, "Loading the conversation");
 }
@@ -149,11 +178,25 @@ export async function fetchConversationRevision(
   sessionId: string,
   signal?: AbortSignal,
 ): Promise<{ revision: number }> {
-  const res = await fetch(
+  const res = await fetchHistory(
     `${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}/revision`,
-    { headers: apiHeaders(), signal, cache: "no-store" },
+    signal,
   );
   return parse(res, "Checking the conversation revision");
+}
+
+function historyReadSignal(signal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(10000);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
+async function fetchHistory(url: string, signal?: AbortSignal): Promise<Response> {
+  try { return await fetch(url, { headers: apiHeaders(), signal: historyReadSignal(signal), cache: "no-store" }); }
+  catch (error) {
+    if (signal?.aborted) throw error;
+    const timedOut = error instanceof DOMException && error.name === "TimeoutError";
+    throw new Error(timedOut ? "对话记录读取超时，请稍后重试。" : "暂时无法同步对话记录，请检查网络后重试。");
+  }
 }
 
 export interface ConversationLiveHandlers {
@@ -248,4 +291,21 @@ export async function fetchMessageRequests(messageId: number, signal?: AbortSign
     headers: apiHeaders(), signal, cache: "no-store",
   });
   return parse(response, "加载请求记录");
+}
+
+export interface ContextUsage {
+  estimated_tokens: number;
+  token_budget: number | null;
+  retained_messages: number;
+  summarized_messages: number;
+  total_messages: number;
+  message_budget: number | null;
+  mode: "compression" | "window";
+}
+
+export async function fetchContextUsage(sessionId: string, signal?: AbortSignal): Promise<ContextUsage> {
+  const response = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}/context`, {
+    headers: apiHeaders(), signal, cache: "no-store",
+  });
+  return parse(response, "读取上下文用量");
 }

@@ -51,8 +51,10 @@ async def recover_empty_reply(*, provider, system, messages, elapsed_seconds,
     except (TimeoutError, asyncio.TimeoutError):
         diagnostic["status"] = "timeout"
         return None, diagnostic
-    except ProviderError:
+    except ProviderError as exc:
         diagnostic["status"] = "provider_error"
+        if getattr(exc, "request_id", None):
+            diagnostic["request_id"] = exc.request_id
         return None, diagnostic
     except Exception:
         # Malformed compatible-provider payloads are also an upstream failure;

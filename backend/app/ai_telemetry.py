@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .config import get_settings
 from .models import AIExecutionEvent, Conversation
+from .providers.usage import cache_usage
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,20 @@ async def add_ai_event(
     if scope and scope[0] == session_id and scope[1] is not None:
         event_metadata = {**(event_metadata or {}), "user_message_id": scope[1]}
     usage = usage or {}
+    measured_cache_usage = cache_usage(usage)
+    if measured_cache_usage:
+        event_metadata = {**(event_metadata or {}), "cache_usage": measured_cache_usage}
     cost, pricing_version = estimate_cost(model_name, usage)
+    cache_metrics = {
+        key: usage[key]
+        for key in ("cache_read_input_tokens", "cache_creation_input_tokens")
+        if type(usage.get(key)) is int and usage[key] >= 0
+    }
+    # Keep provider cache observations in existing JSON without a schema change.
+    # Do not infer zero for absent metrics or mutate metadata reused by callers.
+    metadata = dict(event_metadata) if event_metadata is not None else None
+    if cache_metrics:
+        metadata = {**(metadata or {}), **cache_metrics}
     event = AIExecutionEvent(
         conversation_id=conversation_id,
         assistant_message_id=assistant_message_id,
@@ -106,7 +120,7 @@ async def add_ai_event(
         prompt_version=prompt_version,
         estimated_cost_usd=cost,
         pricing_version=pricing_version,
-        event_metadata=event_metadata,
+        event_metadata=metadata,
     )
     db.add(event)
     return event

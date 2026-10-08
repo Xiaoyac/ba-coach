@@ -41,7 +41,8 @@ async def preference_block(db, user_id):
     return value in {'暂时不需要提醒', '仅在我主动找你时提醒'}
 
 
-async def preference_allows(db, item, at):
+async def preference_allows(db, item, at, *, delivery_table=deliveries,
+                            delivered_states=('accepted', 'attempting', 'unknown')):
     from zoneinfo import ZoneInfo
     table = schema.tables['user_preferences']
     pref = (await db.execute(select(table).where(table.c.user_id == item['user_id']))).mappings().one_or_none()
@@ -58,10 +59,10 @@ async def preference_allows(db, item, at):
         return False
     gap = {'每天一次': 1, '隔天一次': 2, '每三天一次': 3, '每周一次': 7}.get(pref['reminder_frequency'])
     if gap:
-        previous = await db.scalar(select(deliveries.c.created_at).where(
-            deliveries.c.user_id == item['user_id'], deliveries.c.state.in_(['accepted','attempting','unknown']),
-            or_(deliveries.c.goal_id != item['goal_id'], deliveries.c.start_at != naive_utc(item['start_at'])))
-            .order_by(deliveries.c.created_at.desc()).limit(1))
+        previous = await db.scalar(select(delivery_table.c.created_at).where(
+            delivery_table.c.user_id == item['user_id'], delivery_table.c.state.in_(delivered_states),
+            or_(delivery_table.c.goal_id != item['goal_id'], delivery_table.c.start_at != naive_utc(item['start_at'])))
+            .order_by(delivery_table.c.created_at.desc()).limit(1))
         if previous and (local.date() - utc(previous).astimezone(ZoneInfo(item['timezone'])).date()).days < gap: return False
     return True
 

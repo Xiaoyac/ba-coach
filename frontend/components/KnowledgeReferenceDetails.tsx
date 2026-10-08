@@ -5,6 +5,8 @@ import { fetchKnowledgeReferences, type KnowledgeReferences } from "@/lib/conver
 import { knowledgeScoreLabel } from "@/lib/knowledgeScores";
 
 const statusLabels: Record<string, string> = {
+  astrbot_hybrid: "AstrBot 混合检索", catalog: "目录检索", hybrid_direct: "混合检索材料直接提供给主回复",
+  bypassed: "已绕过中介", admin_direct: "管理员测试：检索材料直通主回复",
   returned: "已召回", empty: "未召回相关片段", skipped: "已跳过", disabled: "未启用",
   completed: "已完成", fallback: "未放行", timeout: "中介超时，片段未放行",
   invalid_output_or_provider_error: "中介输出异常或服务错误，片段未放行",
@@ -48,7 +50,6 @@ export default function KnowledgeReferenceDetails({ messageId, pending, view = "
       onClick={() => setRetry(value => value + 1)}>重试加载</button></div>;
   if (!data) return <p role="status">正在加载本轮参考片段…</p>;
   if (!data.available) return <div role="status"><p className="font-mono text-ink">null</p><p className="mt-2">本条回复未记录参考片段（历史回复、开场白或未经过知识检索流程）。不会重新检索补填。</p></div>;
-  if (!data.recalled.length) return <p role="status" className="font-mono text-ink">null</p>;
   if (view === "mediator") return <div className="space-y-3">
     <div className="space-y-1">
       <p className="font-medium text-accent-ink">中介节点使用建议内容</p>
@@ -63,10 +64,18 @@ export default function KnowledgeReferenceDetails({ messageId, pending, view = "
         {data.mediator_cautions.map((item, index) => <li key={index} className="whitespace-pre-wrap [overflow-wrap:anywhere]">{item}</li>)}
       </ul>
     </section>}
-    {!data.mediator_guidance && <p>{data.mediator_status === "completed"
+    {data.mediator_note && <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">判断说明：{data.mediator_note}</p>}
+    {!data.mediator_guidance && !data.mediator_note && <p>{data.mediator_status === "bypassed"
+      ? "本轮未调用中介模型；提供给主回复的材料可在知识详情中查看。"
+      : data.mediator_status === "completed"
       ? "本条历史回复未保存中介使用建议，不会重新调用模型补填；新回复可查看实际建议。"
       : "本轮没有可用的中介使用建议，请结合上方处理状态查看原因。"}</p>}
     {data.mediator_guidance && <p className="text-ink-faint">这是中介给回复模型的知识使用建议，不是独立思考内容，也不代表回复最终实际引用。</p>}
+    {data.mediator_response_content && <details open className="rounded-lg bg-surface/70 px-3 py-2">
+      <summary className="cursor-pointer py-1 font-medium text-ink focus-visible:outline-accent-edge">中介模型返回内容（调试）</summary>
+      <p className="mt-2 whitespace-pre-wrap [overflow-wrap:anywhere]">{data.mediator_response_content}</p>
+      <p className="mt-2 text-ink-faint">这是本轮原始返回结果，不代表校验通过；是否采用以上方处理状态为准。</p>
+    </details>}
     {data.mediator_reasoning_content && <details className="rounded-lg bg-surface/70 px-3 py-2">
       <summary className="cursor-pointer py-1 font-medium text-ink focus-visible:outline-accent-edge">中介思考（已保存）</summary>
       <p className="mt-2 whitespace-pre-wrap [overflow-wrap:anywhere]">{data.mediator_reasoning_content}</p>
@@ -78,6 +87,7 @@ export default function KnowledgeReferenceDetails({ messageId, pending, view = "
     <div className="space-y-1">
       <p className="font-medium text-accent-ink">本轮召回 {data.recalled.length} 段 · 传给回复模型 {data.provided.length} 段</p>
       <p>模块：{data.module ?? "未记录"} · 检索：{label(data.retrieval_outcome)}</p>
+      {data.retrieval_mode && <p>检索模式：{label(data.retrieval_mode)}</p>}
       {data.gate_reason && <p>意图门控：{label(data.gate_reason)}</p>}
       <p>中介：{label(data.mediator_status)} · {label(data.mediator_reason)}</p>
       {data.context_withheld && <p className="text-accent-ink">安全上下文不可用，本轮片段全部未放行。</p>}

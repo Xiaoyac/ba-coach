@@ -2,7 +2,8 @@
 
 The internal ``deepseek`` key and environment variable names are retained for
 existing accounts and deployments. Requests use the configured URL/model and
-model-specific thinking parameters. System segments are joined into one string.
+model-specific thinking parameters. Main-reply context can preserve a trusted
+system suffix after history; ordinary/router callers retain their old layout.
 
 Current thinking-capable models return `reasoning_content` separately from
 the user-facing `content`; both are preserved so the UI can disclose the
@@ -13,29 +14,73 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 
 import openai
 
 from ..config import Settings
 from ..schemas import Message
 from .deadline import timeout
-from .request_ids import request_id
+from .request_ids import request_id as extract_request_id
 from ..generation_policy import main_thinking_options, native_thinking_options
+from .prompt_cache import system_messages
+from .usage import openai_usage
+from ..generation_policy import is_ark_kimi, ark_kimi_effort, auxiliary_output_budget
 from .base import (
     Completion,
     LLMProvider,
     ProviderError,
     StreamDelta,
     SystemPrompt,
-    as_text,
     match_label,
 )
 
 logger = logging.getLogger(__name__)
 
 
+def _cache_usage(usage: object) -> dict[str, int]:
+    """Preserve reported cache counters; an absent counter is not a cache miss."""
+    details = (
+        usage.get("prompt_tokens_details")
+        if isinstance(usage, Mapping)
+        else getattr(usage, "prompt_tokens_details", None)
+    )
+    counters: dict[str, int] = {}
+    for source, target in (
+        ("cached_tokens", "cache_read_input_tokens"),
+        ("cache_creation_input_tokens", "cache_creation_input_tokens"),
+    ):
+        value = details.get(source) if isinstance(details, Mapping) else getattr(details, source, None)
+        if type(value) is int and value >= 0:
+            counters[target] = value
+    return counters
+
+
+def _stream_header_request_id(stream: object) -> str | None:
+    """AsyncStream exposes the HTTP response, not a parsed _request_id field."""
+    headers = getattr(getattr(stream, "response", None), "headers", None)
+    value = headers.get("x-request-id") if headers is not None else None
+    return value if isinstance(value, str) and value else None
+
+
+def _error_request_id(error: Exception) -> str | None:
+    # APIStatusError obtains this from the response header; body completion IDs
+    # such as chatcmpl-* are not substitutes for a provider request ID.
+    if isinstance(error, openai.APIStatusError):
+        value = error.request_id
+        return value if isinstance(value, str) and value else None
+    return None
+
+
+def _provider_error(message: str, request_id: str | None = None) -> ProviderError:
+    error = ProviderError(message)
+    if request_id:
+        error.request_id = request_id
+    return error
+
+
 class DeepSeekProvider(LLMProvider):
+    supports_native_tools = True
     name = "deepseek"
 
     def __init__(self, settings: Settings) -> None:
@@ -53,9 +98,18 @@ class DeepSeekProvider(LLMProvider):
         )
 
     def _payload(self, system: SystemPrompt, messages: list[Message]) -> list[dict]:
-        return [{"role": "system", "content": as_text(system)}] + [
-            {"role": m.role, "content": m.content} for m in messages
-        ]
+        from .prompt_cache import ordered_messages
+        from .base import as_segments
+        if not any(s.after_history for s in as_segments(system)):
+            return system_messages(system, settings=self._settings, model=self.model) + [
+                {"role": m.role, "content": m.content} for m in messages]
+        return ordered_messages(system, [{"role": m.role, "content": m.content} for m in messages])
+
+    @property
+    def supports_tail_system(self) -> bool:
+        # Verified on the configured Ark K3 channel; other transports retain
+        # their existing layout until separately tested.
+        return is_ark_kimi(self._settings, self.name, model=self.model)
 
     async def complete_without_reasoning(
         self, *, system: SystemPrompt, messages: list[Message]
@@ -65,51 +119,59 @@ class DeepSeekProvider(LLMProvider):
         Not a router call: using its model/prompt would lose coaching context.
         Never feeds the unfinished reasoning back as evidence or retries again.
         """
+        if self.deep_reply_enabled:
+            # The experiment must not silently downgrade a failed deep reply.
+            # This remains one caller-bounded recovery on the same full input.
+            return await self.complete(system=system, messages=messages)
         # An explicit administrator choice applies even to a bounded recovery.
         enabled = self.thinking_override is True
         try:
             response = await self._client.with_options(max_retries=0).chat.completions.create(
                 model=self.model,
                 messages=self._payload(system, messages),
-                max_tokens=min(self._settings.deepseek_max_tokens, 1200 + (self._settings.qwen_thinking_budget if enabled else 0)),
+                max_tokens=auxiliary_output_budget(
+                    self._settings, self.name, self.model,
+                    min(self._settings.deepseek_max_tokens, 1200 + (self._settings.qwen_thinking_budget if enabled else 0))),
                 extra_body=native_thinking_options(self._settings, self.name, enabled=enabled, model=self.model),
             )
         except openai.OpenAIError as exc:
-            raise ProviderError(f"{self.model} reply recovery failed") from exc
+            raise _provider_error(f"{self.model} reply recovery failed", _error_request_id(exc)) from exc
         choice = response.choices[0]
         usage = response.usage
         return Completion(
             text=choice.message.content or "", model=response.model,
             usage={"input_tokens": usage.prompt_tokens if usage else 0,
                    "output_tokens": usage.completion_tokens if usage else 0,
-                   "reasoning_tokens": getattr(getattr(usage, "completion_tokens_details", None), "reasoning_tokens", 0) or 0},
-            reasoning_content=getattr(choice.message, "reasoning_content", None) or "",
+                   "reasoning_tokens": (getattr(getattr(usage, "completion_tokens_details", None),
+                                                "reasoning_tokens", 0) or 0) if enabled else 0,
+                   **_cache_usage(usage)},
+            reasoning_content=(getattr(choice.message, "reasoning_content", None)
+                               or getattr(choice.message, "reasoning", None) or ""),
             finish_reason=choice.finish_reason,
-            request_id=request_id(response),
+            request_id=extract_request_id(response),
         )
 
     async def complete(
         self, *, system: SystemPrompt, messages: list[Message]
     ) -> Completion:
         try:
-            timeout_seconds = getattr(
-                self._settings, "provider_request_timeout_seconds", 60.0
-            )
+            timeout_seconds = self._main_timeout_seconds()
             async with timeout(timeout_seconds):
-                response = await self._client.chat.completions.create(
+                response = await self._main_client().chat.completions.create(
                     model=self.model,
-                    max_tokens=self._settings.deepseek_max_tokens,
+                    max_tokens=auxiliary_output_budget(
+                        self._settings, self.name, self.model, self._main_max_tokens()),
                     messages=self._payload(system, messages),
-                    extra_body=main_thinking_options(self._settings, self.name, messages, enabled_override=self.thinking_override),
+                    extra_body=self._main_thinking_options(messages),
                 )
         except (TimeoutError, asyncio.TimeoutError, openai.APITimeoutError) as exc:
             raise ProviderError(
                 f"{self.model} request timed out after "
-                f"{getattr(self._settings, 'provider_request_timeout_seconds', 60.0):g}s"
+                f"{self._main_timeout_seconds():g}s"
             ) from exc
         except openai.APIStatusError as exc:
-            raise ProviderError(
-                f"{self.model} API error {exc.status_code}: {exc.message}"
+            raise _provider_error(
+                f"{self.model} API error {exc.status_code}: {exc.message}", _error_request_id(exc)
             ) from exc
         except openai.APIConnectionError as exc:
             raise ProviderError(f"Could not reach the {self.model} API") from exc
@@ -119,54 +181,46 @@ class DeepSeekProvider(LLMProvider):
         return Completion(
             text=choice.message.content or "",
             model=response.model,
-            usage={
-                "input_tokens": usage.prompt_tokens if usage else 0,
-                "output_tokens": usage.completion_tokens if usage else 0,
-                "reasoning_tokens": (
-                    getattr(
-                        getattr(usage, "completion_tokens_details", None),
-                        "reasoning_tokens",
-                        0,
-                    )
-                    or 0
-                ),
-            },
+            usage=openai_usage(usage),
             reasoning_content=(
                 getattr(choice.message, "reasoning_content", None)
                 or getattr(choice.message, "reasoning", None)
                 or ""
             ),
             finish_reason=choice.finish_reason,
-            request_id=request_id(response),
+            request_id=extract_request_id(response),
         )
 
     async def stream(
         self, *, system: SystemPrompt, messages: list[Message]
     ) -> AsyncIterator[StreamDelta]:
         stream = None
+        request_id: str | None = None
         try:
-            timeout_seconds = getattr(
-                self._settings, "provider_request_timeout_seconds", 60.0
-            )
+            timeout_seconds = self._main_timeout_seconds()
             async with timeout(timeout_seconds):
-                stream = await self._client.chat.completions.create(
+                stream = await self._main_client().chat.completions.create(
                     model=self.model,
-                    max_tokens=self._settings.deepseek_max_tokens,
+                    max_tokens=auxiliary_output_budget(
+                        self._settings, self.name, self.model, self._main_max_tokens()),
                     messages=self._payload(system, messages),
                     stream=True,
                     stream_options={"include_usage": True},
-                    extra_body=main_thinking_options(self._settings, self.name, messages, enabled_override=self.thinking_override),
+                    extra_body=self._main_thinking_options(messages),
                 )
-                stream_request_id = request_id(stream)
-                if stream_request_id:
-                    yield StreamDelta(kind="usage", request_id=stream_request_id)
+                header_request_id = _stream_header_request_id(stream)
+                request_id = header_request_id or extract_request_id(stream)
+                if header_request_id:
+                    # Send the identifier before content so interrupted streams
+                    # can still be located in the provider's inference logs.
+                    yield StreamDelta(kind="usage", request_id=header_request_id)
                 usage_payload: dict[str, int] = {}
                 finish_reason: str | None = None
                 async for chunk in stream:
-                    chunk_request_id = request_id(chunk)
-                    if chunk_request_id and not stream_request_id:
-                        stream_request_id = chunk_request_id
-                        yield StreamDelta(kind="usage", request_id=stream_request_id)
+                    chunk_request_id = extract_request_id(chunk)
+                    if chunk_request_id and not request_id:
+                        request_id = chunk_request_id
+                        yield StreamDelta(kind="usage", request_id=request_id)
                     if chunk.usage is not None:
                         usage_payload = {
                             "input_tokens": chunk.usage.prompt_tokens or 0,
@@ -179,6 +233,7 @@ class DeepSeekProvider(LLMProvider):
                                 )
                                 or 0
                             ),
+                            **_cache_usage(chunk.usage),
                         }
                     if not chunk.choices:
                         continue
@@ -197,19 +252,22 @@ class DeepSeekProvider(LLMProvider):
                     kind="usage",
                     usage=usage_payload,
                     finish_reason=finish_reason,
-                    request_id=stream_request_id,
+                    request_id=request_id,
                 )
         except (TimeoutError, asyncio.TimeoutError, openai.APITimeoutError) as exc:
-            raise ProviderError(
+            raise _provider_error(
                 f"{self.model} stream timed out after "
-                f"{getattr(self._settings, 'provider_request_timeout_seconds', 60.0):g}s"
+                f"{self._main_timeout_seconds():g}s", request_id
             ) from exc
         except openai.APIStatusError as exc:
-            raise ProviderError(
-                f"{self.model} API error {exc.status_code}: {exc.message}"
+            error_request_id = _error_request_id(exc) or request_id
+            if error_request_id and error_request_id != request_id:
+                yield StreamDelta(kind="usage", request_id=error_request_id)
+            raise _provider_error(
+                f"{self.model} API error {exc.status_code}: {exc.message}", error_request_id
             ) from exc
         except openai.APIConnectionError as exc:
-            raise ProviderError(f"Could not reach the {self.model} API") from exc
+            raise _provider_error(f"Could not reach the {self.model} API", request_id) from exc
 
         finally:
             if stream is not None and callable(getattr(stream, "close", None)):
@@ -231,10 +289,12 @@ class DeepSeekProvider(LLMProvider):
             async with timeout(timeout_seconds):
                 response = await self._client.chat.completions.create(
                     model=self._settings.deepseek_router_model,
-                    max_tokens=max_tokens or self._settings.router_max_tokens,
+                    max_tokens=auxiliary_output_budget(
+                        self._settings, self.name, self._settings.deepseek_router_model,
+                        max_tokens or self._settings.router_max_tokens),
                     temperature=0,
                     messages=[
-                        {"role": "system", "content": system},
+                        *system_messages(system, settings=self._settings, model=self._settings.deepseek_router_model),
                         {"role": "user", "content": user},
                     ],
                     extra_body=native_thinking_options(self._settings, self.name, enabled=False,
@@ -245,17 +305,16 @@ class DeepSeekProvider(LLMProvider):
             return Completion(
                 text=choice.message.content or "",
                 model=response.model,
-                usage={
-                    "input_tokens": usage.prompt_tokens if usage else 0,
-                    "output_tokens": usage.completion_tokens if usage else 0,
-                    "reasoning_tokens": 0,
-                },
+                usage=openai_usage(usage),
+                reasoning_content=(getattr(choice.message, "reasoning_content", None)
+                                   or getattr(choice.message, "reasoning", None) or ""),
                 finish_reason=choice.finish_reason,
-                request_id=request_id(response),
+                request_id=extract_request_id(response),
             )
-        except Exception:  # noqa: BLE001 — routing must never break the turn
+        except Exception as exc:  # noqa: BLE001 — routing must never break the turn
             logger.warning("DeepSeek router call failed", exc_info=True)
-            return Completion(text="", model=self._settings.deepseek_router_model)
+            return Completion(text="", model=self._settings.deepseek_router_model,
+                              request_id=_error_request_id(exc))
 
     async def classify(
         self, *, system: str, user: str, allowed: Sequence[str], default: str
@@ -303,15 +362,19 @@ class DeepSeekProvider(LLMProvider):
             )
             thinking_body = native_thinking_options(self._settings, self.name, enabled=True, model=model)
             request_options = {}
-            if reasoning_effort and "enable_thinking" not in thinking_body:
+            if is_ark_kimi(self._settings, self.name, model=model):
+                thinking_body = {"reasoning_effort": ark_kimi_effort(reasoning_effort)}
+            elif reasoning_effort and "enable_thinking" not in thinking_body:
                 request_options["reasoning_effort"] = reasoning_effort
             async with timeout(timeout_seconds):
                 response = await client.chat.completions.create(
                     model=model,
-                    max_tokens=max_tokens or self._settings.router_reasoning_max_tokens,
+                    max_tokens=auxiliary_output_budget(
+                        self._settings, self.name, model,
+                        max_tokens or self._settings.router_reasoning_max_tokens),
                     **request_options,
                     messages=[
-                        {"role": "system", "content": system},
+                        *system_messages(system, settings=self._settings, model=model),
                         {"role": "user", "content": user},
                     ],
                     extra_body=thinking_body,
@@ -326,17 +389,10 @@ class DeepSeekProvider(LLMProvider):
                     or getattr(choice.message, "reasoning", None)
                     or ""
                 ),
-                usage={
-                    "input_tokens": usage.prompt_tokens if usage else 0,
-                    "output_tokens": usage.completion_tokens if usage else 0,
-                    "reasoning_tokens": (
-                        getattr(getattr(usage, "completion_tokens_details", None), "reasoning_tokens", 0)
-                        or 0
-                    ),
-                },
+                usage=openai_usage(usage),
                 finish_reason=choice.finish_reason,
-                request_id=request_id(response),
+                request_id=extract_request_id(response),
             )
-        except Exception:  # noqa: BLE001 — routing must never break the turn
+        except Exception as exc:  # noqa: BLE001 — routing must never break the turn
             logger.warning("DeepSeek thinking router call failed", exc_info=True)
-            return Completion(text="", model=model)
+            return Completion(text="", model=model, request_id=_error_request_id(exc))

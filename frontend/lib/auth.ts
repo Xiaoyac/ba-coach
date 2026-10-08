@@ -170,11 +170,12 @@ export async function login(
  * state, not an error the UI should report.
  */
 export async function fetchMe(): Promise<Account | null> {
-  if (!getToken()) return null;
+  const token = getToken();
+  if (!token) return null;
   try {
     const res = await fetch(`${API_BASE}/api/auth/me`, { headers: headers() });
     if (res.status === 401) {
-      clearToken();
+      if (getToken() === token) clearToken();
       return null;
     }
     if (!res.ok) return null;
@@ -277,15 +278,17 @@ export async function resetPassword(
 }
 
 export async function logout(): Promise<void> {
+  const token = getToken();
+  const requestHeaders = headers();
   await import('@/lib/push').then(m=>m.clearLocalPush()).catch(()=>{});
   try {
     await fetch(`${API_BASE}/api/auth/logout`, {
       method: "POST",
-      headers: headers(),
+      headers: requestHeaders,
     });
   } finally {
     // Local state is cleared even if the revoke call failed, so the button
     // always signs you out of this browser.
-    clearToken();
+    if (getToken() === token) clearToken();
   }
 }

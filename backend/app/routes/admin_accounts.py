@@ -22,6 +22,7 @@ from ..models import (
     ConversationMessage,
     ConversationModuleProgress,
     ConversationRuntimeState,
+    ConversationReplyEffort,
     ProfileExtension,
     UserAccount,
 )
@@ -143,6 +144,8 @@ async def _purge_account_business_data(db: AsyncSession, *, profile_uuid: str) -
     were shared between chats owned by the same account.
     """
     tables = v2_schema.tables
+    from ..goal_card_workspace import delete_user_cards
+    await delete_user_cards(db, profile_uuid)
     if get_settings().database_schema_version != "v2":
         # Local/legacy installations do not have the V2 tables.  Keep the
         # same deletion contract there using the externally-owned ORM models.
@@ -155,6 +158,8 @@ async def _purge_account_business_data(db: AsyncSession, *, profile_uuid: str) -
             telemetry_filters.append(AIExecutionEvent.conversation_id.in_(conversation_ids))
         await db.execute(delete(AIExecutionEvent).where(or_(*telemetry_filters)))
         if conversation_ids:
+            await db.execute(delete(ConversationReplyEffort).where(
+                ConversationReplyEffort.conversation_id.in_(conversation_ids)))
             await db.execute(delete(ConversationModuleProgress).where(
                 ConversationModuleProgress.conversation_id.in_(conversation_ids)))
             await db.execute(delete(ConversationRuntimeState).where(
@@ -218,6 +223,8 @@ async def _purge_account_business_data(db: AsyncSession, *, profile_uuid: str) -
         telemetry_filters.append(AIExecutionEvent.session_id.in_([row.session_id for row in conversations]))
     await db.execute(delete(AIExecutionEvent).where(or_(*telemetry_filters)))
     if conversation_ids:
+        await db.execute(delete(ConversationReplyEffort).where(
+            ConversationReplyEffort.conversation_id.in_(conversation_ids)))
         await db.execute(delete(ConversationModuleProgress).where(
             ConversationModuleProgress.conversation_id.in_(conversation_ids)))
         await db.execute(delete(ConversationRuntimeState).where(

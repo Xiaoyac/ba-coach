@@ -67,16 +67,17 @@ export default function SharedConversationView({ token }: { token: string }) {
       {snapshot && <>
         <div className="mx-auto mb-7 max-w-5xl text-center text-xs leading-relaxed text-ink-muted">
           <p>截至 {new Date(snapshot.created_at).toLocaleString("zh-CN")} · {snapshot.messages.length} 条消息</p>
-          <p className="mt-1">仅展示分享时的对话正文与消息时间，后续聊天不会加入此分享。</p>
+          <p className="mt-1">{snapshot.snapshot_version === 2 ? "包含分享时已保存的管理员调试详情，后续聊天和详情更新不会加入此分享。" : "仅展示分享时的对话正文与消息时间，后续聊天不会加入此分享。"}</p>
         </div>
         <section aria-label="分享的对话消息" className="space-y-5 sm:space-y-6">
           {snapshot.messages.map((message, index) => <MessageRow
             key={message.id ?? index}
-            message={{ id: message.id, role: message.role, content: message.content, created_at: message.created_at }}
+            message={snapshot.snapshot_version === 2 ? message : { id: message.id, role: message.role, content: message.content, created_at: message.created_at, reply_status: message.reply_status }}
             pending={false}
             routingPending={false}
             animate={false}
-            showDiagnostics={false}
+            showDiagnostics={snapshot.snapshot_version === 2}
+            knowledgeSource={{ kind: "snapshot", data: snapshot.snapshot_version === 2 ? message.knowledge_references ?? null : null }}
           />)}
         </section>
         {!snapshot.messages.length && <p className="py-10 text-center text-sm text-ink-muted">这份分享没有保存消息。</p>}

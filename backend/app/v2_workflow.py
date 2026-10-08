@@ -15,7 +15,8 @@ async def runtime_for(db, session_id):
         return None, None
     rt = schema.tables["conversation_runtime_states"]
     state = (await db.execute(select(rt).where(rt.c.conversation_id == conversation.id))).mappings().one_or_none()
-    return conversation, state
+    from .goal_scope import scoped_runtime
+    return conversation, await scoped_runtime(db, conversation, state)
 
 
 def fresh_m1(state):
@@ -34,7 +35,8 @@ async def m1_draft(db, user_id, *, state, session_id=None):
     if session_id is None and state:
         session_id = await db.scalar(select(Conversation.session_id).where(
             Conversation.id == state["conversation_id"]))
-    if fresh_m1(state):
+    from .goal_scope import isolated
+    if fresh_m1(state) or await isolated(db, user_id):
         return next((row for row in rows if contract_for(row).get("session_id") == session_id), None)
     for row in rows:
         source = contract_for(row).get("session_id")
@@ -53,7 +55,8 @@ async def load_workflow(maker, session_id):
         if not conversation or not state:
             return steps, None
         m1 = schema.tables["user_module_one_state"]
-        one = (await db.execute(select(m1).where(m1.c.user_id == conversation.subject_id))).mappings().one_or_none()
+        from .goal_scope import m1_state
+        one = await m1_state(db, conversation.subject_id, conversation.id)
         if fresh_m1(state):
             from .m1_contract import contract_for
             pending = await m1_draft(db, conversation.subject_id, state=state, session_id=session_id)
@@ -75,7 +78,7 @@ async def current_cycle(db, session_id):
 
 async def module_extraction_is_current(
     db, *, conversation_id, state, module, assistant_message_id=None,
-    following_user_message_id=None,
+    following_user_message_id=None, following_assistant_message_id=None,
 ):
     """Whether source-validated extraction belongs to the current boundary."""
     if module not in {"module_2", "module_3", "module_4"}:
@@ -89,8 +92,27 @@ async def module_extraction_is_current(
         ConversationMessage.position.desc(), ConversationMessage.id.desc()).limit(1))).scalar_one_or_none()
     if latest_row is None:
         return False
+    if following_assistant_message_id is not None:
+        # A detached confirmation may run after this turn's own reply is
+        # durable. Only that exact adjacent pair is authorized, never merely
+        # the latest user somewhere in the transcript.
+        if (latest_row.id != following_assistant_message_id or latest_row.role != "assistant"
+                or following_user_message_id is None):
+            return False
+        following_user = await db.get(ConversationMessage, following_user_message_id)
+        if (not following_user or following_user.conversation_id != conversation_id
+                or following_user.role != "user" or latest_row.position != following_user.position + 1):
+            return False
+        latest_row = following_user
     if latest_row.id == source_message_id:
-        expected_role = "user" if freshness.get("user_message_id") is not None else "assistant"
+        source_user_id = freshness.get("user_message_id")
+        if source_user_id is not None and source_user_id != source_message_id:
+            source_user = await db.get(ConversationMessage, source_user_id)
+            return bool(latest_row.role == "assistant" and source_user
+                and source_user.conversation_id == conversation_id and source_user.role == "user"
+                and latest_row.position == source_user.position + 1
+                and (assistant_message_id is None or assistant_message_id == source_message_id))
+        expected_role = "user" if source_user_id is not None else "assistant"
         return bool(latest_row.role == expected_role
                     and (assistant_message_id is None or assistant_message_id == source_message_id)
                     and (freshness.get("user_message_id") is None
@@ -110,6 +132,19 @@ async def module_extraction_is_current(
                 and (assistant_message_id is None or assistant_message_id == source_message_id))
 
 
+def _background_evidence_boundary(messages, *, user_message_id, assistant_message_id):
+    """Return semantic sources through the user of an exact durable turn."""
+    if len(messages) < 2:
+        return None
+    user, assistant = messages[-2:]
+    if (user.id != user_message_id or user.role != "user"
+            or assistant.id != assistant_message_id or assistant.role != "assistant"
+            or assistant.conversation_id != user.conversation_id
+            or assistant.position != user.position + 1):
+        return None
+    return messages[:-1]
+
+
 async def record_steps(db, *, session_id, user_id, module, requested_target, steps, assistant_message_id,
                        revoked_steps=(), revocation_evidence=None, diagnostics=None, allow_transition=True):
     diagnostics = diagnostics if diagnostics is not None else {}
@@ -120,6 +155,8 @@ async def record_steps(db, *, session_id, user_id, module, requested_target, ste
     profiles, rt = schema.tables["user_profile"], schema.tables["conversation_runtime_states"]
     await db.execute(select(profiles.c.uuid).where(profiles.c.uuid == user_id).with_for_update())
     state = (await db.execute(select(rt).where(rt.c.conversation_id == conversation.id).with_for_update())).mappings().one()
+    from .goal_scope import scoped_runtime
+    state = await scoped_runtime(db, conversation, state)
     if state["memory"].get("sandbox_mode") == "true":
         return requested_target, None
     latest_id = (await db.execute(select(ConversationMessage.id).where(
@@ -194,10 +231,6 @@ async def record_steps(db, *, session_id, user_id, module, requested_target, ste
         fresh_contract = (extraction_fresh and contract.get("assistant_message_id") == assistant_message_id
                           and contract.get("session_id") == session_id and contract.get("cycle_id") == state["active_cycle_id"])
         merged = [s for s in allowed if s in contract.get("completed_steps", []) and s not in revoked] if fresh_contract else []
-        decision_exists = (await db.execute(select(followups.c.review_id).join(reviews).where(
-            reviews.c.cycle_id == state["active_cycle_id"], reviews.c.record_status == "draft"))).first()
-        if not extraction_fresh or not decision_exists:
-            merged = [step for step in merged if step != "review_decision_made"]
     # Publish the same structured readiness reasons used by the confirmation
     # endpoint.  Router step evidence remains useful for conversation flow,
     # but it no longer silently substitutes for the record's required shape.
@@ -389,7 +422,7 @@ def record_values(module, data):
 
 async def create_goal_from_agent_dialogue(db, *, session_id, user_id, data,
                                            completed_steps, assistant_message_id,
-                                           diagnostics=None):
+                                           diagnostics=None, source_user_message_id=None):
     """Atomically bind a new goal after source-validated user selection.
 
     The web client cannot call this path. Router evidence alone is insufficient
@@ -405,8 +438,10 @@ async def create_goal_from_agent_dialogue(db, *, session_id, user_id, data,
         return None
 
     values = record_values("module_2", data)
+    raw_choice = data.get("core_goal_choice")
+    raw_choice = raw_choice if isinstance(raw_choice, dict) else {}
     activity = values.get("activity_content")
-    if not isinstance(activity, str) or not activity.strip():
+    if (not isinstance(activity, str) or not activity.strip()) and raw_choice.get("action") != "keep":
         return blocked("activity_missing", "没有识别到可创建目标的具体活动")
     conversation, state = await runtime_for(db, session_id)
     if not conversation or conversation.subject_id != user_id or not state:
@@ -415,8 +450,9 @@ async def create_goal_from_agent_dialogue(db, *, session_id, user_id, data,
     await db.execute(select(profiles.c.uuid).where(profiles.c.uuid == user_id).with_for_update())
     state = (await db.execute(select(runtime).where(
         runtime.c.conversation_id == conversation.id).with_for_update())).mappings().one()
+    from .goal_scope import scoped_runtime
+    state = await scoped_runtime(db, conversation, state)
     if (state["current_module"] != "module_2" or state["flow_status"] == "completed"
-            or state["active_goal_id"] or state["active_cycle_id"]
             or state["memory"].get("sandbox_mode") == "true"):
         if state["memory"].get("sandbox_mode") == "true":
             return blocked("sandbox_blocked", "沙盒会话不写入目标")
@@ -427,6 +463,41 @@ async def create_goal_from_agent_dialogue(db, *, session_id, user_id, data,
     messages = await evidence_messages(db, conversation.id, user_id)
     if not messages or messages[-1].id != assistant_message_id:
         return blocked("assistant_evidence_stale", "当前助手消息不是会话最新证据，拒绝用旧轮次创建目标")
+    if source_user_message_id is not None:
+        messages = _background_evidence_boundary(messages, user_message_id=source_user_message_id,
+            assistant_message_id=assistant_message_id)
+        if messages is None:
+            return blocked("assistant_evidence_stale", "当前回复不属于指定用户轮次")
+    from .pa_lifecycle import (unfinished_core_goals, reviewed_goal, core_choice,
+        keep_reviewed_goal, replace_core_goal)
+    candidates = await unfinished_core_goals(db, user_id=user_id, conversation_id=state["conversation_id"])
+    previous = await reviewed_goal(db, user_id=user_id, memory=state["memory"], conversation_id=state["conversation_id"])
+    if previous and previous["id"] not in {item["id"] for item in candidates}:
+        candidates.append(previous)
+    choice = core_choice(data.get("core_goal_choice"), candidates, messages)
+    if choice and choice["action"] == "additional":
+        return blocked("secondary_only", "新增次要活动保留原核心，未修改核心计划")
+    if state["active_cycle_id"] and not (choice and choice["action"] == "replace"
+            and choice["goal"]["id"] == state["active_goal_id"]):
+        return blocked("goal_creation_window_closed", "本轮已有目标，不能从普通抽取新建核心")
+    if candidates and not choice:
+        return blocked("core_choice_required", "保留已有核心，等待真实选择证据；抽取失败不等于用户没有表达")
+    if choice and choice["action"] == "keep":
+        if not previous or previous["id"] != choice["goal"]["id"]:
+            return blocked("unfinished_core_retained", "原核心尚未收尾，不建立重复周期")
+        result = await keep_reviewed_goal(db, user_id=user_id, conversation_id=conversation.id,
+            goal=previous, values={})
+        memory = {k:v for k,v in (state["memory"] or {}).items() if k != "last_reviewed_cycle"}
+        await db.execute(update(runtime).where(runtime.c.conversation_id == conversation.id).values(
+            active_goal_id=result["goal_id"], active_cycle_id=result["cycle_id"], memory=memory,
+            current_module="module_2", flow_status="active", row_version=state["row_version"] + 1,
+            last_transition_reason="user_kept_reviewed_goal"))
+        await db.execute(insert(schema.tables["ai_decision_logs"]), {
+            "conversation_id": conversation.id, "turn_id": str(assistant_message_id),
+            "goal_id": result["goal_id"], "cycle_id": result["cycle_id"], "module_name": "module_2",
+            "decision_type": "core_goal_kept", "decision_value": {"source_quote": choice["quote"]},
+            "evidence_message_ids": [choice["message_id"]]})
+        return result
     proposal = data.get("goal_proposal")
     if not isinstance(proposal, dict) or "selection_status" not in proposal:
         return blocked("selection_extraction_missing", "选择证据需要从已有消息重新抽取")
@@ -443,6 +514,8 @@ async def create_goal_from_agent_dialogue(db, *, session_id, user_id, data,
     if not evidence:
         return blocked("selection_source_invalid", "选择或活动引用无法与当前会话的真实消息核对")
     values.update(difficulty_values(data, messages))
+    from .plan_contract import normalize_coping_evidence
+    values = normalize_coping_evidence(values, messages)
     values = normalize_plan_time(values, messages, timezone_name="Asia/Shanghai")
     # The extractor may decorate the chosen activity with an assistant's
     # wording. Persist the source-backed user choice, not an expanded activity
@@ -460,6 +533,9 @@ async def create_goal_from_agent_dialogue(db, *, session_id, user_id, data,
         creation_reason = "extractor_evidence_fallback_router_step_missing"
     goal_id = await create_goal(db, user_id=user_id, title=activity,
                                 conversation_id=conversation.id)
+    if choice and choice["action"] == "replace":
+        await replace_core_goal(db, user_id=user_id, old_goal_id=choice["goal"]["id"],
+            new_goal_id=goal_id, conversation_id=conversation.id, choice=choice)
     await save_goal_details(db, goal_id, evidence)
     cycle_id = await start_cycle(db, user_id=user_id, goal_id=goal_id,
                                  conversation_id=conversation.id)
@@ -473,10 +549,12 @@ async def create_goal_from_agent_dialogue(db, *, session_id, user_id, data,
         "assistant_message_id": assistant_message_id,
         "cycle_id": cycle_id,
     }
+    if source_user_message_id is not None:
+        freshness["module_2"]["user_message_id"] = source_user_message_id
     await db.execute(update(runtime).where(runtime.c.conversation_id == conversation.id).values(
         active_goal_id=goal_id, active_cycle_id=cycle_id,
         last_transition_reason="agent_created_goal_from_dialogue",
-        memory={**(state["memory"] or {}), "module_extraction_freshness": freshness},
+        memory={**{k:v for k,v in (state["memory"] or {}).items() if k != "last_reviewed_cycle"}, "module_extraction_freshness": freshness},
         row_version=state["row_version"] + 1, updated_at=now()))
 
     user_message_id = evidence["source_message_id"]
@@ -501,9 +579,14 @@ async def create_goal_from_agent_dialogue(db, *, session_id, user_id, data,
     return {"goal_id": goal_id, "cycle_id": cycle_id, "plan_id": plan_id}
 
 
-async def persist_record(maker, *, module, user_id, data, cycle_id):
+async def persist_record(maker, *, module, user_id, data, cycle_id, db_session=None,
+                         tool_closing_summary=None):
     table = schema.tables[TABLES[module]]
-    async with maker() as db:
+    from contextlib import asynccontextmanager
+    @asynccontextmanager
+    async def borrowed():
+        yield db_session
+    async with (maker() if db_session is None else borrowed()) as db:
         profiles = schema.tables["user_profile"]
         await db.execute(select(profiles.c.uuid).where(profiles.c.uuid == user_id).with_for_update())
         values = record_values(module, data)
@@ -549,15 +632,28 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
                 or source_state["active_cycle_id"] != cycle_id or source_state["current_module"] != module
                 or (source_state["memory"] or {}).get("sandbox_mode") == "true" or source_state["flow_status"] in {"completed", "paused"}):
                 return None
+            from .goal_scope import require_goal
+            if source_state["active_goal_id"]:
+                await require_goal(db, user_id, source_state["active_goal_id"], conversation.id)
             messages = await evidence_messages(db, conversation.id, user_id)
             source_user_id = data.get("_source_user_message_id")
-            source_id = source_user_id if source_user_id is not None else data.get("_source_assistant_message_id")
+            source_assistant_id = data.get("_source_assistant_message_id")
+            source_id = source_user_id if source_user_id is not None else source_assistant_id
             expected_role = "user" if source_user_id is not None else "assistant"
-            if not messages or messages[-1].id != source_id or messages[-1].role != expected_role:
+            if source_user_id is not None and source_assistant_id is not None:
+                messages = _background_evidence_boundary(messages, user_message_id=source_user_id,
+                    assistant_message_id=source_assistant_id)
+                if messages is None:
+                    return None
+            elif not messages or messages[-1].id != source_id or messages[-1].role != expected_role:
                 return None
             if module in {"module_2", "module_4"}:
                 await capture_activities(db, user_id=user_id, conversation=conversation, state=source_state,
                     raw=data.get("activity_observations"), messages=messages, corrections=data.get("activity_corrections"))
+        from .goal_scope import isolated
+        isolated_conversation = await isolated(db, user_id)
+        if isolated_conversation and source_state is None:
+            return None
         if module == "module_1":
             scope = table.c.user_id == user_id
             defaults = {"user_id": user_id}
@@ -630,9 +726,24 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
                     values["goal_setting_willingness"] = (
                         "willing" if "goal_setting_consent" in merged_contract.get("completed_steps", [])
                         else "unknown")
+        if module == "module_2" and source_state and messages:
+            from .pa_lifecycle import unfinished_core_goals
+            pending_cores = await unfinished_core_goals(db, user_id=user_id, conversation_id=source_state["conversation_id"])
+            proposal = data.get("goal_proposal")
+            role = proposal.get("selection_role") if isinstance(proposal, dict) else None
+            raw_choice = data.get("core_goal_choice")
+            choice_action = raw_choice.get("action") if isinstance(raw_choice, dict) else None
+            if choice_action in {"replace", "additional"} or (pending_cores and role in {"secondary", "trial"}):
+                # Activity capture has its own source checks. Do not let those
+                # observations overwrite the focused core's editable version.
+                if db_session is None:
+                    await db.commit()
+                return None
         if module == "module_2":
             from .goal_contract import difficulty_values
+            from .plan_contract import normalize_coping_evidence
             values.update(difficulty_values(data, messages, existing=existing))
+            values = normalize_coping_evidence(values, messages, existing=existing)
             if existing:
                 values = _synchronize_duration_text(values, existing)
             values = normalize_plan_time(values, messages, existing=existing,
@@ -713,8 +824,8 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
                 return None
             messages = await cycle_messages(db, messages)
             values = normalize(data, messages, session_id=data["_source_session_id"], cycle_id=cycle_id,
-                assistant_message_id=(data.get("_source_user_message_id") or data.get("_source_assistant_message_id")), existing=existing,
-                cycle_status=cycle["status"])
+                assistant_message_id=(data.get("_source_assistant_message_id") or data.get("_source_user_message_id")), existing=existing,
+                cycle_status=cycle["status"], tool_closing_summary=tool_closing_summary)
             progress, rt = schema.tables["pa_cycle_progress"], schema.tables["conversation_runtime_states"]
             await db.execute(update(progress).where(progress.c.cycle_id == cycle_id).values(
                 module_4_scenario=values["scenario_type"], module_4_steps=values["phase_c"]["_m4_contract"]["completed_steps"],
@@ -728,6 +839,7 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
                 await db.execute(update(cycles).where(cycles.c.id == cycle_id,
                     cycles.c.status == "waiting_execution").values(status="reviewing"))
                 await db.execute(update(rt).where(rt.c.active_cycle_id == cycle_id,
+                    (rt.c.conversation_id == source_state["conversation_id"]) if isolated_conversation else True,
                     rt.c.current_module == "module_4", rt.c.flow_status == "waiting_execution").values(
                         flow_status="active"))
         if existing:
@@ -737,6 +849,9 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
                     m1.c.status != "completed").values(completed_steps=data["m1_contract"]["completed_steps"],
                     row_version=m1.c.row_version + 1, updated_at=now()))
                 owned_conversations = select(Conversation.id).where(Conversation.subject_id == user_id)
+                from .goal_scope import isolated
+                if await isolated(db, user_id):
+                    owned_conversations = owned_conversations.where(Conversation.id == source_state["conversation_id"])
                 await db.execute(update(rt).where(rt.c.conversation_id.in_(owned_conversations),
                     rt.c.current_module == "module_1").values(last_transition_reason="m1_snapshot_updated",
                     row_version=rt.c.row_version + 1))
@@ -748,7 +863,8 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
                     await db.execute(update(progress).where(progress.c.cycle_id == cycle_id).values(
                         module_2_steps=[s for s in row["module_2_steps"] if s != "pa_card_completed"],
                         row_version=progress.c.row_version + 1, updated_at=now()))
-                await db.execute(update(rt).where(rt.c.active_cycle_id == cycle_id, rt.c.current_module == "module_2").values(
+                await db.execute(update(rt).where(rt.c.active_cycle_id == cycle_id, rt.c.current_module == "module_2",
+                    (rt.c.conversation_id == source_state["conversation_id"]) if isolated_conversation else True).values(
                     last_transition_reason="plan_changed_requires_review", row_version=rt.c.row_version + 1))
                 await db.execute(insert(schema.tables["ai_decision_logs"]), {
                     "turn_id": "plan-edit-" + existing["id"],
@@ -785,7 +901,7 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
             rt = schema.tables["conversation_runtime_states"]
             freshness = dict((source_state["memory"] or {}).get("module_extraction_freshness") or {})
             freshness[module] = {
-                "assistant_message_id": data.get("_source_user_message_id") or data.get("_source_assistant_message_id"),
+                "assistant_message_id": data.get("_source_assistant_message_id") or data.get("_source_user_message_id"),
                 "cycle_id": cycle_id,
             }
             if data.get("_source_user_message_id") is not None:
@@ -793,7 +909,8 @@ async def persist_record(maker, *, module, user_id, data, cycle_id):
             await db.execute(update(rt).where(rt.c.conversation_id == source_state["conversation_id"]).values(
                 memory={**(source_state["memory"] or {}), "module_extraction_freshness": freshness},
                 row_version=rt.c.row_version + 1, updated_at=now()))
-        await db.commit()
+        if db_session is None:
+            await db.commit()
         return record_id
 
 
@@ -808,7 +925,8 @@ async def clinical_context(maker, user_id, session_id):
             context_conversation, state = None, None
         one = schema.tables["module_one_record"]
         m1 = schema.tables["user_module_one_state"]
-        completion = (await db.execute(select(m1).where(m1.c.user_id == user_id))).mappings().one_or_none()
+        from .goal_scope import m1_state
+        completion = await m1_state(db, user_id, context_conversation.id if context_conversation else None)
         if state and state["current_module"] == "module_1":
             from .m1_contract import contract_for, EDUCATION_TOPICS, OPTIONAL_EDUCATION_TOPICS
             pending = await m1_draft(db, user_id, state=state, session_id=session_id)
@@ -865,6 +983,17 @@ async def clinical_context(maker, user_id, session_id):
                 "status": completion["status"], "evidence_status": completion["evidence_status"],
                 "confirmed_formulation_id": completion["confirmed_formulation_id"],
             }, ensure_ascii=False))
+        if state and state["current_module"] == "module_4":
+            from .pa_lifecycle import M4_CLOSURE_POLICY
+            lines.append(M4_CLOSURE_POLICY)
+        if state and state["current_module"] == "module_2":
+            from .pa_lifecycle import unfinished_core_goals, reviewed_goal, CORE_CHOICE_POLICY, M2_REVIEW_POLICY
+            candidates = await unfinished_core_goals(db, user_id=user_id, conversation_id=state["conversation_id"])
+            previous = await reviewed_goal(db, user_id=user_id, memory=state["memory"], conversation_id=state["conversation_id"])
+            if candidates:
+                lines.extend([CORE_CHOICE_POLICY, "未结束核心 PA 记录：" + json.dumps(candidates, ensure_ascii=False)])
+            if previous:
+                lines.extend([M2_REVIEW_POLICY, "上一轮已结束 PA 记录：" + json.dumps(previous, ensure_ascii=False)])
         if state and state["active_goal_id"]:
             goal = await owned_goal(db, user_id, state["active_goal_id"])
             lines.append("后台绑定目标记录（名称用于识别既有目标，不代表本轮讨论内容或计划已确认）：" + json.dumps({
@@ -913,17 +1042,27 @@ async def clinical_context(maker, user_id, session_id):
                 review = (await db.execute(select(reviews).where(reviews.c.cycle_id == cycle["id"]))).mappings().one_or_none()
                 if review:
                     contract = contract_for(review)
+                    outcomes = contract.get("outcomes") or {}
+                    outcome_evidence = contract.get("evidence") or {}
                     lines.append("当前周期 M4 记录状态：" + json.dumps({
                         "source": "module_four_record", "record_id": review["id"],
                         "cycle_id": cycle["id"], "record_status": review["record_status"],
                         "evidence_version": contract.get("version"),
                         "scenario_type": review["scenario_type"], "execution_result": review["execution_result"],
+                        "outcomes": outcomes or None,
+                        "outcome_sources": {key: outcome_evidence[key] for key, flag in (
+                            ("emotion_quote", "emotion_improved"),
+                            ("positive_feedback_quote", "positive_feedback"))
+                            if type(outcomes.get(flag)) is bool and key in outcome_evidence},
                         "chain_confirmation_status": review["chain_confirmation_status"],
                         "confirmation_message_id": review["confirmation_message_id"],
                         "review_decision": review["review_decision"],
                     }, ensure_ascii=False))
+                    lines.append("M4 执行情况、情绪变化和其他积极反馈分别理解；情境 A 不等于情绪一定改善。"
+                                 "outcomes 缺失、null 或 legacy_mood_only 表示旧记录未完整区分，不补造效果，"
+                                 "也不因此逐项追问或要求用户重复确认已核对的事实。")
         elif state and state["current_module"] != "module_1":
             lines.append("本聊天目标绑定状态：" + json.dumps({"active_goal_id": None}, ensure_ascii=False))
-        for memory in await reply_memories(db, user_id=user_id):
+        for memory in await reply_memories(db, user_id=user_id, conversation_id=context_conversation.id if context_conversation else None):
             lines.append(f"长期记忆（{memory['confirmation_status']} / {memory['source_kind']}）：{memory['content']}")
     return lines

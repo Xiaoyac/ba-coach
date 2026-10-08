@@ -18,10 +18,12 @@ class KnowledgeReferences(BaseModel):
     available: bool = False
     module: str | None = None
     retrieval_outcome: str | None = None
+    retrieval_mode: str | None = None
     gate_reason: str | None = None
     mediator_status: str | None = None
     mediator_reason: str | None = None
     mediator_reasoning_content: str | None = None
+    mediator_response_content: str | None = None
     mediator_decision: str | None = None
     mediator_selections: list[dict[str, str]] = Field(default_factory=list)
     mediator_note: str | None = None
@@ -35,17 +37,19 @@ class KnowledgeReferences(BaseModel):
     provided: list[ReferenceChunk] = Field(default_factory=list)
 
 
-def reference_snapshot(*, module, recalled, provided, retrieval, mediator, context_withheld=False, mediator_reasoning=None):
+def reference_snapshot(*, module, recalled, provided, retrieval, mediator, context_withheld=False, mediator_reasoning=None, mediator_response=None):
     def project(chunks):
         return [ReferenceChunk(id=str(c.id), source=c.source, text=c.text,
             score=c.score if c.score is not None and math.isfinite(c.score) else None,
             score_type=c.score_type) for c in chunks]
     return KnowledgeReferences(
-        version=4, available=True, module=module,
+        version=5, available=True, module=module,
         retrieval_outcome=retrieval.get("outcome", "disabled"),
+        retrieval_mode=retrieval.get("ranking_mode"),
         gate_reason=(retrieval.get("gate") or {}).get("reason"),
         mediator_status=mediator.get("status"), mediator_reason=mediator.get("reason"),
         mediator_reasoning_content=mediator_reasoning if recalled else None,
+        mediator_response_content=mediator_response if recalled else None,
         mediator_decision=mediator.get("decision") if not context_withheld else None,
         mediator_selections=(mediator.get("selections") or [] if not context_withheld
                              and mediator.get("status") == "completed" else []),

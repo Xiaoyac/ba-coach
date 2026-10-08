@@ -13,6 +13,7 @@ from langgraph.graph import END, START, StateGraph
 
 from ..prompts import MODULE_PROMPTS
 from ..pre_reply_routing import pre_reply_router_node, route_after_pre_reply, route_to_pre_reply
+from ..pa_reply_preparation import prepare_pa_reply_node
 from .nodes import (
     MODULE_NODES,
     analyze_intent_node,
@@ -43,6 +44,7 @@ def build_graph() -> StateGraph:
     builder.add_node("recall_memory", recall_memory_node)
     builder.add_node(RISK_NODE, risk_gate_node)
     builder.add_node("pre_reply_router", pre_reply_router_node)
+    builder.add_node("prepare_pa_reply", prepare_pa_reply_node)
 
     # --- Module branches, plus the crisis branch that can replace them ---
     for module_name, node in MODULE_NODES.items():
@@ -65,8 +67,9 @@ def build_graph() -> StateGraph:
         route_to_pre_reply,
         {"pre_reply_router": "pre_reply_router", CRISIS_NODE: CRISIS_NODE},
     )
+    builder.add_edge("pre_reply_router", "prepare_pa_reply")
     builder.add_conditional_edges(
-        "pre_reply_router",
+        "prepare_pa_reply",
         route_after_pre_reply,
         {
             **{module_name: module_name for module_name in MODULE_PROMPTS},

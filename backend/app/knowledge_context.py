@@ -121,7 +121,10 @@ async def assemble_knowledge_context(maker, user_id, session_id, *, module=None,
             table = metadata.tables["module_one_record"]
             # Preserve the actual confirmation state, including recent drafts.
             from .v2_workflow import fresh_m1, m1_draft
-            if fresh_m1(state):
+            from .goal_scope import isolated, m1_record
+            if await isolated(db, user_id):
+                row = await m1_record(db, user_id, conversation.id)
+            elif fresh_m1(state):
                 row = await m1_draft(db, user_id, state=state, session_id=session_id)
             else:
                 row = (await db.execute(select(table).where(
