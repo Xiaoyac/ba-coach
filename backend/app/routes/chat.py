@@ -72,6 +72,7 @@ CLIENT_EVENTS = {
     "done",
     "error",
     "reply_wait",
+    "retry",
 }
 
 
@@ -174,7 +175,8 @@ async def _persist_assistant_message(
             error_code=metrics.get("error_code") or "empty_reply",
             prompt_version=metrics.get("prompt_version"),
             event_metadata={"user_message_id":user_message_id,"pa_tools":metrics.get("pa_tools"),
-                            "main_input":metrics.get("main_input")},
+                            "main_input":metrics.get("main_input"), "overload_retries":metrics.get("overload_retries"),
+                            "main_timeout_seconds":metrics.get("main_timeout_seconds")},
         )
         await db.commit()
         return None
@@ -237,7 +239,7 @@ async def _apply_conversation_thinking(context, *, session_id, subject_id, state
                 session_id=session_id, subject_id=subject_id)
             from ..prompt_store import effective_reply_lead_prompt
             context.reply_lead_prompt = await effective_reply_lead_prompt(preference_db)
-    context.provider = context.provider.with_thinking(enabled)
+    context.provider = context.provider.with_thinking(enabled).with_main_reply()
     context.router_provider = context.router_provider.with_thinking(enabled)
     if hasattr(context.knowledge_base, "with_thinking"):
         context.knowledge_base = context.knowledge_base.with_thinking(enabled)
@@ -443,6 +445,8 @@ async def chat(
         # after the new assistant row is durable.
         cancel_on_timeout=False,
     )
+    if request.retry_of_message_id is not None:
+        raise HTTPException(400, "请使用流式聊天的恢复入口重试。")
     provider = await _resolve_provider(request, db, subject_id=subject_id)
     router_prompt = await effective_router_prompt(db)
     state, session_id = await _initial_state(request, store, db, subject_id=subject_id, received_at=received_at)
@@ -538,7 +542,7 @@ async def chat_stream(
     if request.generation_id is None:
         request = request.model_copy(update={"generation_id": uuid4()})
     try:
-        control = generations.begin(subject_id, str(request.generation_id))
+        control = generations.begin(subject_id, str(request.generation_id), request.session_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
@@ -590,6 +594,8 @@ async def _prepare_chat_stream(
         timeout_seconds=settings.routing_wait_timeout_seconds,
         cancel_on_timeout=False,
     )
+    from ..chat_retry import validate_retry
+    await validate_retry(db, request, subject_id)
     provider = await _resolve_provider(request, db, subject_id=subject_id)
     router_prompt = await effective_router_prompt(db)
     state, session_id = await _initial_state(request, store, db, subject_id=subject_id, received_at=received_at)

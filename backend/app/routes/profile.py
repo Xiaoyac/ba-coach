@@ -38,8 +38,7 @@ from ..clinical_store import set_values
 from ..birth_dates import age_on
 from ..db import get_db
 from ..identity import CallerIdentity, require_caller
-from ..account_identity import normalize_display_name
-from ..models import AccountHandle, AccountSettings, ProfileExtension, UserAccount
+from ..models import AccountSettings, ProfileExtension, UserAccount
 from ..models_business import UserProfile
 from ..providers import configured_providers
 from ..schemas import ProfileOut, ProfileUpdate, ReminderWindow, Supporter
@@ -56,7 +55,6 @@ _SET_FIELDS = ("physical_condition", "behavior_taboo", "content_taboo")
 # Fields that live in `profile_extensions`, not `user_profile`.
 _EXTENSION_FIELDS = ("supporters", "reminder_window")
 _ACCOUNT_FIELDS = ("preferred_provider",)
-_IDENTITY_FIELDS = ("tag",)
 
 # The six buckets `user_profile.reminder_time_slot` allows, as (name, start,
 # end) in minutes from midnight. Used only to project a precise window down
@@ -124,7 +122,6 @@ def _to_out(
     profile: UserProfile,
     extension: ProfileExtension | None,
     account_settings: AccountSettings | None,
-    handle: AccountHandle | None,
 ) -> ProfileOut:
     supporters = effective_supporters(profile, extension)
     window = None
@@ -140,8 +137,6 @@ def _to_out(
 
     return ProfileOut(
         nickname=profile.nickname,
-        tag=handle.tag if handle else None,
-        display_id=handle.full_username if handle else None,
         age=age_on(profile.birth_date) if profile.birth_date else profile.age,
         birth_date=profile.birth_date,
         living_status=profile.living_status,
@@ -208,18 +203,6 @@ async def _load_account_settings(
     ).scalar_one_or_none()
 
 
-async def _load_account_handle(
-    db: AsyncSession, subject_id: str
-) -> AccountHandle | None:
-    return (
-        await db.execute(
-            select(AccountHandle)
-            .join(UserAccount, UserAccount.id == AccountHandle.account_id)
-            .where(UserAccount.profile_uuid == subject_id)
-        )
-    ).scalar_one_or_none()
-
-
 async def _account_id(db: AsyncSession, subject_id: str) -> int:
     account_id = (
         await db.execute(
@@ -256,7 +239,6 @@ async def read_profile(
         profile,
         await _load_extension(db, subject_id),
         await _load_account_settings(db, subject_id),
-        await _load_account_handle(db, subject_id),
     )
     result.current_module = await derived_current_module(db, subject_id=subject_id)
     return _visible_profile(result, caller)
@@ -279,7 +261,7 @@ async def update_profile(
             return _visible_profile(await v2_profile.patch(db, subject_id, payload), caller)
         except IntegrityError:
             await db.rollback()
-            raise HTTPException(409, "昵称标签已被使用，请刷新后重试") from None
+            raise HTTPException(409, "档案保存冲突，请刷新后重试") from None
     profile = await _own_profile(db, subject_id)
 
     # `exclude_unset` is what makes a partial edit partial: a form that only
@@ -311,7 +293,6 @@ async def update_profile(
 
     extension = await _load_extension(db, subject_id)
     account_settings = await _load_account_settings(db, subject_id)
-    handle = await _load_account_handle(db, subject_id)
     if any(key in changes for key in _EXTENSION_FIELDS):
         if extension is None:
             extension = ProfileExtension(profile_uuid=subject_id)
@@ -335,38 +316,8 @@ async def update_profile(
             db.add(account_settings)
         account_settings.preferred_provider = payload.preferred_provider or "deepseek"
 
-    if "tag" in changes or "nickname" in changes:
-        nickname = (
-            payload.nickname.strip()
-            if "nickname" in changes and payload.nickname
-            else (profile.nickname or "").strip()
-        )
-        if not nickname or "#" in nickname:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="昵称不能为空且不能包含 #",
-            )
-        if "tag" in changes and payload.tag is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="五位数字标签不能清空"
-            )
-        tag = payload.tag if "tag" in changes else (handle.tag if handle else None)
-        if handle is not None:
-            handle.base_username = nickname
-            handle.normalized_base = normalize_display_name(nickname)
-            if tag is not None:
-                handle.tag = tag
-        elif tag is not None:
-            handle = AccountHandle(
-                account_id=await _account_id(db, subject_id),
-                base_username=nickname,
-                normalized_base=normalize_display_name(nickname),
-                tag=tag,
-            )
-            db.add(handle)
-
     for key, value in changes.items():
-        if key in _EXTENSION_FIELDS or key in _ACCOUNT_FIELDS or key in _IDENTITY_FIELDS:
+        if key in _EXTENSION_FIELDS or key in _ACCOUNT_FIELDS:
             continue  # written above; not a `user_profile` column
         if key in _SET_FIELDS:
             # MySQL SET wants a comma-joined string, and an empty list has to
@@ -417,11 +368,11 @@ async def update_profile(
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="这个昵称与标签组合已被使用",
+            detail="档案保存冲突，请刷新后重试",
         ) from None
     logger.info(
         "profile updated for %s… (%s)", subject_id[:8], ", ".join(sorted(changes))
     )
-    result = _to_out(profile, extension, account_settings, handle)
+    result = _to_out(profile, extension, account_settings)
     result.current_module = await derived_current_module(db, subject_id=subject_id)
     return _visible_profile(result, caller)

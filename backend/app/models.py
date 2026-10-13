@@ -225,7 +225,7 @@ class UserAccount(Base):
 
     # Independent login account. Registration accepts ASCII letters and
     # digits only and stores a case-folded value. It is never combined with a
-    # nickname or display tag.
+    # nickname.
     username: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     # Argon2id, in PHC string format: the algorithm, its cost parameters and
     # the per-password salt are all encoded in here. That is why there is no
@@ -249,12 +249,6 @@ class UserAccount(Base):
         uselist=False,
         lazy="selectin",
     )
-    handle: Mapped[AccountHandle | None] = relationship(
-        back_populates="account",
-        cascade="all, delete-orphan",
-        uselist=False,
-        lazy="selectin",
-    )
     email_address: Mapped[AccountEmail | None] = relationship(
         back_populates="account",
         cascade="all, delete-orphan",
@@ -266,42 +260,6 @@ class UserAccount(Base):
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<UserAccount {self.username!r}>"
-
-
-class AccountHandle(Base):
-    """User-chosen public ``nickname#12345`` identity.
-
-    The database column names are retained from the first Riot-ID migration,
-    but ``base_username`` now stores the display nickname, not the login
-    account. Existing accounts may temporarily have no row while they choose a
-    tag; every new registration creates one. The composite unique constraint
-    is the final authority for nickname+tag uniqueness.
-    """
-
-    __tablename__ = "account_handles"
-
-    account_id: Mapped[int] = mapped_column(
-        ForeignKey("user_accounts.id", ondelete="CASCADE"), primary_key=True
-    )
-    base_username: Mapped[str] = mapped_column(String(58), nullable=False)
-    normalized_base: Mapped[str] = mapped_column(String(58), nullable=False)
-    tag: Mapped[str] = mapped_column(String(5), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(), nullable=False, default=_utcnow, server_default=func.now()
-    )
-
-    account: Mapped[UserAccount] = relationship(back_populates="handle")
-
-    __table_args__ = (
-        UniqueConstraint(
-            "normalized_base", "tag", name="uq_account_handle_base_tag"
-        ),
-        Index("ix_account_handle_base", "normalized_base"),
-    )
-
-    @property
-    def full_username(self) -> str:
-        return f"{self.base_username}#{self.tag}"
 
 
 class AccountSettings(Base):
@@ -989,3 +947,6 @@ class AIExecutionEvent(Base):
         Index("ix_ai_event_session_stage", "session_id", "stage", "created_at"),
         Index("ix_ai_event_subject_created", "subject_id", "created_at"),
     )
+
+# Registered with the shared metadata for fresh databases and test fixtures.
+from .prompt_history_models import PromptHistoryState, PromptRevision  # noqa: E402,F401

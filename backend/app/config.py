@@ -136,7 +136,7 @@ class Settings(BaseSettings):
     reply_lead_base_url: str | None = None
     reply_lead_api_key: str | None = Field(default=None, repr=False)
     reply_lead_model: str | None = "kimi-k3"
-    reply_lead_timeout_seconds: float = Field(default=8.0, ge=1, le=20)
+    reply_lead_timeout_seconds: float = Field(default=12.0, ge=1, le=20)
     reply_lead_max_tokens: int = Field(default=2048, ge=128, le=8192)
     reply_lead_character_seconds: float = Field(default=0.12, ge=0.01, le=0.5)
     # Low effort is opt-in: the live probe can exhaust its output budget without

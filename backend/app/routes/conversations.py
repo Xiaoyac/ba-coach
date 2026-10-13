@@ -143,6 +143,7 @@ def _detail(c: Conversation, *, next_module: str | None = None,
             timing=timing,
             reply_status=("incomplete" if message.error_code == "reply_length_limit" else "interrupted" if message.error_code in {
                 "generation_cancelled", "client_disconnected", "continuation_error",
+                "provider_error", "provider_timeout", "invalid_protocol_completion", "uncommitted_workflow_claim",
                 "continuation_timeout", "continuation_empty", "continuation_protocol",
             } else None),
         )

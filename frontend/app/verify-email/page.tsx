@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import ThemeToggle from "@/components/ThemeToggle";
+import AuthEntryStyle from "@/components/AuthEntryStyle";
 import { AuthError, verifyEmail } from "@/lib/auth";
 
 export default function VerifyEmailPage() {
@@ -27,8 +28,9 @@ export default function VerifyEmailPage() {
   }, []);
 
   return (
+    <AuthEntryStyle>
     <main className="relative flex h-[100dvh] items-center justify-center overflow-clip bg-canvas p-4">
-      <section className="zen-page-enter relative z-10 w-full max-w-md rounded-[28px] border border-line bg-panel p-7 text-center depth-panel backdrop-blur-2xl">
+      <section className="zen-page-enter default-style:relative default-style:z-10 default-style:w-full default-style:max-w-md default-style:rounded-[28px] default-style:border default-style:border-line default-style:bg-panel default-style:p-7 default-style:text-center default-style:depth-panel default-style:backdrop-blur-2xl simple:relative simple:z-10 simple:w-full simple:max-w-md simple:rounded-2xl simple:border simple:border-line simple:bg-panel simple:p-7 simple:text-center simple:depth-panel ">
         <p className="text-[0.68rem] tracking-[0.18em] text-accent">BA COACH · 邮箱验证</p>
         <div className={`mx-auto mt-5 h-3 w-3 rounded-full ${state === "error" ? "bg-alert-ink" : "bg-accent"} ${state === "checking" ? "zen-breathe" : ""}`} />
         <h1 className="mt-4 text-[1rem] text-ink">
@@ -43,5 +45,6 @@ export default function VerifyEmailPage() {
       </section>
       <ThemeToggle />
     </main>
+    </AuthEntryStyle>
   );
 }

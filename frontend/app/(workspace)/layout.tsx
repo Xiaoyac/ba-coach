@@ -1,6 +1,6 @@
 import AuthGate from "@/components/AuthGate";
 
-export default function Home() {
+export default function WorkspaceLayout({ children }: { children: React.ReactNode }) {
   return (
     // The rail sits flush to the viewport; only message/composer reading
     // widths are capped inside the workspace.
@@ -21,7 +21,7 @@ export default function Home() {
           even when it is invisible. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10 overflow-clip"
+        className="pointer-events-none absolute inset-0 -z-10 overflow-clip simple:hidden"
       >
         <div className="ambient-orb ambient-orb-a" />
         <div className="ambient-orb ambient-orb-b" />
@@ -32,6 +32,7 @@ export default function Home() {
           this one client boundary — see AuthGate on why it is not a render
           prop from this server component. */}
       <AuthGate />
+      {children}
 
     </main>
   );

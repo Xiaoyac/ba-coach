@@ -124,7 +124,9 @@ def _decision_quote_position(raw_quote, messages, *, after_position=-1):
             selected = message
     return selected.position if selected is not None else -1
 SPEC = Spec("m4_contract", "json", '''当前周期焦点PA的完整证据快照，不沿用上周期；未知null。
-对象：phase_a_quote、phase_b_quote、phase_c_quote（分别支持本次ABC实际事实的用户连续原话），
+对象还包含execution_ref：{execution_id:activity_candidates中的执行ID}；若本轮首次报告尚无执行ID，可用{source_message_id,source_quote,activity_content}精确指向本次activity_observations中的一项。
+只复盘当前核心目标当前周期所对应的那一次执行。旧目标、同名旧执行、次要或未设目标活动不得代替当前核心结果；归属不清晰时不拼成当前核心ABC。
+phase_a_quote、phase_b_quote、phase_c_quote（分别支持本次ABC实际事实的用户连续原话），
 emotion_improved(true/false/null)、emotion_quote（情绪改善/未改善的用户原话），
 positive_feedback(true/false/null)、positive_feedback_quote（本次核心PA实际发生后积极反馈或明确没有积极反馈的用户连续原话），
 positive_feedback_types（已明确的类别数组：emotion=情绪改善，physical=身体感觉改善，achievement=成就感或满足感，self_view=对自身状态的积极认识，action_willingness=本次体验促进之后行动意愿；未区分时[]，不要逐类追问），

@@ -58,6 +58,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 await db.execute(select(table).limit(0))
     if maintenance_enabled:
         await init_db()
+    from .prompt_history import initialize_history, sync_source_defaults
+    from .db import get_engine
+    await initialize_history(get_engine())
+    async with get_sessionmaker()() as prompt_db:
+        await sync_source_defaults(prompt_db)
     # Conversations created before the opening turn moved server-side are
     # repaired once and then remain ordinary durable transcripts.
     if maintenance_enabled:

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import ThemeToggle from "@/components/ThemeToggle";
+import AuthEntryStyle from "@/components/AuthEntryStyle";
 import { AuthError, resetPassword } from "@/lib/auth";
 
 export default function ResetPasswordPage() {
@@ -40,11 +41,12 @@ export default function ResetPasswordPage() {
   }
 
   return (
+    <AuthEntryStyle>
     <main className="relative flex h-[100dvh] items-center justify-center overflow-clip bg-canvas p-4">
-      <div aria-hidden className="pointer-events-none absolute inset-0 overflow-clip">
+      <div aria-hidden className="pointer-events-none absolute inset-0 overflow-clip simple:hidden">
         <div className="absolute -top-40 left-1/2 h-[34rem] w-[34rem] -translate-x-1/2 rounded-full bg-wash-a blur-[130px]" />
       </div>
-      <section className="zen-page-enter relative z-10 w-full max-w-md rounded-[28px] border border-line bg-panel p-6 depth-panel backdrop-blur-2xl">
+      <section className="zen-page-enter default-style:relative default-style:z-10 default-style:w-full default-style:max-w-md default-style:rounded-[28px] default-style:border default-style:border-line default-style:bg-panel default-style:p-6 default-style:depth-panel default-style:backdrop-blur-2xl simple:relative simple:z-10 simple:w-full simple:max-w-md simple:rounded-2xl simple:border simple:border-line simple:bg-panel simple:p-6 simple:depth-panel ">
         <p className="text-[0.68rem] tracking-[0.18em] text-accent">BA COACH · 账号安全</p>
         <h1 className="mt-2 text-[1.08rem] text-ink">设置新密码</h1>
         {done ? (
@@ -81,6 +83,7 @@ export default function ResetPasswordPage() {
       </section>
       <ThemeToggle />
     </main>
+    </AuthEntryStyle>
   );
 }
 

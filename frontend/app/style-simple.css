@@ -1,0 +1,772 @@
+/* Simple style for public account entry and verified admin preferences. */
+.reply-vote-button:where(.style-simple, .style-simple *) {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; flex-shrink: 0; border-radius: 12px;
+  color: var(--color-ink-muted); border: 1px solid transparent;
+  transition: color 180ms ease, background-color 180ms ease, transform 180ms ease;
+}
+
+/* Flat surfaces and compact controls. Kept outside Tailwind layers so the
+   simple preference also overrides the shared components' utility borders. */
+.style-simple .workspace-rail {
+  border: 0;
+  background: var(--color-canvas);
+}
+
+.style-simple .workspace-card,
+.style-simple .workspace-card-header,
+.style-simple .workbench-shell {
+  border: 0;
+  box-shadow: none;
+  background: var(--color-panel);
+}
+
+.style-simple .conversation-row-active {
+  background: var(--color-raised);
+  color: var(--color-ink);
+}
+
+.style-simple .conversation-row-active::before {
+  content: none;
+}
+
+.style-simple .composer-shell {
+  border: 0;
+  border-radius: 12px;
+  background: var(--color-raised);
+  box-shadow: none;
+}
+
+/* These palettes reserve a composer border in the default skin as well. */
+:is(.theme-porcelain, .theme-github).style-simple .composer-shell {
+  border: 1px solid transparent;
+}
+
+.style-simple .composer-shell:focus-within {
+  outline: 2px solid var(--color-accent-edge);
+  outline-offset: 2px;
+}
+
+.style-simple .reply-feedback-panel {
+  border: 0;
+  background: var(--color-raised);
+}
+
+.style-simple .reply-feedback-reason,
+.style-simple .reply-vote-button.is-selected {
+  border-color: transparent;
+}
+
+.style-simple .goal-archive-card {
+  border: 0;
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+/* The rail and pane are separated by tone, like the reference settings
+   window. Colors remain semantic so all four existing palettes still work. */
+.style-simple .settings-window {
+  border-color: transparent;
+  border-radius: 14px;
+  background: var(--color-panel);
+}
+
+.style-simple .settings-rail {
+  border: 0;
+  background: color-mix(in srgb, var(--color-canvas) 72%, var(--color-raised));
+}
+
+.style-simple .settings-identity {
+  border: 0;
+  background: transparent;
+}
+
+.style-simple .settings-nav-item {
+  border: 0;
+  border-radius: 7px;
+  box-shadow: none;
+}
+
+.style-simple .settings-nav-item[aria-current="page"] {
+  color: var(--color-ink);
+  background: color-mix(in srgb, var(--color-ink) 8%, transparent);
+  font-weight: 600;
+}
+
+.style-simple .settings-nav-item:hover:not([aria-current="page"]) {
+  background: color-mix(in srgb, var(--color-ink) 5%, transparent);
+}
+
+.style-simple .settings-pane,
+.style-simple .settings-titlebar {
+  border: 0;
+  background: var(--color-panel);
+}
+
+.style-simple .settings-close {
+  border: 0;
+  border-radius: 8px;
+  box-shadow: none;
+  color: var(--color-ink-muted);
+  background: transparent;
+}
+
+.style-simple .settings-close:hover {
+  color: var(--color-ink);
+  background: var(--color-raised);
+}
+
+.style-simple .settings-content :is(.border-line, .simple\:border-line) {
+  border-color: transparent;
+}
+
+.style-simple .settings-content :is(input, textarea, select):not([type="radio"]):not([type="checkbox"]):not([type="range"]) {
+  border-color: transparent;
+  border-radius: 8px;
+  background: var(--color-raised);
+  box-shadow: none;
+}
+
+.style-simple .overall-style-option {
+  border-radius: 8px;
+  color: var(--color-ink);
+  background: color-mix(in srgb, var(--color-raised) 42%, transparent);
+}
+
+.style-simple .overall-style-option[data-selected="true"],
+.style-simple .overall-style-option:hover {
+  background: var(--color-raised);
+}
+
+.style-simple .theme-option {
+  border-radius: 8px;
+  background: transparent;
+}
+
+.style-simple .theme-option,
+.style-simple .theme-option[aria-checked="true"] {
+  border-color: transparent;
+}
+
+.style-simple .theme-option[aria-checked="true"],
+.style-simple .theme-option:hover {
+  background: var(--color-raised);
+}
+
+.style-simple .theme-swatch {
+  border-color: transparent;
+  border-radius: 6px;
+}
+
+@media (max-width: 639px) {
+  .style-simple .settings-window {
+    border-radius: 12px;
+  }
+
+}
+
+@media (max-width: 480px) {
+  .style-simple .settings-window {
+    border-radius: 0;
+  }
+}
+.reply-vote-button:hover:where(.style-simple, .style-simple *) { background: var(--color-accent-wash); color: var(--color-accent-ink); }
+.reply-vote-button:active:not(:disabled):where(.style-simple, .style-simple *) { transform: translateY(1px); }
+.reply-vote-button.is-selected:where(.style-simple, .style-simple *) { background: var(--color-accent-wash); color: var(--color-accent-ink); border-color: var(--color-accent-edge); }
+.reply-vote-button:disabled:where(.style-simple, .style-simple *) { opacity: .45; cursor: wait; }
+.reply-vote-button:focus-visible:where(.style-simple, .style-simple *),
+.reply-feedback-reason:focus-visible:where(.style-simple, .style-simple *) {
+  outline: 2px solid var(--color-accent-edge); outline-offset: 3px;
+}
+.reply-feedback-reveal:where(.style-simple, .style-simple *) { display: grid; grid-template-rows: 0fr; visibility: hidden; transition: grid-template-rows 240ms ease, visibility 240ms; }
+.reply-feedback-reveal.is-open:where(.style-simple, .style-simple *) { grid-template-rows: 1fr; visibility: visible; }
+.reply-feedback-panel:where(.style-simple, .style-simple *) { margin-top: 6px; padding: 12px 16px 16px; border: 1px solid var(--color-line); border-radius: 16px; background: var(--color-panel); }
+.reply-feedback-reason:where(.style-simple, .style-simple *) { min-height: 36px; padding: 6px 12px; border: 1px solid var(--color-line); border-radius: 10px; color: var(--color-ink-muted); font-size: 12px; transition: background-color 180ms ease, border-color 180ms ease; }
+.reply-feedback-reason:hover:where(.style-simple, .style-simple *),
+.reply-feedback-reason.is-selected:where(.style-simple, .style-simple *) { color: var(--color-accent-ink); background: var(--color-accent-wash); border-color: var(--color-accent-edge); }
+@media (pointer: coarse) { .reply-vote-button:where(.style-simple, .style-simple *) { width: 44px; height: 44px; } .reply-feedback-reason:where(.style-simple, .style-simple *) { min-height: 44px; } }
+@media (prefers-reduced-motion: reduce) { .reply-vote-button:where(.style-simple, .style-simple *),
+.reply-feedback-reveal:where(.style-simple, .style-simple *),
+.reply-feedback-reason:where(.style-simple, .style-simple *) { transition: none; } }
+
+/*
+ * Four themes, one semantic color contract.
+ *
+ * Every token below is *semantic* — `canvas`, `raised`, `ink` — never a raw
+ * colour name. That is what makes the second theme possible: `bg-night-800`
+ * would be a lie in a light theme, but `bg-panel` is true in both, so the
+ * markup never has to know which theme is active.
+ *
+ * `@theme` carries the Dark Zen values as the base palette. The default warm
+ * theme re-declares the same variables under `.theme-warm` on <html>; Tailwind
+ * utilities compile to `var(--color-…)`, so swapping one class re-skins the
+ * whole app with no per-component conditionals.
+ *
+ * Alpha is baked into the tokens that need it (`--color-line`, the bubble
+ * fills) rather than applied with a `/opacity` modifier in the markup. A dark
+ * theme wants white at 6%; a light theme wants warm brown at 10% — the two
+ * differ in *both* channel and amount, and a hard-coded modifier can only
+ * carry the amount.
+ */
+
+/*
+ * Depth — deliberately NOT `@theme --shadow-*`.
+ *
+ * Tailwind parses shadow values at build time and inlines them into the
+ * utility, so that `shadow-<color>` can splice a colour in:
+ *
+ *   .shadow-panel { --tw-shadow: 0 28px 80px -32px var(--tw-shadow-color, …) }
+ *
+ * The literal is baked into the rule, so redeclaring `--shadow-panel` for
+ * another theme has no effect — unlike colours, which compile to a plain
+ * `var()` reference and re-theme correctly. Declaring these as ordinary custom
+ * properties and pairing them with the `@utility` rules at the bottom of this
+ * file keeps them swappable.
+ *
+ * Dark surfaces need long, very soft shadows to separate at all.
+ */
+:root:where(.style-simple, .style-simple *) {
+  --shadow-panel: 0 16px 48px -24px rgb(0 0 0 / 0.5);
+  --shadow-bubble: none;
+  --shadow-composer: none;
+  --shadow-float: 0 12px 30px -14px rgb(0 0 0 / 0.9);
+}
+
+/* ------------------------------------------------------------------ *
+ * Daylight living room: cream plaster, oatmeal linen, pale oak and walnut.
+ * Soft surfaces and diffused shadows carry the atmosphere; text and focus
+ * indicators stay dark enough to read. No pink or green brand accents.
+ * ------------------------------------------------------------------ */
+.theme-warm:where(.style-simple, .style-simple *) {
+  --color-canvas: #f8f7f4;
+  --color-panel: #fdfcf9;
+  --color-sheet: #fdfcf9;
+  --color-raised: #f1efe9;
+  --color-agent-bubble: #f4eee3;
+  --color-line: #e2ded5;
+  --color-line-strong: #c5b69e;
+
+  /* Text contrast is checked on both cream panels and oat selected surfaces. */
+  --color-ink: #352f27;
+  --color-ink-muted: #62594b;
+  --color-ink-faint: #6d604f;
+
+  --color-accent: #80613e;
+  --color-accent-ink: #664b2e;
+  --color-on-accent: #fffdf8;
+  --color-accent-wash: #eeebe4;
+  --color-accent-edge: #98805b;
+
+  --color-mine: #eeeae1;
+  --color-mine-edge: #b5a17d;
+  --color-mine-ink: #493923;
+
+  --color-alert-ink: #9b4a4a;
+  --color-alert-wash: #c0656514;
+  --color-alert-edge: #c065653d;
+
+  --color-wash-a: #e3d1aa38;
+  --color-wash-b: #ba98602b;
+  --color-wash-c: #fffdf8a0;
+
+  /* Short and warm-grey. A light theme cannot use the dark theme's long black
+     shadows — on a near-white canvas they read as dirt rather than depth. */
+  --shadow-panel: 0 16px 48px -24px rgb(55 48 38 / 0.2);
+  --shadow-bubble: none;
+  --shadow-composer: none;
+  --shadow-float: 0 8px 24px -14px rgb(94 73 42 / 0.24);
+}
+
+.theme-porcelain:where(.style-simple, .style-simple *) {
+  --color-canvas: #f2f6f8;
+  --color-panel: #fcfdfc;
+  --color-sheet: #fcfdfc;
+  --color-raised: #edf2f6;
+  --color-agent-bubble: #eef3f7;
+  --color-line: #d6e1e9;
+  --color-line-strong: #9cb3c6;
+  --color-ink: #243c50;
+  --color-ink-muted: #50697e;
+  --color-ink-faint: #566d80;
+  --color-accent: #37658a;
+  --color-accent-ink: #315e82;
+  --color-on-accent: #fcfdfc;
+  --color-accent-wash: #e8eff5;
+  --color-accent-edge: #789ab6;
+  --color-mine: #e4edf5;
+  --color-mine-edge: #a9bfd1;
+  --color-mine-ink: #294d6a;
+  --color-alert-ink: #994d50;
+  --color-alert-wash: #994d5010;
+  --color-alert-edge: #994d5036;
+  --color-wash-a: #a8c7df18;
+  --color-wash-b: #bdd0de14;
+  --color-wash-c: #fcfdfc70;
+  --shadow-panel: 0 16px 48px -24px rgb(47 80 108 / 0.16);
+  --shadow-bubble: none;
+  --shadow-composer: none;
+  --shadow-float: 0 8px 24px -14px rgb(47 80 108 / 0.24);
+}
+
+.theme-github:where(.style-simple, .style-simple *) {
+  --color-canvas: #1e1e1e;
+  --color-panel: #252525;
+  --color-sheet: #252525;
+  --color-raised: #303030;
+  --color-agent-bubble: #2b2b2b;
+  --color-line: #3d3d3d;
+  --color-line-strong: #737373;
+  --color-ink: #f2f2f2;
+  --color-ink-muted: #c5c5c5;
+  --color-ink-faint: #ababab;
+  --color-accent: #b5b5b5;
+  --color-accent-ink: #e3e3e3;
+  --color-on-accent: #1e1e1e;
+  --color-accent-wash: #3b3b3b;
+  --color-accent-edge: #858585;
+  --color-mine: #333333;
+  --color-mine-edge: #585858;
+  --color-mine-ink: #ededed;
+  --color-alert-ink: #efa3a3;
+  --color-alert-wash: #efa3a312;
+  --color-alert-edge: #efa3a33d;
+  --color-wash-a: transparent;
+  --color-wash-b: transparent;
+  --color-wash-c: transparent;
+  --shadow-panel: 0 18px 48px -30px rgb(0 0 0 / 0.5);
+  --shadow-bubble: none;
+  --shadow-composer: none;
+  --shadow-float: 0 12px 28px -12px rgb(0 0 0 / 0.6);
+}
+
+/*
+ * Paired with the custom properties above — a plain `var()` reference is what
+ * makes the shadows follow the active theme.
+ *
+ * Named `depth-*` rather than `shadow-*` to stay clear of the colour tokens:
+ * `shadow-panel` collides with `--color-panel`, and Tailwind merges its own
+ * `shadow-<color>` rule into the utility of the same name.
+ */
+
+@layer base {
+  html:where(.style-simple, .style-simple *),
+body:where(.style-simple, .style-simple *) {
+    height: 100%;
+  }
+
+  /* Tells the browser to paint its own chrome — carets, native scrollbars,
+     autofill — to match. Without it the UA uses light defaults on the dark
+     theme and flashes white. */
+  html:where(.style-simple, .style-simple *) {
+    color-scheme: dark;
+  }
+
+  html.theme-warm:where(.style-simple, .style-simple *),
+html.theme-porcelain:where(.style-simple, .style-simple *) {
+    color-scheme: light;
+  }
+
+  body:where(.style-simple, .style-simple *) {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  :where(.style-simple, .style-simple *)::selection {
+    background-color: color-mix(in srgb, var(--color-accent) 28%, transparent);
+    color: var(--color-ink);
+  }
+
+  /* Cross-fade the theme switch. Every colour token in this file is a plain
+     `var()`, so toggling `.theme-warm` on <html> otherwise repaints every
+     surface in the same frame — instant on a large flat area like the chat
+     panel or the modal backdrop reads as a flash, not a switch.
+
+     This lives in `@layer base`, one layer below Tailwind's own `utilities`,
+     so anything with its own `transition-colors` class (the buttons, the
+     composer) keeps its hand-tuned timing; this only fills in the elements —
+     mostly plain surfaces — that don't declare a transition at all. */
+  @media (prefers-reduced-motion: no-preference) {
+    *:where(.style-simple, .style-simple *) {
+      transition-property: background-color, border-color, color, box-shadow,
+        fill, stroke;
+      transition-duration: 500ms;
+      transition-timing-function: ease-out;
+    }
+  }
+}
+
+@layer components {
+  /* Keep ambient decoration behind every control, including the desktop rail.
+     A positioned ::after painted last otherwise veils text with canvas color. */
+  .app-canvas:where(.style-simple, .style-simple *) {
+    isolation: isolate;
+  }
+
+  .auth-shell:where(.style-simple, .style-simple *),
+.auth-story:where(.style-simple, .style-simple *),
+.auth-form-panel:where(.style-simple, .style-simple *) {
+    background: transparent;
+  }
+
+  .eyebrow:where(.style-simple, .style-simple *) {
+    font-size: 0.68rem;
+    font-weight: 650;
+    letter-spacing: 0.19em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+  }
+
+  .display-title:where(.style-simple, .style-simple *) {
+    font-weight: 520;
+    letter-spacing: -0.035em;
+    text-wrap: balance;
+  }
+
+  .number-chip:where(.style-simple, .style-simple *) {
+    display: grid;
+    width: 2rem;
+    height: 2rem;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 1px solid var(--color-accent-edge);
+    border-radius: 0.5rem;
+    background: var(--color-accent-wash);
+    color: var(--color-accent-ink);
+    font-size: 0.68rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .premium-control:where(.style-simple, .style-simple *) {
+    min-height: 3rem;
+    box-shadow: none;
+  }
+
+  .primary-action:where(.style-simple, .style-simple *) {
+    min-height: 3rem;
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+  }
+
+  .primary-action:hover:not(:disabled):where(.style-simple, .style-simple *) {
+    filter: brightness(0.94);
+  }
+
+  .surface-button:where(.style-simple, .style-simple *) {
+    box-shadow: none;
+  }
+
+  .surface-button:hover:not(:disabled):where(.style-simple, .style-simple *) {
+    border-color: var(--color-accent-edge);
+    background: var(--color-accent-wash);
+    color: var(--color-accent-ink);
+
+  }
+
+  .workspace-rail:where(.style-simple, .style-simple *) {
+    background: color-mix(in srgb, var(--color-panel) 94%, transparent);
+  }
+
+  .workspace-rail .surface-button:where(.style-simple, .style-simple *) { box-shadow: none; }
+  .workspace-rail .conversation-row-active:where(.style-simple, .style-simple *)::before { content: none; }
+  .archive-input:where(.style-simple, .style-simple *) {
+    min-height: 2.75rem;
+    border: 1px solid var(--color-line);
+    border-radius: 0.5rem;
+    padding: 0.6rem 0.9rem;
+    background: var(--color-raised);
+    color: var(--color-ink);
+    font-size: 0.875rem;
+  }
+  .archive-action:where(.style-simple, .style-simple *) {
+    min-height: 2.75rem;
+    border-radius: 0.5rem;
+    padding: 0.6rem 0.9rem;
+    background: var(--color-accent-wash);
+    color: var(--color-accent-ink);
+    font-size: 0.8125rem;
+  }
+  .archive-action:disabled:where(.style-simple, .style-simple *) { opacity: 0.4; cursor: not-allowed; }
+  .archive-action:hover:not(:disabled):where(.style-simple, .style-simple *) { background: var(--color-raised); }
+  .goal-timeline-entry:where(.style-simple, .style-simple *) {
+    position: relative;
+    padding: 0 0 1.75rem 1.75rem;
+  }
+  .goal-timeline-entry:where(.style-simple, .style-simple *)::before {
+    content: "";
+    position: absolute;
+    left: 0.35rem;
+    top: 0.65rem;
+    bottom: -0.65rem;
+    width: 1px;
+    background: var(--color-line);
+  }
+  .goal-timeline-entry:last-child:where(.style-simple, .style-simple *)::before { bottom: 1.75rem; }
+  .goal-timeline-dot:where(.style-simple, .style-simple *) {
+    position: absolute;
+    left: 0;
+    top: 0.35rem;
+    width: 0.85rem;
+    height: 0.85rem;
+    border: 2px solid var(--color-accent);
+    border-radius: 50%;
+  }
+  .goal-timeline-date:where(.style-simple, .style-simple *) { padding-bottom: 0.75rem; }
+  @media (min-width: 640px) {
+    .goal-timeline-entry:where(.style-simple, .style-simple *) {
+      display: grid;
+      grid-template-columns: 8.5rem minmax(0, 1fr);
+      gap: 2.5rem;
+      padding-left: 0;
+    }
+    .goal-timeline-date:where(.style-simple, .style-simple *) { padding-top: 1.5rem; text-align: right; }
+    .goal-timeline-dot:where(.style-simple, .style-simple *) { left: 9.35rem; top: 1.7rem; }
+    .goal-timeline-entry:where(.style-simple, .style-simple *)::before { left: 9.7rem; top: 2rem; bottom: -2rem; }
+  }
+  .archive-input:focus-visible:where(.style-simple, .style-simple *),
+.archive-action:focus-visible:where(.style-simple, .style-simple *) {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  .workspace-card:where(.style-simple, .style-simple *) {
+    background: color-mix(in srgb, var(--color-panel) 78%, transparent);
+  }
+
+  .workspace-card-header:where(.style-simple, .style-simple *) {
+    background: color-mix(in srgb, var(--color-panel) 72%, transparent);
+  }
+
+  .theme-warm .workspace-rail:where(.style-simple, .style-simple *),
+.theme-porcelain .workspace-rail:where(.style-simple, .style-simple *),
+.theme-github .workspace-rail:where(.style-simple, .style-simple *) {
+    background: var(--color-raised);
+    border-color: var(--color-line);
+  }
+
+  .workspace-card:where(.style-simple, .style-simple *),
+.workspace-card-header:where(.style-simple, .style-simple *),
+.theme-warm .workspace-card:where(.style-simple, .style-simple *),
+.theme-warm .workspace-card-header:where(.style-simple, .style-simple *) {
+    background: var(--color-panel);
+  }
+
+  .composer-shell:where(.style-simple, .style-simple *) {
+    background: var(--color-panel);
+    border: 1px solid var(--color-line-strong);
+    box-shadow: none;
+  }
+
+  .conversation-row-active:where(.style-simple, .style-simple *)::before {
+    position: absolute;
+    left: 0.3rem;
+    top: 50%;
+    width: 0.18rem;
+    height: 1.5rem;
+    border-radius: 999px;
+    content: "";
+    background: var(--color-accent);
+    transform: translateY(-50%);
+    box-shadow: none;
+  }
+
+  .workbench-shell:where(.style-simple, .style-simple *) {
+    background: var(--color-panel);
+    box-shadow: var(--shadow-panel);
+  }
+
+  /* A thin, low-contrast scrollbar. The default chrome is visually loud and
+     pulls attention to the edge of the transcript. */
+  .zen-scroll:where(.style-simple, .style-simple *) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+
+  .zen-scroll:where(.style-simple, .style-simple *)::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .zen-scroll:where(.style-simple, .style-simple *)::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .zen-scroll:where(.style-simple, .style-simple *)::-webkit-scrollbar-thumb {
+    background-color: var(--color-line-strong);
+    border-radius: 999px;
+  }
+
+  .zen-scroll:where(.style-simple, .style-simple *)::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-accent);
+  }
+}
+
+@media (max-width: 767px) {
+  .app-canvas:where(.style-simple, .style-simple *)::before {
+    background-size: 40px 40px;
+    opacity: 0.28;
+  }
+
+  .ambient-orb:where(.style-simple, .style-simple *) {
+    filter: blur(78px);
+  }
+}
+
+@layer components {
+  /* Assessment sliders.
+     `appearance: none` throws away the native widget entirely, which means the
+     track and thumb have to be rebuilt per engine — WebKit and Firefox expose
+     different pseudo-elements and neither inherits from the other, so the
+     blocks below are duplicates by necessity, not by accident. */
+  .zen-range:where(.style-simple, .style-simple *) {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 100%;
+    height: 1.5rem;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .zen-range:where(.style-simple, .style-simple *)::-webkit-slider-runnable-track {
+    height: 0.375rem;
+    border-radius: 999px;
+    background: var(--color-accent-wash);
+    border: 1px solid var(--color-line);
+  }
+
+  .zen-range:where(.style-simple, .style-simple *)::-moz-range-track {
+    height: 0.375rem;
+    border-radius: 999px;
+    background: var(--color-accent-wash);
+    border: 1px solid var(--color-line);
+  }
+
+  .zen-range:where(.style-simple, .style-simple *)::-webkit-slider-thumb {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 1.125rem;
+    height: 1.125rem;
+    border-radius: 999px;
+    background: var(--color-accent);
+    border: 2px solid var(--color-raised);
+    box-shadow: var(--shadow-bubble);
+    /* Centre the thumb on the track: half the difference of their heights. */
+    margin-top: calc((0.375rem - 1.125rem) / 2);
+    transition: transform 200ms ease-out;
+  }
+
+  .zen-range:where(.style-simple, .style-simple *)::-moz-range-thumb {
+    width: 1.125rem;
+    height: 1.125rem;
+    border-radius: 999px;
+    background: var(--color-accent);
+    border: 2px solid var(--color-raised);
+    box-shadow: var(--shadow-bubble);
+    transition: transform 200ms ease-out;
+  }
+
+  .zen-range:active:where(.style-simple, .style-simple *)::-webkit-slider-thumb {
+    transform: scale(1.15);
+  }
+
+  .zen-range:active:where(.style-simple, .style-simple *)::-moz-range-thumb {
+    transform: scale(1.15);
+  }
+
+  .zen-range:focus-visible:where(.style-simple, .style-simple *)::-webkit-slider-thumb {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  .zen-range:focus-visible:where(.style-simple, .style-simple *)::-moz-range-thumb {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}
+
+/* Streaming placeholder: three dots breathing in sequence. Slow and shallow —
+   a fast pulse reads as "system is struggling", which is the wrong signal in a
+   counselling context. */
+
+/* A single motion language for navigation and overlays. The distance and
+   scale are intentionally small: this should feel like the next surface
+   settling into place, not like a card flying across a dashboard. */
+
+/* New turns rise gently from the composer. The assistant follows a fraction
+   later so the exchange reads as a calm sequence instead of two simultaneous
+   notifications. */
+
+@media (prefers-reduced-motion: no-preference) {
+  .zen-page-enter:where(.style-simple, .style-simple *) {
+    animation: zen-page-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .zen-overlay-enter:where(.style-simple, .style-simple *) {
+    animation: zen-overlay-enter 280ms ease-out both;
+  }
+
+  .zen-message-user:where(.style-simple, .style-simple *) {
+    transform-origin: right bottom;
+    animation: zen-message-float 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .zen-message-agent:where(.style-simple, .style-simple *) {
+    transform-origin: left bottom;
+    animation: zen-message-float 480ms 70ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  [role="dialog"]:where(.style-simple, .style-simple *),
+[role="alertdialog"]:where(.style-simple, .style-simple *) {
+    animation: zen-page-enter 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  button:not(:disabled):where(.style-simple, .style-simple *) {
+    transition-property: color, background-color, border-color, box-shadow,
+      opacity, transform;
+    transition-duration: 220ms;
+    transition-timing-function: ease-out;
+  }
+
+  button:not(:disabled):active:where(.style-simple, .style-simple *) {
+    transform: scale(0.97);
+  }
+}
+
+.zen-breathe:where(.style-simple, .style-simple *) {
+  animation: zen-breathe 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zen-page-enter:where(.style-simple, .style-simple *),
+.zen-overlay-enter:where(.style-simple, .style-simple *),
+.zen-message-user:where(.style-simple, .style-simple *),
+.zen-message-agent:where(.style-simple, .style-simple *),
+[role="dialog"]:where(.style-simple, .style-simple *),
+[role="alertdialog"]:where(.style-simple, .style-simple *) {
+    animation: none;
+  }
+
+  .zen-breathe:where(.style-simple, .style-simple *) {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+/* Shared form and dialog hierarchy. Keep native focus, scroll and modal behavior. */
+@layer components {
+  dialog:where(.style-simple, .style-simple *),
+[role="dialog"]:where(.style-simple, .style-simple *) { color: var(--color-ink); }
+  dialog:where(.style-simple, .style-simple *)::backdrop { background: rgb(22 24 27 / 0.32); }
+  :where(button, a, input, textarea, select, summary):focus-visible:where(.style-simple, .style-simple *) {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 3px;
+  }
+  :where(input, textarea, select):where(.style-simple, .style-simple *) { accent-color: var(--color-accent); }
+  .workspace-card-header:where(.style-simple, .style-simple *) { border-bottom: 0; }
+  [aria-label="设置页面"] h2:where(.style-simple, .style-simple *) { letter-spacing: -.015em; }
+  [aria-label="目标设定时间线"] button[data-goal-id]:where(.style-simple, .style-simple *) {
+    box-shadow: none;
+    border: 0;
+  }
+}

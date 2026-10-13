@@ -56,6 +56,8 @@ export interface KnowledgeReferences {
   gate_reason: string | null;
   mediator_status: string | null;
   mediator_reason: string | null;
+  mediator_validation_errors?: { field: string; type: string }[];
+  mediator_normalized_fields?: string[];
   mediator_reasoning_content: string | null;
   mediator_response_content?: string | null;
   mediator_note?: string | null;

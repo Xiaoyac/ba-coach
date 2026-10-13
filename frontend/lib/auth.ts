@@ -21,8 +21,6 @@ let memoryOnly = false;
 export interface Account {
   username: string;
   nickname: string | null;
-  tag: string | null;
-  display_id: string | null;
   profile_uuid: string;
   current_module: string | null;
   role: "user" | "admin";
@@ -45,7 +43,6 @@ export interface RegisterInput {
   password: string;
   email: string;
   nickname: string;
-  tag: string;
   /** Stable enough to ask once — everything else is edited in the profile. */
   birth_date: string;
   living_status?: string | null;

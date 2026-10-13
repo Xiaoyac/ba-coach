@@ -22,6 +22,8 @@ class KnowledgeReferences(BaseModel):
     gate_reason: str | None = None
     mediator_status: str | None = None
     mediator_reason: str | None = None
+    mediator_validation_errors: list[dict[str, str]] = Field(default_factory=list)
+    mediator_normalized_fields: list[str] = Field(default_factory=list)
     mediator_reasoning_content: str | None = None
     mediator_response_content: str | None = None
     mediator_decision: str | None = None
@@ -43,11 +45,15 @@ def reference_snapshot(*, module, recalled, provided, retrieval, mediator, conte
             score=c.score if c.score is not None and math.isfinite(c.score) else None,
             score_type=c.score_type) for c in chunks]
     return KnowledgeReferences(
-        version=5, available=True, module=module,
+        version=6, available=True, module=module,
         retrieval_outcome=retrieval.get("outcome", "disabled"),
         retrieval_mode=retrieval.get("ranking_mode"),
         gate_reason=(retrieval.get("gate") or {}).get("reason"),
         mediator_status=mediator.get("status"), mediator_reason=mediator.get("reason"),
+        mediator_validation_errors=[{"field": str(error.get("field", "")), "type": str(error.get("type", ""))}
+            for error in (mediator.get("validation_errors") or [])[:8]],
+        mediator_normalized_fields=[field for field in (mediator.get("normalized_fields") or [])
+            if field in {"note", "selections.0.quote", "selections.1.quote"}],
         mediator_reasoning_content=mediator_reasoning if recalled else None,
         mediator_response_content=mediator_response if recalled else None,
         mediator_decision=mediator.get("decision") if not context_withheld else None,

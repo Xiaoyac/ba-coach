@@ -62,6 +62,7 @@ export interface ChatMessage {
 export interface ChatRequest {
   message: string;
   generation_id?: string;
+  retry_of_message_id?: number;
   session_id?: string | null;
   provider?: "claude" | "deepseek" | "doubao";
   /** Pin a module and skip the router, e.g. "module_3". */
@@ -122,6 +123,7 @@ export interface RoutingMeta {
 
 export interface StreamHandlers {
   /** Pause between the visible opening and its continuation in one reply. */
+  onRetry?: (value: { retrying: boolean; attempt: number; max_retries: number; generation_id: string }) => void;
   onReplyWait?: (value: { waiting: boolean; generation_id: string }) => void;
   onCancelled?: () => void;
   /**
@@ -160,6 +162,10 @@ export async function streamChat(
 
   if (!res.ok || !res.body) {
     let message = chatRequestError(res.status);
+    if (body.retry_of_message_id && res.status === 409) {
+      const result = await res.json().catch(() => null);
+      if (typeof result?.detail === "string") message = result.detail;
+    }
     if (body.metadata?.goal_card_action === "confirm") {
       if (res.status === 409) {
         const result = await res.json().catch(() => null);
@@ -182,7 +188,7 @@ export async function streamChat(
 
   try { while (true) {
     const { done, value } = await reader.read();
-    if (done) throw new Error(generationError ?? "连接已中断，正在同步已保存的回复；请勿重复发送。");
+    if (done) throw new Error(generationError ?? "连接已中断，原文已保留。请检查记录后重新尝试。");
     buffer += decoder.decode(value, { stream: true });
     buffer = buffer.replace(/\r\n/g, "\n");
 
@@ -201,6 +207,11 @@ export async function streamChat(
 
       const payload = JSON.parse(dataLines.join("\n"));
       switch (event) {
+        case "retry":
+          if (typeof payload.retrying === "boolean" && typeof payload.generation_id === "string"
+            && Number.isInteger(payload.attempt) && payload.attempt >= 1 && payload.attempt <= 5
+            && payload.max_retries === 5) handlers.onRetry?.(payload);
+          break;
         case "reply_wait":
           if (typeof payload.waiting === "boolean" && typeof payload.generation_id === "string") {
             handlers.onReplyWait?.(payload);

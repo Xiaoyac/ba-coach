@@ -12,7 +12,23 @@ function inline(text: string): ReactNode[] {
   });
 }
 
-export default function MessageMarkdown({ text, trailing }: { text: string; trailing?: ReactNode }) {
+// Ignore escaped pipes and pipes inside inline code when detecting table cells.
+function tableCells(line: string): string[] {
+  const cells: string[] = []; let cell = "", code = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === "\\" && line[i + 1] === "|") { cell += "|"; i++; continue; }
+    if (char === "`") code = !code;
+    if (char === "|" && !code) { cells.push(cell.trim()); cell = ""; }
+    else cell += char;
+  }
+  cells.push(cell.trim());
+  if (line.trimStart().startsWith("|")) cells.shift();
+  if (line.trimEnd().endsWith("|") && cells.at(-1) === "") cells.pop();
+  return cells;
+}
+
+export default function MessageMarkdown({ text, trailing, tables = false }: { text: string; trailing?: ReactNode; tables?: boolean }) {
   const blocks: ReactNode[] = [];
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   let lastContentLine = lines.length - 1;
@@ -20,7 +36,25 @@ export default function MessageMarkdown({ text, trailing }: { text: string; trai
   const suffix = (index: number) => index === lastContentLine ? trailing : null;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    if (/^\s*```/.test(line)) {
+    const header = tables && line.includes("|") ? tableCells(line) : [];
+    const divider = tables && i + 1 < lines.length ? tableCells(lines[i + 1]) : [];
+    if (header.length >= 2 && header.length === divider.length && divider.every(cell => /^:?-{3,}:?$/.test(cell))) {
+      const rows: string[][] = [];
+      const start = i;
+      i += 2;
+      while (i < lines.length && lines[i].trim() && lines[i].includes("|")) {
+        const cells = tableCells(lines[i]);
+        // A partial streamed row stays as prose until it has all its cells.
+        if (cells.length !== header.length) break;
+        rows.push(cells); i++;
+      }
+      i--;
+      const align = (index: number): "left" | "center" | "right" => divider[index].endsWith(":") ? divider[index].startsWith(":") ? "center" : "right" : "left";
+      blocks.push(<Fragment key={start}><div role="region" aria-label="回复表格，可横向滚动" tabIndex={0} className="participant-reply-table">
+        <table><thead><tr>{header.map((cell, index) => <th key={index} scope="col" style={{textAlign: align(index)}}>{inline(cell)}</th>)}</tr></thead>
+          <tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, column) => <td key={column} style={{textAlign: align(column)}}>{inline(cell)}</td>)}</tr>)}</tbody>
+        </table></div>{suffix(i)}</Fragment>);
+    } else if (/^\s*```/.test(line)) {
       const code: string[] = [];
       while (++i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i]);
       blocks.push(<Fragment key={i}><pre className="my-2 overflow-x-auto rounded-xl bg-raised p-3 text-xs"><code>{code.join("\n")}</code></pre>{i >= lastContentLine ? trailing : null}</Fragment>);

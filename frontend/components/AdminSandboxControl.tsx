@@ -71,7 +71,7 @@ export default function AdminSandboxControl({
         <div
           role="menu"
           aria-label="选择沙盒起始模块"
-          className="absolute left-0 top-full z-50 mt-2 w-full overflow-hidden rounded-2xl border border-accent-edge bg-panel/95 p-1.5 depth-panel backdrop-blur-2xl"
+          className="default-style:absolute default-style:left-0 default-style:top-full default-style:z-50 default-style:mt-2 default-style:w-full default-style:overflow-hidden default-style:rounded-2xl default-style:border default-style:border-accent-edge default-style:bg-panel/95 default-style:p-1.5 default-style:depth-panel default-style:backdrop-blur-2xl simple:absolute simple:left-0 simple:top-full simple:z-50 simple:mt-2 simple:w-full simple:overflow-hidden simple:rounded-2xl simple:border simple:border-accent-edge simple:bg-panel/95 simple:p-1.5 simple:depth-panel "
         >
           <p className="px-2.5 pb-2 pt-1.5 text-[0.62rem] leading-relaxed text-ink-faint">
             每次选择都会创建全新空白对话，不写入真实临床进度。

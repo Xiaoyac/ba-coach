@@ -42,7 +42,7 @@ export default function RequiredBirthDateModal({ onSaved, onLogout }: {
   }
 
   return <dialog ref={dialog} aria-labelledby="required-birthday-title" onCancel={event => event.preventDefault()}
-    className="m-auto w-[min(440px,calc(100vw-32px))] max-h-[calc(100dvh-32px)] overflow-y-auto rounded-3xl border-0 bg-sheet p-6 text-ink shadow-2xl backdrop:bg-black/40 sm:p-8">
+    className="default-style:m-auto default-style:w-[min(440px,calc(100vw-32px))] default-style:max-h-[calc(100dvh-32px)] default-style:overflow-y-auto default-style:rounded-3xl default-style:border-0 default-style:bg-sheet default-style:p-6 default-style:text-ink default-style:shadow-2xl default-style:backdrop:bg-black/40 default-style:sm:p-8 simple:m-auto simple:w-[min(440px,calc(100vw-32px))] simple:max-h-[calc(100dvh-32px)] simple:overflow-y-auto simple:rounded-2xl simple:border-0 simple:bg-sheet simple:p-6 simple:text-ink simple:depth-panel simple:backdrop:bg-black/40 simple:sm:p-8">
     <h1 id="required-birthday-title" className="text-xl font-semibold">补充一下你的生日</h1>
     <p className="mt-3 text-sm leading-7 text-ink-muted">旧资料中的年龄记录为 10 岁，需要你确认出生日期，让建议更贴合实际情况。</p>
     <form onSubmit={submit} className="mt-6 space-y-5" aria-busy={busy}>

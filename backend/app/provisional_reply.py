@@ -65,6 +65,23 @@ def classify_lead(raw):
     return (text, None) if len(text) <= 150 else ("", "too_long")
 
 
+def usable_lead(raw):
+    """Keep only a complete validated opening before an overlong/question tail."""
+    text, reason = classify_lead(raw)
+    if text or reason not in {"question", "too_long", "too_many_sentences"}:
+        return text, reason, False
+    normalized = " ".join(normalize_reasoning_channels(raw, "").reply.split())
+    prefix = ""
+    for sentence in re.findall(r"[^。！？.!?]*[。！.!?？]", normalized):
+        if "?" in sentence or "？" in sentence:
+            break
+        candidate, rejection = classify_lead(prefix + sentence)
+        if rejection:
+            break
+        prefix = candidate
+    return (prefix, None, True) if prefix else ("", reason, False)
+
+
 def normalize_lead(raw):
     return classify_lead(raw)[0]
 
@@ -206,7 +223,7 @@ async def generate_reply_lead(provider, *, user_input, history, user_created_at=
         result.update(provider=provider.name, model=provider.model)
         scoped = provider.with_thinking(False)
         config = settings or getattr(scoped, "_settings", None)
-        deadline = getattr(config, "reply_lead_timeout_seconds", 8.0)
+        deadline = getattr(config, "reply_lead_timeout_seconds", 12.0)
         budget = getattr(config, "reply_lead_max_tokens", 2048)
         from .generation_policy import is_ark_kimi, auxiliary_output_budget
         wire_settings = getattr(scoped, "_settings", None)
@@ -252,7 +269,8 @@ async def generate_reply_lead(provider, *, user_input, history, user_created_at=
         result.update(model=response.model or provider.model, request_id=response.request_id,
                       usage=response.usage, finish_reason=response.finish_reason)
         if response.finish_reason in (None, "stop", "end_turn"):
-            text, rejection = classify_lead(response.text)
+            text, rejection, shortened = usable_lead(response.text)
+            result["trimmed_to_valid_prefix"] = shortened
         else:
             text, rejection = "", "incomplete_generation"
         if text:
@@ -262,7 +280,7 @@ async def generate_reply_lead(provider, *, user_input, history, user_created_at=
     except asyncio.TimeoutError:
         result["reason_code"] = "lead_timeout"
     except Exception as exc:
-        result.update(reason_code="lead_provider_error", error_type=type(exc).__name__)
+        result.update(reason_code="lead_timeout" if "timed out" in str(exc).casefold() else "lead_provider_error", error_type=type(exc).__name__)
     finally:
         if owned_client is not None:
             with anyio.CancelScope(shield=True):

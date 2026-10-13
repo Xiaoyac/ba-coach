@@ -1,28 +1,40 @@
+/* Default layout: production baseline 20261010T070658Z, scoped without changing declarations. */
 @import "tailwindcss";
+@import "./style-simple.css";
+@import "./style-participant-1.css";
+@import "./settings.css";
 
-.reply-vote-button {
+/* Layout choice is independent of the color palette. */
+@custom-variant simple (&:where(.style-simple, .style-simple *));
+@custom-variant default-style (&:where(html:not(.style-simple), html:not(.style-simple) *));
+
+.reply-vote-button:where(html:not(.style-simple), html:not(.style-simple) *) {
   display: inline-flex; align-items: center; justify-content: center;
   width: 40px; height: 40px; flex-shrink: 0; border-radius: 12px;
   color: var(--color-ink-muted); border: 1px solid transparent;
   transition: color 180ms ease, background-color 180ms ease, transform 180ms ease;
 }
-.reply-vote-button:hover { background: var(--color-accent-wash); color: var(--color-accent-ink); }
-.reply-vote-button:active:not(:disabled) { transform: translateY(1px); }
-.reply-vote-button.is-selected { background: var(--color-accent-wash); color: var(--color-accent-ink); border-color: var(--color-accent-edge); }
-.reply-vote-button:disabled { opacity: .45; cursor: wait; }
-.reply-vote-button:focus-visible, .reply-feedback-reason:focus-visible {
+.reply-vote-button:hover:where(html:not(.style-simple), html:not(.style-simple) *) { background: var(--color-accent-wash); color: var(--color-accent-ink); }
+.reply-vote-button:active:not(:disabled):where(html:not(.style-simple), html:not(.style-simple) *) { transform: translateY(1px); }
+.reply-vote-button.is-selected:where(html:not(.style-simple), html:not(.style-simple) *) { background: var(--color-accent-wash); color: var(--color-accent-ink); border-color: var(--color-accent-edge); }
+.reply-vote-button:disabled:where(html:not(.style-simple), html:not(.style-simple) *) { opacity: .45; cursor: wait; }
+.reply-vote-button:focus-visible:where(html:not(.style-simple), html:not(.style-simple) *),
+.reply-feedback-reason:focus-visible:where(html:not(.style-simple), html:not(.style-simple) *) {
   outline: 2px solid var(--color-accent-edge); outline-offset: 3px;
 }
-.reply-feedback-reveal { display: grid; grid-template-rows: 0fr; visibility: hidden; transition: grid-template-rows 240ms ease, visibility 240ms; }
-.reply-feedback-reveal.is-open { grid-template-rows: 1fr; visibility: visible; }
-.reply-feedback-panel { margin-top: 6px; padding: 12px 16px 16px; border: 1px solid var(--color-line); border-radius: 16px; background: var(--color-panel); }
-.reply-feedback-reason { min-height: 36px; padding: 6px 12px; border: 1px solid var(--color-line); border-radius: 10px; color: var(--color-ink-muted); font-size: 12px; transition: background-color 180ms ease, border-color 180ms ease; }
-.reply-feedback-reason:hover, .reply-feedback-reason.is-selected { color: var(--color-accent-ink); background: var(--color-accent-wash); border-color: var(--color-accent-edge); }
-@media (pointer: coarse) { .reply-vote-button { width: 44px; height: 44px; } .reply-feedback-reason { min-height: 44px; } }
-@media (prefers-reduced-motion: reduce) { .reply-vote-button, .reply-feedback-reveal, .reply-feedback-reason { transition: none; } }
+.reply-feedback-reveal:where(html:not(.style-simple), html:not(.style-simple) *) { display: grid; grid-template-rows: 0fr; visibility: hidden; transition: grid-template-rows 240ms ease, visibility 240ms; }
+.reply-feedback-reveal.is-open:where(html:not(.style-simple), html:not(.style-simple) *) { grid-template-rows: 1fr; visibility: visible; }
+.reply-feedback-panel:where(html:not(.style-simple), html:not(.style-simple) *) { margin-top: 6px; padding: 12px 16px 16px; border: 1px solid var(--color-line); border-radius: 16px; background: var(--color-panel); }
+.reply-feedback-reason:where(html:not(.style-simple), html:not(.style-simple) *) { min-height: 36px; padding: 6px 12px; border: 1px solid var(--color-line); border-radius: 10px; color: var(--color-ink-muted); font-size: 12px; transition: background-color 180ms ease, border-color 180ms ease; }
+.reply-feedback-reason:hover:where(html:not(.style-simple), html:not(.style-simple) *),
+.reply-feedback-reason.is-selected:where(html:not(.style-simple), html:not(.style-simple) *) { color: var(--color-accent-ink); background: var(--color-accent-wash); border-color: var(--color-accent-edge); }
+@media (pointer: coarse) { .reply-vote-button:where(html:not(.style-simple), html:not(.style-simple) *) { width: 44px; height: 44px; } .reply-feedback-reason:where(html:not(.style-simple), html:not(.style-simple) *) { min-height: 44px; } }
+@media (prefers-reduced-motion: reduce) { .reply-vote-button:where(html:not(.style-simple), html:not(.style-simple) *),
+.reply-feedback-reveal:where(html:not(.style-simple), html:not(.style-simple) *),
+.reply-feedback-reason:where(html:not(.style-simple), html:not(.style-simple) *) { transition: none; } }
 
 /*
- * Two themes, one contract.
+ * Four themes, one semantic color contract.
  *
  * Every token below is *semantic* — `canvas`, `raised`, `ink` — never a raw
  * colour name. That is what makes the second theme possible: `bg-night-800`
@@ -104,7 +116,7 @@
  *
  * Dark surfaces need long, very soft shadows to separate at all.
  */
-:root {
+:root:where(html:not(.style-simple), html:not(.style-simple) *) {
   --shadow-panel: 0 28px 80px -32px rgb(0 0 0 / 0.95);
   --shadow-bubble: 0 18px 40px -26px rgb(0 0 0 / 0.95);
   --shadow-composer: 0 18px 44px -28px rgb(0 0 0 / 1);
@@ -116,7 +128,7 @@
  * Soft surfaces and diffused shadows carry the atmosphere; text and focus
  * indicators stay dark enough to read. No pink or green brand accents.
  * ------------------------------------------------------------------ */
-.theme-warm {
+.theme-warm:where(html:not(.style-simple), html:not(.style-simple) *) {
   --color-canvas: #f2eee5;
   --color-panel: #fffdf8;
   --color-sheet: #fffdf8;
@@ -156,6 +168,68 @@
   --shadow-float: 0 8px 24px -14px rgb(94 73 42 / 0.24);
 }
 
+.theme-porcelain:where(html:not(.style-simple), html:not(.style-simple) *) {
+  --color-canvas: #f2f6f8;
+  --color-panel: #fcfdfc;
+  --color-sheet: #fcfdfc;
+  --color-raised: #edf2f6;
+  --color-agent-bubble: #eef3f7;
+  --color-line: #d6e1e9;
+  --color-line-strong: #9cb3c6;
+  --color-ink: #243c50;
+  --color-ink-muted: #50697e;
+  --color-ink-faint: #566d80;
+  --color-accent: #37658a;
+  --color-accent-ink: #315e82;
+  --color-on-accent: #fcfdfc;
+  --color-accent-wash: #e8eff5;
+  --color-accent-edge: #789ab6;
+  --color-mine: #e4edf5;
+  --color-mine-edge: #a9bfd1;
+  --color-mine-ink: #294d6a;
+  --color-alert-ink: #994d50;
+  --color-alert-wash: #994d5010;
+  --color-alert-edge: #994d5036;
+  --color-wash-a: #a8c7df18;
+  --color-wash-b: #bdd0de14;
+  --color-wash-c: #fcfdfc70;
+  --shadow-panel: 0 24px 70px -36px rgb(47 80 108 / 0.18);
+  --shadow-bubble: 0 8px 28px -18px rgb(47 80 108 / 0.16);
+  --shadow-composer: 0 12px 32px -22px rgb(47 80 108 / 0.2);
+  --shadow-float: 0 8px 24px -14px rgb(47 80 108 / 0.24);
+}
+
+.theme-github:where(html:not(.style-simple), html:not(.style-simple) *) {
+  --color-canvas: #1e1e1e;
+  --color-panel: #252525;
+  --color-sheet: #252525;
+  --color-raised: #303030;
+  --color-agent-bubble: #2b2b2b;
+  --color-line: #3d3d3d;
+  --color-line-strong: #737373;
+  --color-ink: #f2f2f2;
+  --color-ink-muted: #c5c5c5;
+  --color-ink-faint: #ababab;
+  --color-accent: #b5b5b5;
+  --color-accent-ink: #e3e3e3;
+  --color-on-accent: #1e1e1e;
+  --color-accent-wash: #3b3b3b;
+  --color-accent-edge: #858585;
+  --color-mine: #333333;
+  --color-mine-edge: #585858;
+  --color-mine-ink: #ededed;
+  --color-alert-ink: #efa3a3;
+  --color-alert-wash: #efa3a312;
+  --color-alert-edge: #efa3a33d;
+  --color-wash-a: transparent;
+  --color-wash-b: transparent;
+  --color-wash-c: transparent;
+  --shadow-panel: 0 18px 48px -30px rgb(0 0 0 / 0.5);
+  --shadow-bubble: none;
+  --shadow-composer: none;
+  --shadow-float: 0 12px 28px -12px rgb(0 0 0 / 0.6);
+}
+
 /*
  * Paired with the custom properties above — a plain `var()` reference is what
  * makes the shadows follow the active theme.
@@ -181,23 +255,24 @@
 }
 
 @layer base {
-  html,
-  body {
+  html:where(html:not(.style-simple), html:not(.style-simple) *),
+body:where(html:not(.style-simple), html:not(.style-simple) *) {
     height: 100%;
   }
 
   /* Tells the browser to paint its own chrome — carets, native scrollbars,
      autofill — to match. Without it the UA uses light defaults on the dark
      theme and flashes white. */
-  html {
+  html:where(html:not(.style-simple), html:not(.style-simple) *) {
     color-scheme: dark;
   }
 
-  html.theme-warm {
+  html.theme-warm:where(html:not(.style-simple), html:not(.style-simple) *),
+html.theme-porcelain:where(html:not(.style-simple), html:not(.style-simple) *) {
     color-scheme: light;
   }
 
-  body {
+  body:where(html:not(.style-simple), html:not(.style-simple) *) {
     background-color: var(--color-canvas);
     color: var(--color-ink);
     font-family: var(--font-sans);
@@ -205,7 +280,7 @@
     text-rendering: optimizeLegibility;
   }
 
-  ::selection {
+  :where(html:not(.style-simple), html:not(.style-simple) *)::selection {
     background-color: color-mix(in srgb, var(--color-accent) 28%, transparent);
     color: var(--color-ink);
   }
@@ -220,7 +295,7 @@
      composer) keeps its hand-tuned timing; this only fills in the elements —
      mostly plain surfaces — that don't declare a transition at all. */
   @media (prefers-reduced-motion: no-preference) {
-    * {
+    *:where(html:not(.style-simple), html:not(.style-simple) *) {
       transition-property: background-color, border-color, color, box-shadow,
         fill, stroke;
       transition-duration: 500ms;
@@ -232,16 +307,16 @@
 @layer components {
   /* Keep ambient decoration behind every control, including the desktop rail.
      A positioned ::after painted last otherwise veils text with canvas color. */
-  .app-canvas {
+  .app-canvas:where(html:not(.style-simple), html:not(.style-simple) *) {
     isolation: isolate;
   }
 
-  .app-canvas::before,
-  .app-canvas::after {
+  .app-canvas:where(html:not(.style-simple), html:not(.style-simple) *)::before,
+.app-canvas:where(html:not(.style-simple), html:not(.style-simple) *)::after {
     z-index: -1;
   }
 
-  .app-canvas::before {
+  .app-canvas:where(html:not(.style-simple), html:not(.style-simple) *)::before {
     position: absolute;
     inset: 0;
     content: "";
@@ -254,7 +329,7 @@
     mask-image: linear-gradient(to bottom, black, transparent 82%);
   }
 
-  .app-canvas::after {
+  .app-canvas:where(html:not(.style-simple), html:not(.style-simple) *)::after {
     position: absolute;
     inset: 0;
     content: "";
@@ -262,14 +337,14 @@
     background: radial-gradient(circle at 50% 42%, transparent 28%, var(--color-canvas) 92%);
   }
 
-  .ambient-orb {
+  .ambient-orb:where(html:not(.style-simple), html:not(.style-simple) *) {
     position: absolute;
     border-radius: 999px;
     filter: blur(100px);
     opacity: 0.9;
   }
 
-  .ambient-orb-a {
+  .ambient-orb-a:where(html:not(.style-simple), html:not(.style-simple) *) {
     left: 10%;
     top: -18rem;
     width: 38rem;
@@ -277,7 +352,7 @@
     background: var(--color-wash-a);
   }
 
-  .ambient-orb-b {
+  .ambient-orb-b:where(html:not(.style-simple), html:not(.style-simple) *) {
     right: 7%;
     bottom: -20rem;
     width: 34rem;
@@ -285,7 +360,7 @@
     background: var(--color-wash-b);
   }
 
-  .ambient-orb-c {
+  .ambient-orb-c:where(html:not(.style-simple), html:not(.style-simple) *) {
     right: 18%;
     top: 18%;
     width: 24rem;
@@ -293,13 +368,13 @@
     background: var(--color-wash-c);
   }
 
-  .auth-shell {
+  .auth-shell:where(html:not(.style-simple), html:not(.style-simple) *) {
     background:
       linear-gradient(145deg, color-mix(in srgb, var(--color-panel) 92%, transparent), color-mix(in srgb, var(--color-raised) 76%, transparent));
     box-shadow: var(--shadow-panel);
   }
 
-  .auth-story {
+  .auth-story:where(html:not(.style-simple), html:not(.style-simple) *) {
     position: relative;
     isolation: isolate;
     background:
@@ -307,7 +382,7 @@
       linear-gradient(155deg, color-mix(in srgb, var(--color-raised) 82%, transparent), color-mix(in srgb, var(--color-panel) 58%, transparent));
   }
 
-  .auth-story::after {
+  .auth-story:where(html:not(.style-simple), html:not(.style-simple) *)::after {
     position: absolute;
     z-index: -1;
     right: -5rem;
@@ -322,11 +397,11 @@
       0 0 0 8rem color-mix(in srgb, var(--color-accent) 2%, transparent);
   }
 
-  .auth-form-panel {
+  .auth-form-panel:where(html:not(.style-simple), html:not(.style-simple) *) {
     background: color-mix(in srgb, var(--color-panel) 88%, transparent);
   }
 
-  .eyebrow {
+  .default-style\:eyebrow:where(html:not(.style-simple), html:not(.style-simple) *) {
     font-size: 0.68rem;
     font-weight: 650;
     letter-spacing: 0.19em;
@@ -334,13 +409,13 @@
     color: var(--color-accent);
   }
 
-  .display-title {
+  .display-title:where(html:not(.style-simple), html:not(.style-simple) *) {
     font-weight: 520;
     letter-spacing: -0.035em;
     text-wrap: balance;
   }
 
-  .number-chip {
+  .default-style\:number-chip:where(html:not(.style-simple), html:not(.style-simple) *) {
     display: grid;
     width: 2rem;
     height: 2rem;
@@ -354,42 +429,42 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .premium-control {
+  .premium-control:where(html:not(.style-simple), html:not(.style-simple) *) {
     min-height: 3rem;
     box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-ink) 5%, transparent);
   }
 
-  .primary-action {
+  .primary-action:where(html:not(.style-simple), html:not(.style-simple) *) {
     min-height: 3rem;
     background: var(--color-accent);
     color: var(--color-on-accent);
     box-shadow: 0 14px 34px -20px var(--color-accent);
   }
 
-  .primary-action:hover:not(:disabled) {
+  .primary-action:hover:not(:disabled):where(html:not(.style-simple), html:not(.style-simple) *) {
     filter: brightness(1.08);
     box-shadow: 0 18px 40px -18px var(--color-accent);
     transform: translateY(-1px);
   }
 
-  .surface-button {
+  .surface-button:where(html:not(.style-simple), html:not(.style-simple) *) {
     box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-ink) 5%, transparent);
   }
 
-  .surface-button:hover:not(:disabled) {
+  .surface-button:hover:not(:disabled):where(html:not(.style-simple), html:not(.style-simple) *) {
     border-color: var(--color-accent-edge);
     background: var(--color-accent-wash);
     color: var(--color-accent-ink);
     transform: translateY(-1px);
   }
 
-  .workspace-rail {
+  .workspace-rail:where(html:not(.style-simple), html:not(.style-simple) *) {
     background: color-mix(in srgb, var(--color-panel) 94%, transparent);
   }
 
-  .workspace-rail .surface-button { box-shadow: none; }
-  .workspace-rail .conversation-row-active::before { content: none; }
-  .archive-input {
+  .workspace-rail .surface-button:where(html:not(.style-simple), html:not(.style-simple) *) { box-shadow: none; }
+  .workspace-rail .conversation-row-active:where(html:not(.style-simple), html:not(.style-simple) *)::before { content: none; }
+  .archive-input:where(html:not(.style-simple), html:not(.style-simple) *) {
     min-height: 2.75rem;
     border: 1px solid var(--color-line);
     border-radius: 0.8rem;
@@ -398,7 +473,7 @@
     color: var(--color-ink);
     font-size: 0.875rem;
   }
-  .archive-action {
+  .archive-action:where(html:not(.style-simple), html:not(.style-simple) *) {
     min-height: 2.75rem;
     border-radius: 0.75rem;
     padding: 0.6rem 0.9rem;
@@ -406,13 +481,13 @@
     color: var(--color-accent-ink);
     font-size: 0.8125rem;
   }
-  .archive-action:disabled { opacity: 0.4; cursor: not-allowed; }
-  .archive-action:hover:not(:disabled) { background: var(--color-raised); }
-  .goal-timeline-entry {
+  .archive-action:disabled:where(html:not(.style-simple), html:not(.style-simple) *) { opacity: 0.4; cursor: not-allowed; }
+  .archive-action:hover:not(:disabled):where(html:not(.style-simple), html:not(.style-simple) *) { background: var(--color-raised); }
+  .goal-timeline-entry:where(html:not(.style-simple), html:not(.style-simple) *) {
     position: relative;
     padding: 0 0 1.75rem 1.75rem;
   }
-  .goal-timeline-entry::before {
+  .goal-timeline-entry:where(html:not(.style-simple), html:not(.style-simple) *)::before {
     content: "";
     position: absolute;
     left: 0.35rem;
@@ -421,8 +496,8 @@
     width: 2px;
     background: var(--color-accent-edge);
   }
-  .goal-timeline-entry:last-child::before { bottom: 1.75rem; }
-  .goal-timeline-dot {
+  .goal-timeline-entry:last-child:where(html:not(.style-simple), html:not(.style-simple) *)::before { bottom: 1.75rem; }
+  .goal-timeline-dot:where(html:not(.style-simple), html:not(.style-simple) *) {
     position: absolute;
     left: 0;
     top: 0.35rem;
@@ -431,72 +506,73 @@
     border: 2px solid var(--color-accent);
     border-radius: 50%;
   }
-  .goal-timeline-date { padding-bottom: 0.75rem; }
+  .goal-timeline-date:where(html:not(.style-simple), html:not(.style-simple) *) { padding-bottom: 0.75rem; }
   @media (min-width: 640px) {
-    .goal-timeline-entry {
+    .goal-timeline-entry:where(html:not(.style-simple), html:not(.style-simple) *) {
       display: grid;
       grid-template-columns: 8.5rem minmax(0, 1fr);
       gap: 2.5rem;
       padding-left: 0;
     }
-    .goal-timeline-date { padding-top: 1.5rem; text-align: right; }
-    .goal-timeline-dot { left: 9.35rem; top: 1.7rem; }
-    .goal-timeline-entry::before { left: 9.7rem; top: 2rem; bottom: -2rem; }
+    .goal-timeline-date:where(html:not(.style-simple), html:not(.style-simple) *) { padding-top: 1.5rem; text-align: right; }
+    .goal-timeline-dot:where(html:not(.style-simple), html:not(.style-simple) *) { left: 9.35rem; top: 1.7rem; }
+    .goal-timeline-entry:where(html:not(.style-simple), html:not(.style-simple) *)::before { left: 9.7rem; top: 2rem; bottom: -2rem; }
   }
-  .archive-input:focus-visible, .archive-action:focus-visible {
+  .archive-input:focus-visible:where(html:not(.style-simple), html:not(.style-simple) *),
+.archive-action:focus-visible:where(html:not(.style-simple), html:not(.style-simple) *) {
     outline: 2px solid var(--color-accent);
     outline-offset: 2px;
   }
 
-  .workspace-card {
+  .workspace-card:where(html:not(.style-simple), html:not(.style-simple) *) {
     background: color-mix(in srgb, var(--color-panel) 78%, transparent);
   }
 
-  .workspace-card-header {
+  .workspace-card-header:where(html:not(.style-simple), html:not(.style-simple) *) {
     background: color-mix(in srgb, var(--color-panel) 72%, transparent);
   }
 
   /* Broad daylight replaces the technical grid in the light theme. */
-  .theme-warm .app-canvas::before {
+  .theme-warm .app-canvas:where(html:not(.style-simple), html:not(.style-simple) *)::before {
     opacity: 0.7;
     background-image: linear-gradient(120deg, transparent 24%, #fffdf8b8 25%, #fffdf8b8 44%, transparent 45%, transparent 59%, #fffdf870 60%, #fffdf870 76%, transparent 77%);
     background-size: 100% 100%;
     mask-image: linear-gradient(to bottom, black, transparent 90%);
   }
 
-  .theme-warm .workspace-rail {
+  .theme-warm .workspace-rail:where(html:not(.style-simple), html:not(.style-simple) *) {
     background: #f8f4ec;
     border-color: var(--color-line);
   }
 
-  .theme-warm .workspace-card {
+  .theme-warm .workspace-card:where(html:not(.style-simple), html:not(.style-simple) *) {
     background: #fffdf8b8;
   }
 
-  .theme-warm .auth-shell {
+  .theme-warm .auth-shell:where(html:not(.style-simple), html:not(.style-simple) *) {
     border-color: var(--color-line);
     background: linear-gradient(145deg, #fffdf8, #faf7f0);
   }
 
-  .theme-warm .workspace-card-header {
+  .theme-warm .workspace-card-header:where(html:not(.style-simple), html:not(.style-simple) *) {
     background: #fffdf8a8;
   }
 
-  .theme-warm .conversation-row-active::before {
+  .theme-warm .conversation-row-active:where(html:not(.style-simple), html:not(.style-simple) *)::before {
     box-shadow: none;
   }
 
-  .theme-warm .composer-shell {
+  .theme-warm .composer-shell:where(html:not(.style-simple), html:not(.style-simple) *) {
     background: var(--color-panel);
     border-color: var(--color-line-strong);
   }
 
-  .composer-shell {
+  .composer-shell:where(html:not(.style-simple), html:not(.style-simple) *) {
     background: color-mix(in srgb, var(--color-raised) 92%, transparent);
     box-shadow: 0 8px 32px -18px color-mix(in srgb, var(--color-ink) 24%, transparent);
   }
 
-  .conversation-row-active::before {
+  .conversation-row-active:where(html:not(.style-simple), html:not(.style-simple) *)::before {
     position: absolute;
     left: 0.3rem;
     top: 50%;
@@ -509,7 +585,7 @@
     box-shadow: none;
   }
 
-  .workbench-shell {
+  .workbench-shell:where(html:not(.style-simple), html:not(.style-simple) *) {
     background:
       linear-gradient(150deg, color-mix(in srgb, var(--color-panel) 98%, transparent), color-mix(in srgb, var(--color-canvas) 96%, transparent));
     box-shadow: var(--shadow-panel);
@@ -517,36 +593,36 @@
 
   /* A thin, low-contrast scrollbar. The default chrome is visually loud and
      pulls attention to the edge of the transcript. */
-  .zen-scroll {
+  .zen-scroll:where(html:not(.style-simple), html:not(.style-simple) *) {
     scrollbar-width: thin;
     scrollbar-color: var(--color-line-strong) transparent;
   }
 
-  .zen-scroll::-webkit-scrollbar {
+  .zen-scroll:where(html:not(.style-simple), html:not(.style-simple) *)::-webkit-scrollbar {
     width: 6px;
   }
 
-  .zen-scroll::-webkit-scrollbar-track {
+  .zen-scroll:where(html:not(.style-simple), html:not(.style-simple) *)::-webkit-scrollbar-track {
     background: transparent;
   }
 
-  .zen-scroll::-webkit-scrollbar-thumb {
+  .zen-scroll:where(html:not(.style-simple), html:not(.style-simple) *)::-webkit-scrollbar-thumb {
     background-color: var(--color-line-strong);
     border-radius: 999px;
   }
 
-  .zen-scroll::-webkit-scrollbar-thumb:hover {
+  .zen-scroll:where(html:not(.style-simple), html:not(.style-simple) *)::-webkit-scrollbar-thumb:hover {
     background-color: var(--color-accent);
   }
 }
 
 @media (max-width: 767px) {
-  .app-canvas::before {
+  .app-canvas:where(html:not(.style-simple), html:not(.style-simple) *)::before {
     background-size: 40px 40px;
     opacity: 0.28;
   }
 
-  .ambient-orb {
+  .ambient-orb:where(html:not(.style-simple), html:not(.style-simple) *) {
     filter: blur(78px);
   }
 }
@@ -557,7 +633,7 @@
      track and thumb have to be rebuilt per engine — WebKit and Firefox expose
      different pseudo-elements and neither inherits from the other, so the
      blocks below are duplicates by necessity, not by accident. */
-  .zen-range {
+  .zen-range:where(html:not(.style-simple), html:not(.style-simple) *) {
     appearance: none;
     -webkit-appearance: none;
     width: 100%;
@@ -566,21 +642,21 @@
     cursor: pointer;
   }
 
-  .zen-range::-webkit-slider-runnable-track {
+  .zen-range:where(html:not(.style-simple), html:not(.style-simple) *)::-webkit-slider-runnable-track {
     height: 0.375rem;
     border-radius: 999px;
     background: var(--color-accent-wash);
     border: 1px solid var(--color-line);
   }
 
-  .zen-range::-moz-range-track {
+  .zen-range:where(html:not(.style-simple), html:not(.style-simple) *)::-moz-range-track {
     height: 0.375rem;
     border-radius: 999px;
     background: var(--color-accent-wash);
     border: 1px solid var(--color-line);
   }
 
-  .zen-range::-webkit-slider-thumb {
+  .zen-range:where(html:not(.style-simple), html:not(.style-simple) *)::-webkit-slider-thumb {
     appearance: none;
     -webkit-appearance: none;
     width: 1.125rem;
@@ -594,7 +670,7 @@
     transition: transform 200ms ease-out;
   }
 
-  .zen-range::-moz-range-thumb {
+  .zen-range:where(html:not(.style-simple), html:not(.style-simple) *)::-moz-range-thumb {
     width: 1.125rem;
     height: 1.125rem;
     border-radius: 999px;
@@ -604,20 +680,20 @@
     transition: transform 200ms ease-out;
   }
 
-  .zen-range:active::-webkit-slider-thumb {
+  .zen-range:active:where(html:not(.style-simple), html:not(.style-simple) *)::-webkit-slider-thumb {
     transform: scale(1.15);
   }
 
-  .zen-range:active::-moz-range-thumb {
+  .zen-range:active:where(html:not(.style-simple), html:not(.style-simple) *)::-moz-range-thumb {
     transform: scale(1.15);
   }
 
-  .zen-range:focus-visible::-webkit-slider-thumb {
+  .zen-range:focus-visible:where(html:not(.style-simple), html:not(.style-simple) *)::-webkit-slider-thumb {
     outline: 2px solid var(--color-accent);
     outline-offset: 2px;
   }
 
-  .zen-range:focus-visible::-moz-range-thumb {
+  .zen-range:focus-visible:where(html:not(.style-simple), html:not(.style-simple) *)::-moz-range-thumb {
     outline: 2px solid var(--color-accent);
     outline-offset: 2px;
   }
@@ -672,57 +748,73 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .zen-page-enter {
+  .zen-page-enter:where(html:not(.style-simple), html:not(.style-simple) *) {
     animation: zen-page-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
-  .zen-overlay-enter {
+  .zen-overlay-enter:where(html:not(.style-simple), html:not(.style-simple) *) {
     animation: zen-overlay-enter 280ms ease-out both;
   }
 
-  .zen-message-user {
+  .zen-message-user:where(html:not(.style-simple), html:not(.style-simple) *) {
     transform-origin: right bottom;
     animation: zen-message-float 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
-  .zen-message-agent {
+  .zen-message-agent:where(html:not(.style-simple), html:not(.style-simple) *) {
     transform-origin: left bottom;
     animation: zen-message-float 480ms 70ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
-  [role="dialog"],
-  [role="alertdialog"] {
+  [role="dialog"]:where(html:not(.style-simple), html:not(.style-simple) *),
+[role="alertdialog"]:where(html:not(.style-simple), html:not(.style-simple) *) {
     animation: zen-page-enter 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
-  button:not(:disabled) {
+  button:not(:disabled):where(html:not(.style-simple), html:not(.style-simple) *) {
     transition-property: color, background-color, border-color, box-shadow,
       opacity, transform;
     transition-duration: 220ms;
     transition-timing-function: ease-out;
   }
 
-  button:not(:disabled):active {
+  button:not(:disabled):active:where(html:not(.style-simple), html:not(.style-simple) *) {
     transform: scale(0.97);
   }
 }
 
-.zen-breathe {
+.zen-breathe:where(html:not(.style-simple), html:not(.style-simple) *) {
   animation: zen-breathe 1.6s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .zen-page-enter,
-  .zen-overlay-enter,
-  .zen-message-user,
-  .zen-message-agent,
-  [role="dialog"],
-  [role="alertdialog"] {
+  .zen-page-enter:where(html:not(.style-simple), html:not(.style-simple) *),
+.zen-overlay-enter:where(html:not(.style-simple), html:not(.style-simple) *),
+.zen-message-user:where(html:not(.style-simple), html:not(.style-simple) *),
+.zen-message-agent:where(html:not(.style-simple), html:not(.style-simple) *),
+[role="dialog"]:where(html:not(.style-simple), html:not(.style-simple) *),
+[role="alertdialog"]:where(html:not(.style-simple), html:not(.style-simple) *) {
     animation: none;
   }
 
-  .zen-breathe {
+  .zen-breathe:where(html:not(.style-simple), html:not(.style-simple) *) {
     animation: none;
     opacity: 0.6;
   }
 }
+
+/* New palettes use the calm, flat surfaces shown in the local preview.
+   Keep the existing warm and midnight themes unchanged. */
+:is(.theme-porcelain, .theme-github) .app-canvas:where(html:not(.style-simple), html:not(.style-simple) *)::before,
+:is(.theme-porcelain, .theme-github) .app-canvas:where(html:not(.style-simple), html:not(.style-simple) *)::after,
+:is(.theme-porcelain, .theme-github) .auth-story:where(html:not(.style-simple), html:not(.style-simple) *)::after { content: none; }
+:is(.theme-porcelain, .theme-github) .ambient-orb:where(html:not(.style-simple), html:not(.style-simple) *) { display: none; }
+:is(.theme-porcelain, .theme-github) .auth-shell:where(html:not(.style-simple), html:not(.style-simple) *),
+:is(.theme-porcelain, .theme-github) .auth-story:where(html:not(.style-simple), html:not(.style-simple) *),
+:is(.theme-porcelain, .theme-github) .auth-form-panel:where(html:not(.style-simple), html:not(.style-simple) *) { background: transparent; }
+:is(.theme-porcelain, .theme-github) .workspace-rail:where(html:not(.style-simple), html:not(.style-simple) *) { background: var(--color-raised); border-color: var(--color-line); }
+:is(.theme-porcelain, .theme-github) .workspace-card:where(html:not(.style-simple), html:not(.style-simple) *),
+:is(.theme-porcelain, .theme-github) .workspace-card-header:where(html:not(.style-simple), html:not(.style-simple) *) { background: var(--color-panel); }
+:is(.theme-porcelain, .theme-github) .composer-shell:where(html:not(.style-simple), html:not(.style-simple) *) { background: var(--color-panel); border: 1px solid var(--color-line-strong); box-shadow: none; }
+:is(.theme-porcelain, .theme-github) .primary-action:where(html:not(.style-simple), html:not(.style-simple) *) { box-shadow: none; }
+:is(.theme-porcelain, .theme-github) .primary-action:hover:not(:disabled):where(html:not(.style-simple), html:not(.style-simple) *) { filter: brightness(0.94); transform: none; }

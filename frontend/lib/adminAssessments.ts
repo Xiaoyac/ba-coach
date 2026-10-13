@@ -3,8 +3,30 @@ import { apiHeaders, checkAuthentication } from './http';
 import type { AssessmentRecord } from './assessment';
 
 export type RecordFilters = { query: string; start: string; end: string; scale_version: string };
-export type AdminRecord = { subject_id: string; username: string | null; display_id: string | null; record: AssessmentRecord };
+export type AdminRecord = { subject_id: string; username: string | null; nickname: string | null; record: AssessmentRecord };
 export type AdminRecordPage = { items: AdminRecord[]; total: number; users: number; versions: Record<string, number>; has_more: boolean };
+export type AdminRecordUser = {
+  subject_id: string;
+  username: string | null;
+  nickname: string | null;
+  today_completed: boolean;
+  record_count: number;
+  date_count: number;
+  last_record_date: string | null;
+};
+export type AdminRecordUserPage = {
+  items: AdminRecordUser[];
+  total: number;
+  has_more: boolean;
+  today: string;
+  time_zone: 'Asia/Shanghai';
+};
+export type AdminRecordDates = {
+  subject_id: string;
+  items: { local_date: string; record_count: number; activity_count: number }[];
+  total_dates: number;
+};
+export type AdminRecordDay = { subject_id: string; local_date: string; items: AdminRecord[]; total: number };
 
 function params(filters: RecordFilters) {
   return new URLSearchParams(Object.entries(filters).filter(([,v]) => v.trim()));
@@ -22,6 +44,25 @@ export async function fetchAdminRecords(filters: RecordFilters, offset: number, 
   const response = await checked(await fetch(`${API_BASE}/api/admin/assessments?${query}`, {headers:apiHeaders(),signal,cache:'no-store'}));
   return response.json();
 }
+export async function fetchAdminRecordUsers(query: string, offset: number, signal: AbortSignal): Promise<AdminRecordUserPage> {
+  const search = new URLSearchParams({ query, offset: String(offset), limit: '20' });
+  const response = await checked(await fetch(`${API_BASE}/api/admin/assessments/users?${search}`, {
+    headers: apiHeaders(), signal, cache: 'no-store',
+  }));
+  return response.json();
+}
+export async function fetchAdminRecordDates(subjectId: string, signal: AbortSignal): Promise<AdminRecordDates> {
+  const response = await checked(await fetch(`${API_BASE}/api/admin/assessments/users/${encodeURIComponent(subjectId)}/dates`, {
+    headers: apiHeaders(), signal, cache: 'no-store',
+  }));
+  return response.json();
+}
+export async function fetchAdminRecordDay(subjectId: string, localDate: string, signal: AbortSignal): Promise<AdminRecordDay> {
+  const response = await checked(await fetch(`${API_BASE}/api/admin/assessments/users/${encodeURIComponent(subjectId)}/days/${encodeURIComponent(localDate)}`, {
+    headers: apiHeaders(), signal, cache: 'no-store',
+  }));
+  return response.json();
+}
 export async function exportAdminRecords(filters: RecordFilters, kind: 'daily' | 'activities', signal: AbortSignal) {
   const query=params(filters); query.set('kind',kind);
   const response=await checked(await fetch(`${API_BASE}/api/admin/assessments/export.csv?${query}`,{headers:apiHeaders(),signal,cache:'no-store'}));
@@ -30,13 +71,4 @@ export async function exportAdminRecords(filters: RecordFilters, kind: 'daily' |
   const url=URL.createObjectURL(blob), a=document.createElement('a');
   a.href=url; a.download=`daily-records-${kind}.csv`; document.body.appendChild(a); a.click(); a.remove();
   window.setTimeout(()=>URL.revokeObjectURL(url),1000);
-}
-
-
-export type AssessmentRevision = { revision_no: number; saved_at: string; record: AssessmentRecord };
-export async function fetchAdminRevisions(id: number, signal: AbortSignal): Promise<AssessmentRevision[]> {
-  const response = await checked(await fetch(`${API_BASE}/api/admin/assessments/${id}/revisions`, {
-    headers: apiHeaders(), signal, cache: 'no-store',
-  }));
-  return response.json();
 }

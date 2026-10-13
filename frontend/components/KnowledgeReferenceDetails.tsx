@@ -20,6 +20,25 @@ const statusLabels: Record<string, string> = {
 };
 const label = (value: string | null) => value ? statusLabels[value] ?? value : "未记录";
 
+function validationLabel(error: { field: string; type: string }) {
+  const fields: Record<string, string> = { note: "备注", decision: "使用决定", selections: "片段选择", id: "片段编号", quote: "原文引用", application: "使用建议" };
+  const selection = /^selections\.(\d+)\.(\w+)$/.exec(error.field);
+  const field = selection ? `第 ${Number(selection[1]) + 1} 段的${fields[selection[2]] ?? selection[2]}` : fields[error.field] ?? (error.field || "字段组合");
+  const types: Record<string, string> = { missing: "缺少必需字段", string_too_long: "超过长度上限", string_too_short: "内容为空或过短", string_type: "必须是文字", extra_forbidden: "包含未允许的字段", literal_error: "不在允许的选项中", value_error: "字段之间不符合使用规则", too_long: "条目过多", json_invalid: "JSON 格式不完整或不正确" };
+  return `${field}：${types[error.type] ?? "格式不符合要求"}`;
+}
+
+function ValidationDetails({ data }: { data: KnowledgeReferences }) {
+  return <>
+    {!!data.mediator_validation_errors?.length && <div className="rounded-lg border border-line p-3">
+      <p className="font-medium text-ink">具体校验原因</p>
+      <ul className="mt-1 list-disc pl-5">{data.mediator_validation_errors.map((error, index) => <li key={index}>{validationLabel(error)}</li>)}</ul>
+    </div>}
+    {data.mediator_normalized_fields?.includes("note") && <p className="text-ink-faint">中介省略了可选的空备注，已自动补齐；所选片段和原文引用仍经过校验。</p>}
+    {data.mediator_normalized_fields?.some(field => /^selections\.[01]\.quote$/.test(field)) && <p className="text-ink-faint">引用中的空白或中英文逗号格式差异已还原为知识库原文，未改写文字。</p>}
+  </>;
+}
+
 // Explicit snapshot mode never falls back to the private message endpoint,
 // including when old messages have no saved knowledge details.
 export type KnowledgeReferenceSource = { kind: "snapshot"; data: KnowledgeReferences | null };
@@ -57,6 +76,7 @@ export default function KnowledgeReferenceDetails({ messageId, pending, view = "
       <p>中介处理总耗时：{data.mediator_duration_ms == null ? "未记录" : `${(data.mediator_duration_ms / 1000).toFixed(1)} 秒`}</p>
       <p>本轮召回 {data.recalled.length} 段 · 传给回复模型 {data.provided.length} 段</p>
     </div>
+    <ValidationDetails data={data} />
     <p className="whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">{data.mediator_guidance || "null"}</p>
     {!!data.mediator_cautions?.length && <section className="space-y-1">
       <h4 className="font-medium text-ink">注意事项</h4>
@@ -90,6 +110,7 @@ export default function KnowledgeReferenceDetails({ messageId, pending, view = "
       {data.retrieval_mode && <p>检索模式：{label(data.retrieval_mode)}</p>}
       {data.gate_reason && <p>意图门控：{label(data.gate_reason)}</p>}
       <p>中介：{label(data.mediator_status)} · {label(data.mediator_reason)}</p>
+      <ValidationDetails data={data} />
       {data.context_withheld && <p className="text-accent-ink">安全上下文不可用，本轮片段全部未放行。</p>}
       {data.validator_status && ["blocked", "corrected"].includes(data.validator_status) &&
         <p className="text-accent-ink">回复被校验器拦截或改写；以下仅代表原生成请求的参考材料。</p>}

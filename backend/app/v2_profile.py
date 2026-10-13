@@ -4,7 +4,7 @@ import uuid
 from fastapi import HTTPException
 from sqlalchemy import select, insert, update, delete
 from .database_v2_schema import metadata as schema
-from .models import UserAccount, AccountHandle, AccountSettings
+from .models import UserAccount, AccountSettings
 from .providers import configured_providers
 from .schemas import ProfileOut
 from .birth_dates import age_on
@@ -27,13 +27,11 @@ async def read(db, user_id):
     limits = (await db.execute(select(constraints).where(constraints.c.user_id == user_id,
         constraints.c.status == "active", constraints.c.confirmation_status != "rejected"))).mappings().all()
     account = (await db.execute(select(UserAccount.id).where(UserAccount.profile_uuid == user_id))).scalar_one_or_none()
-    handle = await db.get(AccountHandle, account) if account else None
     settings = await db.get(AccountSettings, account) if account else None
     from .workflow_state import derived_current_module
     return ProfileOut(nickname=profile["nickname"], birth_date=profile["birth_date"],
         age=age_on(profile["birth_date"]) if profile["birth_date"] else profile["reported_age"],
-        living_status=profile["living_status"], tag=handle.tag if handle else None,
-        display_id=handle.full_username if handle else None,
+        living_status=profile["living_status"],
         communication_preference=preference.get("communication_style"),
         reminder_frequency=preference.get("reminder_frequency"), reminder_time_slot=preference.get("reminder_time_slot"),
         reminder_window={"start_minute": preference["reminder_start_minute"], "end_minute": preference["reminder_end_minute"]}
@@ -73,8 +71,7 @@ async def replace_constraints(db, user_id, category, kind, values):
 
 
 async def patch(db, user_id, payload):
-    from .routes.profile import _load_account_handle, _load_account_settings, _account_id
-    from .routes.auth import normalize_display_name
+    from .routes.profile import _load_account_settings, _account_id
     current = await read(db, user_id)
     changes = payload.model_dump(exclude_unset=True)
     if any(k.startswith("supporter1_") or k.startswith("supporter2_") for k in changes):
@@ -121,16 +118,6 @@ async def patch(db, user_id, payload):
             ("behavior_taboo", "行为边界", "user_boundary"), ("content_taboo", "话题边界", "user_boundary")):
         if field in changes:
             await replace_constraints(db, user_id, category, kind, changes[field])
-    if "nickname" in changes or "tag" in changes:
-        nickname = (changes.get("nickname") or current.nickname or "").strip()
-        tag = changes.get("tag", current.tag)
-        if not nickname or "#" in nickname or not tag:
-            raise HTTPException(422, "请填写有效昵称和标签")
-        handle = await _load_account_handle(db, user_id)
-        if not handle:
-            handle = AccountHandle(account_id=await _account_id(db, user_id))
-            db.add(handle)
-        handle.base_username, handle.normalized_base, handle.tag = nickname, normalize_display_name(nickname), tag
     if "preferred_provider" in changes:
         settings = await _load_account_settings(db, user_id)
         if not settings:

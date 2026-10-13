@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useParticipantStyle } from "@/lib/useParticipantStyle";
 import type { ChatMessage } from "@/lib/api";
 import type { KnowledgeReferenceSource } from "@/components/KnowledgeReferenceDetails";
 import MessageMarkdown from "@/components/MessageMarkdown";
@@ -28,6 +29,7 @@ export default function MessageRow({
   knowledgeSource?: KnowledgeReferenceSource;
   showDiagnostics?: boolean;
 }) {
+  const participant = useParticipantStyle();
   const isUser = message.role === "user";
   const timestamp = message.created_at ? new Date(message.created_at) : null;
   const timeLabel = timestamp && Number.isFinite(timestamp.getTime())
@@ -92,6 +94,7 @@ export default function MessageRow({
         }`}
       >
         <div className="min-w-0">
+        {participant && !isUser && <p className="participant-message-author">AI 教练</p>}
         {message.content && <div
           data-message-bubble={message.role}
           className={`min-w-0 max-w-[42rem] px-4 py-3 text-[0.95rem] leading-[1.85] tracking-[0.01em] break-words whitespace-pre-wrap sm:px-5 ${
@@ -100,7 +103,7 @@ export default function MessageRow({
               : "rounded-2xl rounded-tl-md bg-agent-bubble text-ink depth-bubble"
           }`}
         >
-          {message.role === "assistant" ? <MessageMarkdown text={message.content}
+          {message.role === "assistant" ? <MessageMarkdown text={message.content} tables={participant}
             trailing={pending && replyWaiting ? <ReplyContinuationWait /> : undefined} /> : message.content}
           {!isUser && showDiagnostics && (
             <ReasoningDetails message={message} replyPending={pending && !routingPending} routingPending={routingPending} knowledgeSource={knowledgeSource} />
@@ -159,9 +162,10 @@ export default function MessageRow({
 }
 
 function ReplyContinuationWait() {
+  const participant = useParticipantStyle();
   return <span role="status" aria-label="正在生成深度回复" data-reply-wait
     className="ml-1.5 inline-flex h-4 items-center gap-1 align-baseline text-accent-ink">
-    <span className="sr-only">正在生成深度回复</span>
+    <span className={participant ? "text-xs text-ink-muted" : "sr-only"}>{participant ? "回复仍在生成…" : "正在生成深度回复"}</span>
     {[0, 1, 2].map(index => <span key={index} aria-hidden="true"
       className="zen-breathe inline-block h-1 w-1 rounded-full bg-current"
       style={{ animationDelay: `${index * 0.18}s` }} />)}
@@ -187,6 +191,7 @@ function Avatar({ isUser }: { isUser: boolean }) {
 }
 
 function TypingDots({ hasReasoning = false, hasContent = false, startedAt }: { hasReasoning?: boolean; hasContent?: boolean; startedAt?: number }) {
+  const participant = useParticipantStyle();
   const [seconds, setSeconds] = useState(() => startedAt ? Math.max(0, Math.floor((Date.now() - startedAt) / 1000)) : 0);
   useEffect(() => {
     const started = startedAt ?? Date.now();
@@ -194,7 +199,7 @@ function TypingDots({ hasReasoning = false, hasContent = false, startedAt }: { h
     return () => window.clearInterval(timer);
   }, [startedAt]);
   return (
-    <span data-generation-status className="flex min-w-0 items-start gap-2 px-1 py-2" aria-label="Thinking">
+    <span data-generation-status className="flex min-w-0 items-start gap-2 px-1 py-2" role="status" aria-label={participant ? "回复状态" : "Thinking"}>
       <span aria-hidden="true" className="mt-1.5 flex shrink-0 items-center gap-1.5">
         {[0, 1, 2].map((i) => (
           <span
@@ -204,7 +209,7 @@ function TypingDots({ hasReasoning = false, hasContent = false, startedAt }: { h
           />
         ))}
       </span>
-      <span className="text-xs leading-relaxed text-ink-faint">{seconds >= 20 ? `仍在生成，已等待 ${seconds} 秒；请勿重复提交` : hasContent ? "正在生成回复" : hasReasoning ? "正在深度思考" : "正在准备回复"}</span>
+      <span className="text-xs leading-relaxed text-ink-faint">{participant ? `${hasContent ? "正在回复" : "正在准备回复"}${seconds >= 10 ? ` · 已等待 ${seconds} 秒` : "…"}` : seconds >= 20 ? `仍在生成，已等待 ${seconds} 秒；请勿重复提交` : hasContent ? "正在生成回复" : hasReasoning ? "正在深度思考" : "正在准备回复"}</span>
     </span>
   );
 }

@@ -52,6 +52,7 @@ class Message(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=20_000)
     generation_id: UUID | None = None
+    retry_of_message_id: int | None = Field(default=None, gt=0)
     # Omit on the first turn — the server mints one and returns it.
     session_id: str | None = None
     # Override the server default for this request ("claude" | "deepseek").
@@ -284,6 +285,7 @@ PromptKey = Literal[
 
 
 class AdminPromptItem(BaseModel):
+    revision: int
     key: PromptKey
     label: str
     description: str
@@ -297,7 +299,11 @@ class AdminPromptBundle(BaseModel):
     prompts: list[AdminPromptItem]
 
 
-class AdminPromptUpdate(BaseModel):
+class AdminPromptRestore(BaseModel):
+    base_revision: int = Field(..., ge=1)
+
+
+class AdminPromptUpdate(AdminPromptRestore):
     content: str = Field(..., min_length=1, max_length=100_000)
 
 
@@ -372,7 +378,6 @@ class RegisterRequest(BaseModel):
     email: EmailStr
 
     nickname: str = Field(..., min_length=1, max_length=58)
-    tag: str = Field(..., min_length=5, max_length=5, pattern=r"^[0-9]{5}$")
     # TINYINT UNSIGNED on the column. The upper bound is a typo guard, not a
     # claim about human lifespans.
     birth_date: date
@@ -409,8 +414,6 @@ class RegisterRequest(BaseModel):
         value = value.strip()
         if not value:
             raise ValueError("昵称不能为空")
-        if "#" in value:
-            raise ValueError("昵称不能包含 #")
         return value
 
 
@@ -441,8 +444,6 @@ class ProfileOut(BaseModel):
     """GET /api/profile — everything the subject may see and change."""
 
     nickname: str | None = None
-    tag: str | None = None
-    display_id: str | None = None
     age: int | None = None
     birth_date: date | None = None
     living_status: LivingStatus | None = None
@@ -503,9 +504,14 @@ class ProfileUpdate(BaseModel):
     """
 
     nickname: str | None = Field(default=None, min_length=1, max_length=58)
-    tag: str | None = Field(
-        default=None, min_length=5, max_length=5, pattern=r"^[0-9]{5}$"
-    )
+
+    @field_validator("nickname")
+    @classmethod
+    def validate_nickname(cls, value: str | None) -> str:
+        if value is None or not value.strip():
+            raise ValueError("昵称不能为空")
+        return value.strip()
+
     age: int | None = Field(default=None, ge=10, le=120)
     birth_date: date | None = None
 
@@ -613,8 +619,6 @@ class AccountInfo(BaseModel):
 
     username: str
     nickname: str | None = None
-    tag: str | None = None
-    display_id: str | None = None
     # `user_profile.uuid`. The frontend does not need it, but it is what every
     # clinical table keys on, so surfacing it makes support questions ("which
     # row is mine?") answerable without a database session.
@@ -632,8 +636,6 @@ class AdminAccountItem(BaseModel):
     id: int
     username: str
     nickname: str | None = None
-    tag: str | None = None
-    display_id: str | None = None
     role: Literal["user", "admin"]
     created_at: datetime
     last_login_at: datetime | None = None

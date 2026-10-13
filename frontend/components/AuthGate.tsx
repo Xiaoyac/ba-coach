@@ -1,6 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { bindOverallStyleAccount } from "@/lib/overallStyle";
+import { usePathname } from "next/navigation";
+import SettingsPage from "@/components/SettingsPage";
 import AuthScreen from "@/components/AuthScreen";
 import ThemeToggle from "@/components/ThemeToggle";
 import ConversationWorkspace from "@/components/ConversationWorkspace";
@@ -31,6 +34,15 @@ interface AuthState {
  * of requests that all 401.
  */
 export default function AuthGate() {
+  const inSettings = usePathname() === "/settings";
+  const [settingsVisited, setSettingsVisited] = useState(inSettings);
+  useEffect(() => {
+    if (inSettings) setSettingsVisited(true);
+    else {
+      const frame = requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [inSettings]);
   const authGeneration = useRef(0);
   const [expired, setExpired] = useState(false);
   useEffect(() => {
@@ -99,6 +111,11 @@ export default function AuthGate() {
     if (account && generation === authGeneration.current && token === getToken()) setState({ account, checking: false });
   }, []);
 
+  const styleAccountId = state.checking ? undefined : state.account?.profile_uuid;
+  const styleAccountRole = state.checking ? undefined : state.account?.role;
+  useLayoutEffect(() => bindOverallStyleAccount(styleAccountId && styleAccountRole
+    ? { profile_uuid: styleAccountId, role: styleAccountRole } : null), [styleAccountId, styleAccountRole]);
+
   if (state.checking) {
     return (
       <div
@@ -128,19 +145,22 @@ export default function AuthGate() {
 
   return (
     <>
-      <ConversationWorkspace
+      <div data-chat-workspace inert={inSettings} className="flex h-full min-h-0 w-full"><ConversationWorkspace
         key={`${state.account.profile_uuid}:${state.account.role}`}
         accountId={state.account.profile_uuid}
         displayName={state.account.nickname || state.account.username}
         accountUsername={state.account.username}
-        displayIdentity={state.account.display_id}
         accountRole={state.account.role}
         accountEmail={state.account.email}
         accountEmailVerified={state.account.email_verified}
         emailDeliveryAvailable={state.account.email_delivery_available}
         onAccountRefresh={handleAccountRefresh}
         onLogout={handleLogout}
-      />
+      /></div>
+      {settingsVisited && <SettingsPage
+        key={`${state.account.profile_uuid}:${state.account.role}`} active={inSettings && !state.account.email_required} account={state.account}
+        onAccountRefresh={handleAccountRefresh} onLogout={handleLogout}
+      />}
       {state.account.email_required && (
         <RequiredEmailModal
           deliveryAvailable={state.account.email_delivery_available}

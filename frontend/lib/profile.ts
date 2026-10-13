@@ -75,8 +75,6 @@ export function hhmmToMinutes(value: string): number | null {
 
 export interface Profile {
   nickname: string | null;
-  tag: string | null;
-  display_id: string | null;
   age: number | null;
   birth_date: string | null;
   living_status: string | null;
@@ -126,7 +124,7 @@ export interface Profile {
  * silently revert a change made on another device.
  */
 export type ProfilePatch = Partial<
-  Omit<Profile, "current_module" | "available_providers" | "display_id" | "can_manage_models">
+  Omit<Profile, "current_module" | "available_providers" | "can_manage_models">
 >;
 
 async function parse<T>(res: Response, what: string): Promise<T> {

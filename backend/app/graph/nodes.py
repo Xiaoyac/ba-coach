@@ -842,6 +842,10 @@ def make_module_node(module_name: str, config: ModuleConfig):
         reasoning_parts: list[str] = []
         generation_started = perf_counter()
         generation_provider = context.provider
+        if context.stream and getattr(generation_provider, "main_reply_enabled", False):
+            generation_provider.on_main_retry = lambda event: _send({
+                "type": "retry", "generation_id": context.generation_id, **event,
+            })
         if hold_workflow_claims and context.stream:
             from ..reply_integrity import SentenceSaveGuard
             workflow_stream_guard = SentenceSaveGuard(authority, module_name,
@@ -945,6 +949,8 @@ def make_module_node(module_name: str, config: ModuleConfig):
             if telemetry["error_code"] == "provider_timeout":
                 telemetry["finish_reason"] = "timeout"
 
+        telemetry["overload_retries"] = list(getattr(generation_provider, "overload_retries", []))
+        telemetry["main_timeout_seconds"] = generation_provider._main_timeout_seconds() if hasattr(generation_provider, "_settings") else None
         if context.stream:
             if continuation_prefix is not None:
                 tail = continuation_prefix.finish()
@@ -1036,8 +1042,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 module=module_name, provider=context.provider, system=system, messages=messages,
                 elapsed_seconds=perf_counter() - generation_started,
                 total_timeout_seconds=(context.provider._main_timeout_seconds()
-                    if getattr(context.provider, 'deep_reply_enabled', False)
-                    and hasattr(context.provider, '_settings')
+                    if hasattr(context.provider, '_settings')
                     else context.settings.provider_request_timeout_seconds),
                 allow_recovery=not update.get('error'),
                 current_turn_committed=bool(state.get('confirmation_receipt')),
@@ -1523,6 +1528,14 @@ async def _extract_module_data(
             for message in evidence_messages], ensure_ascii=False)
     if evidence_messages is not None:
         transcript += "\n\n" + temporal_context(evidence_messages)
+    if module in {"module_2", "module_4"} and sessionmaker is not None:
+        from ..activity_attribution import activity_candidates, ATTRIBUTION_SCHEMA
+        async with sessionmaker() as attribution_db:
+            attribution_cid = evidence_messages[0].conversation_id if evidence_messages else None
+            candidates = await activity_candidates(attribution_db, subject_id, conversation_id=attribution_cid,
+                source_text=next((m.content for m in reversed(evidence_messages or []) if m.role == "user"), None))
+        transcript += "\n\n活动归属候选（只读数据库事实，不代表本轮已执行）：\n" + json.dumps(candidates, ensure_ascii=False)
+        transcript += "\n" + ATTRIBUTION_SCHEMA
     raw, completion = await extract_module_record_detailed(
         provider, module=module, transcript=transcript, max_tokens=max_tokens
     )

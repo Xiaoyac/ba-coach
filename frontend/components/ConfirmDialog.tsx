@@ -45,14 +45,14 @@ export default function ConfirmDialog({
         aria-label="取消确认"
         disabled={busy}
         onClick={onCancel}
-        className="absolute inset-0 bg-canvas/70 backdrop-blur-md"
+        className="default-style:absolute default-style:inset-0 default-style:bg-canvas/70 default-style:backdrop-blur-md simple:absolute simple:inset-0 simple:bg-canvas/70 simple:backdrop-blur-sm"
       />
       <section
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"
         aria-describedby="confirm-dialog-description"
-        className="relative w-full max-w-sm rounded-[26px] border border-line bg-panel/95 p-5 depth-panel backdrop-blur-2xl sm:p-6"
+        className="default-style:relative default-style:w-full default-style:max-w-sm default-style:rounded-[26px] default-style:border default-style:border-line default-style:bg-panel/95 default-style:p-5 default-style:depth-panel default-style:backdrop-blur-2xl default-style:sm:p-6 simple:relative simple:w-full simple:max-w-sm simple:rounded-[26px] simple:border simple:border-line simple:bg-panel/95 simple:p-5 simple:depth-panel simple:sm:p-6"
       >
         <div
           className={`mb-4 grid h-10 w-10 place-items-center rounded-2xl border text-sm font-medium ${

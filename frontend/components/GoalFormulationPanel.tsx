@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useParticipantStyle } from "@/lib/useParticipantStyle";
 import { fetchGoalCard, submitGoalCard, goalCardFieldLabels, goalCardFieldValue, goalCardKind,
   canConfirmCard, type GoalCardConfirmationResult, type FormulationCard, type GoalCardFields } from "@/lib/goal-card";
 
@@ -30,6 +31,10 @@ function storageSet(key: string, value: string): void { try { sessionStorage.set
 function storageRemove(key: string): void { try { sessionStorage.removeItem(key); } catch { /* Same fallback. */ } }
 
 export default function GoalFormulationPanel({sessionId, accountKey, module, busy, loading, refreshKey, onSend, onOpenGoals, onUpdated, compactArchive = false, composerFocused = false, confirmationResult}: Props) {
+  const participant = useParticipantStyle();
+  const participantRef = useRef(participant); participantRef.current = participant;
+  const dragStart = useRef<number | null>(null);
+  const dragged = useRef(false);
   const [card, setCard] = useState<FormulationCard | null>(null);
   const [draft, setDraft] = useState<Draft>(() => draftOf({}));
   const [expanded, setExpanded] = useState(false);
@@ -133,7 +138,7 @@ export default function GoalFormulationPanel({sessionId, accountKey, module, bus
         }
         const seenKey = `${originalPrefix}:seen:${next.id}`;
         if (next.phase === "formulating" && !seen.current.has(seenKey) && !storageGet(seenKey)) {
-          seen.current.add(seenKey); storageSet(seenKey, "1"); setExpanded(true);
+          seen.current.add(seenKey); storageSet(seenKey, "1"); setExpanded(!participantRef.current);
         }
         if (next.phase === "confirmed" && (changedCard || previous?.phase !== "confirmed")) {
           setExpanded(false);
@@ -235,27 +240,27 @@ export default function GoalFormulationPanel({sessionId, accountKey, module, bus
   const lock = busy || loading || saving;
   // Settled goals use the header shortcut. Keep unfinished work and errors
   // visible so the compact archive never hides a draft or its recovery path.
-  if (module === "module_3" && card?.phase === "confirmed" && !dirty && !error && !readError) return <section aria-label="目标卡快捷入口" className="flex min-h-9 shrink-0 items-center gap-2 border-b border-line px-4 text-xs sm:px-8"><span className="shrink-0 font-medium">{kind}</span><span className="min-w-0 flex-1 truncate text-ink-muted">{card.fields.activity_content}</span><button type="button" onClick={onOpenGoals} className="min-h-9 shrink-0 px-2 text-accent-ink">查看</button></section>;
+  if (module === "module_3" && card?.phase === "confirmed" && !dirty && !error && !readError) return <section aria-label="目标卡快捷入口" className="default-style:flex default-style:min-h-9 default-style:shrink-0 default-style:items-center default-style:gap-2 default-style:border-b default-style:border-line default-style:px-4 default-style:text-xs default-style:sm:px-8 simple:flex simple:min-h-9 simple:shrink-0 simple:items-center simple:gap-2 simple:px-4 simple:text-xs simple:sm:px-8"><span className="shrink-0 font-medium">{kind}</span><span className="min-w-0 flex-1 truncate text-ink-muted">{card.fields.activity_content}</span><button type="button" onClick={onOpenGoals} className="min-h-9 shrink-0 px-2 text-accent-ink">查看</button></section>;
   if (compactArchive && !isM2 && !dirty && !error && !readError && (!card || card.phase === "confirmed")) return null;
-  return <section aria-label="目标卡快捷入口" className={`zen-scroll min-h-0 max-h-[40%] shrink overflow-y-auto border-b border-line px-4 py-2 sm:px-8 ${isM2 && enabled ? "bg-accent-wash/65" : "bg-sheet"}`}>
+  return <section aria-label="目标卡快捷入口" className={`participant-goal-drawer zen-scroll default-style:min-h-0 default-style:max-h-[40%] default-style:shrink default-style:overflow-y-auto default-style:border-b default-style:border-line default-style:px-4 default-style:py-2 default-style:sm:px-8 simple:min-h-0 simple:max-h-[40%] simple:shrink simple:overflow-y-auto simple:px-4 simple:py-2 simple:sm:px-8 ${isM2 && enabled ? "default-style:bg-accent-wash/65 simple:bg-accent-wash/65" : "default-style:bg-sheet simple:bg-sheet"}`}>
     <div className="mx-auto max-w-[58rem]">
       <div className="flex min-h-10 items-center justify-between gap-3">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-ink">{card ? `${kind}卡` : "我的目标"}{card && <span className="ml-2 text-xs font-normal text-ink-muted">{phaseLabel}</span>}</p>
-          {!card && isM2 && enabled && <p className="mt-1 text-xs leading-5 text-ink-muted">先聊聊你的想法，开始制定目标时，卡片会在这里展开。</p>}
+          {!participant && !card && isM2 && enabled && <p className="mt-1 text-xs leading-5 text-ink-muted">先聊聊你的想法，开始制定目标时，卡片会在这里展开。</p>}
           {card && !expanded && <p className="mt-1 truncate text-xs text-ink-muted">{card.fields.activity_content || "想做什么、怎么安排，可以想到多少先填多少。"}</p>}
         </div>
-        {card && <button type="button" onClick={() => setExpanded(value => !value)} aria-expanded={expanded} aria-controls="goal-card-editor" className="min-h-10 shrink-0 rounded-xl px-3 text-sm font-medium text-accent-ink hover:bg-raised">{expanded ? "收起" : editable ? dirty ? "继续填写" : "打开卡片" : "查看卡片"}</button>}
-        <button type="button" onClick={onOpenGoals} aria-haspopup="dialog" className="min-h-10 shrink-0 rounded-xl border border-line px-3 text-xs text-ink-muted hover:bg-raised">{card ? "我的目标 ↗" : "查看全部 ↗"}</button>
+        {card && !participant && <button type="button" onClick={() => setExpanded(value => !value)} aria-expanded={expanded} aria-controls="goal-card-editor" className="min-h-10 shrink-0 rounded-xl px-3 text-sm font-medium text-accent-ink hover:bg-raised">{expanded ? "收起" : editable ? dirty ? "继续填写" : "打开卡片" : "查看卡片"}</button>}
+        <button type="button" onClick={onOpenGoals} aria-haspopup="dialog" className="default-style:min-h-10 default-style:shrink-0 default-style:rounded-xl default-style:border default-style:border-line default-style:px-3 default-style:text-xs default-style:text-ink-muted default-style:hover:bg-raised simple:min-h-10 simple:shrink-0 simple:rounded-xl simple:px-3 simple:text-xs simple:text-ink-muted simple:hover:bg-raised">{card ? "我的目标 ↗" : "查看全部 ↗"}</button>
       </div>
       {(error || readError) && <p role="alert" className="mt-2 text-xs leading-5 text-alert-ink">{error || readError} <button type="button" disabled={saving} onClick={() => setRetry(value => value + 1)} className="min-h-8 px-2 underline underline-offset-4">重试读取</button>{dirty && "未提交的填写仍保留。"}</p>}
       {dirty && <p className="mt-1 text-xs text-ink-muted">填写尚未暂存，教练暂时看不到这些修改。</p>}
       {notice && <p role="status" className="mt-1 text-xs leading-5 text-accent-ink">{notice}</p>}
       {card && ["formulating", "discussing"].includes(card.phase) && !dirty && card.confirmation?.message && <p role="status" className="mt-1 text-xs leading-5 text-ink-muted">{card.confirmation.message}</p>}
       {card?.phase === "confirmed" && dirty && <p className="mt-1 text-xs leading-5 text-ink-muted">本次保存不包含你尚未提交的填写；这些内容仍保留在下方卡片中。</p>}
-      {card && expanded && <div id="goal-card-editor" className="zen-scroll mt-3 max-h-[min(35dvh,420px)] overflow-y-auto rounded-2xl border border-accent-edge bg-panel p-4 sm:p-5">
+      {card && expanded && <div id="goal-card-editor" className="zen-scroll default-style:mt-3 default-style:max-h-[min(35dvh,420px)] default-style:overflow-y-auto default-style:rounded-2xl default-style:border default-style:border-accent-edge default-style:bg-panel default-style:p-4 default-style:sm:p-5 simple:mt-3 simple:max-h-[min(35dvh,420px)] simple:overflow-y-auto simple:rounded-2xl simple:bg-panel simple:p-4 simple:sm:p-5">
         {editable ? <form onSubmit={event => void submit(event)}>
-          <div className="mb-4"><h3 className="text-base font-semibold">先写下你想到的</h3><p className="mt-1 text-xs leading-5 text-ink-muted">都可以先留空。填完后一起讨论，确认之前只是一份草稿。{card.kind === "secondary" ? "这是额外活动，不会替换原来的核心目标。" : "活动、时间和难度，都可以和教练再调整。"}</p></div>
+          <div className="mb-4"><h3 className="text-base font-semibold">{participant ? "编辑目标草稿" : "先写下你想到的"}</h3><p className="mt-1 text-xs leading-5 text-ink-muted">都可以先留空。填完后一起讨论，确认之前只是一份草稿。{card.kind === "secondary" ? "这是额外活动，不会替换原来的核心目标。" : "活动、时间和难度，都可以和教练再调整。"}</p></div>
           <div className="grid gap-4 sm:grid-cols-2">
             {fieldKeys.map(key => <label key={key} className={`block min-w-0 ${key === "activity_content" ? "sm:col-span-2" : ""}`}>
               <span className="mb-1.5 block text-xs font-medium text-ink-muted">{goalCardFieldLabels[key]}{key === "difficulty_rating" ? "（0～10，可不填）" : ""}</span>
@@ -269,13 +274,29 @@ export default function GoalFormulationPanel({sessionId, accountKey, module, bus
           {busy && <p className="mt-2 text-xs text-ink-muted">可以先填写，等教练回复后再提交。</p>}
         </form> : <><h3 className="text-base font-semibold">{card.phase === "paused" ? "暂存的" : "已确认的"}{kind}卡</h3><CardFields fields={card.fields} />{dirty && <details className="mt-4 rounded-xl bg-raised p-3"><summary className="cursor-pointer text-xs text-ink-muted">查看尚未提交的填写</summary><CardFields fields={fieldsOf(draft,card.kind)} /></details>}{card.phase === "paused" ? <><p className="mt-4 text-xs leading-5 text-ink-muted">先保留这些想法，需要时可以再和教练一起完善。</p><button type="button" disabled={lock} onClick={() => void resume()} className="mt-3 min-h-11 rounded-xl bg-accent px-4 text-sm text-on-accent disabled:opacity-50">继续完善</button></> : <p className="mt-4 text-xs leading-5 text-accent-ink">目标信息已保存到“我的目标”，可以随时在那里查看。</p>}</>}
       </div>}
-      {card?.phase === "ready" && <div className="mt-3 rounded-xl border border-accent-edge bg-panel p-3">
+      {card?.phase === "ready" && <div className="default-style:mt-3 default-style:rounded-xl default-style:border default-style:border-accent-edge default-style:bg-panel default-style:p-3 simple:mt-3 simple:rounded-xl simple:bg-panel simple:p-3">
         <p className="text-xs leading-5 text-ink-muted">教练已核对{card.content_revision ? `内容第 ${card.content_revision} 版` : "当前安排"}，请查看后决定。{dirty ? "你还有未提交的修改，请先交给教练核对。" : "需要调整也可以继续聊天。"}</p>
           {card.confirmation?.allowed !== true && <p role="status" className="mt-2 text-xs text-alert-ink">{card.confirmation?.message || "正在核对这版卡片的确认状态…"}</p>}
           <div className="mt-2 flex flex-wrap gap-2"><button type="button" disabled={!canConfirmCard(card, lock, dirty)} onClick={() => void sendChoice("confirm")} className="min-h-10 rounded-xl bg-accent px-4 text-sm font-medium text-on-accent disabled:opacity-50">确认这个安排</button><button type="button" disabled={lock} onClick={() => setExpanded(true)} className="min-h-10 rounded-xl px-3 text-sm text-accent-ink">先查看或修改</button></div>
       </div>}
       {card && !["confirmed","paused"].includes(card.phase) && (expanded || card.phase === "ready") && <button type="button" disabled={lock} onClick={() => void sendChoice("pause")} className="mt-1 min-h-9 px-1 text-xs text-ink-muted underline decoration-line-strong underline-offset-4 disabled:opacity-50">暂不继续细化，保留草稿</button>}
     </div>
+    {participant && card && <button type="button" className="participant-drawer-handle"
+      aria-expanded={expanded} aria-controls={expanded ? "goal-card-editor" : undefined}
+      aria-label={expanded ? "收起目标卡" : "展开目标卡"}
+      onClick={() => { if (dragged.current) { dragged.current = false; return; } setExpanded(value => !value); }}
+      onPointerDown={event => { dragStart.current = event.clientY; dragged.current = false; event.currentTarget.setPointerCapture(event.pointerId); }}
+      onPointerUp={event => {
+        if (dragStart.current !== null) {
+          const delta = event.clientY - dragStart.current;
+          if (Math.abs(delta) >= 24) { dragged.current = true; setExpanded(delta > 0); }
+        }
+        dragStart.current = null;
+      }}
+      onPointerCancel={() => { dragStart.current = null; dragged.current = false; }}
+      onKeyDown={event => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setExpanded(event.key === "ArrowDown"); } }}>
+      {expanded ? "收起目标卡" : card.phase === "ready" ? "查看待确认安排" : "展开目标卡"}
+    </button>}
   </section>;
 }
 

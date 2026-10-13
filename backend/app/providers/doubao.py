@@ -66,9 +66,9 @@ class DoubaoProvider(LLMProvider):
         self, *, system: SystemPrompt, messages: list[Message]
     ) -> Completion:
         try:
-            timeout_seconds = self._main_timeout_seconds()
+            timeout_seconds = self._main_total_timeout_seconds()
             async with timeout(timeout_seconds):
-                response = await self._main_client().chat.completions.create(
+                response = await self._create_main_completion(
                     model=self.model,
                     max_tokens=self._main_max_tokens(),
                     messages=self._payload(system, messages),
@@ -110,9 +110,9 @@ class DoubaoProvider(LLMProvider):
     ) -> AsyncIterator[StreamDelta]:
         stream = None
         try:
-            timeout_seconds = self._main_timeout_seconds()
+            timeout_seconds = self._main_total_timeout_seconds()
             async with timeout(timeout_seconds):
-                stream = await self._main_client().chat.completions.create(
+                stream = await self._create_main_completion(
                     model=self.model,
                     max_tokens=self._main_max_tokens(),
                     messages=self._payload(system, messages),
@@ -125,40 +125,41 @@ class DoubaoProvider(LLMProvider):
                     yield StreamDelta(kind="usage", request_id=stream_request_id)
                 usage_payload: dict[str, int] = {}
                 finish_reason: str | None = None
-                async for chunk in stream:
-                    chunk_request_id = request_id(chunk)
-                    if chunk_request_id and not stream_request_id:
-                        stream_request_id = chunk_request_id
-                        yield StreamDelta(kind="usage", request_id=stream_request_id)
-                    if chunk.usage is not None:
-                        usage_payload = {
-                            "input_tokens": chunk.usage.prompt_tokens or 0,
-                            "output_tokens": chunk.usage.completion_tokens or 0,
-                            "reasoning_tokens": (
-                                getattr(
-                                    getattr(chunk.usage, "completion_tokens_details", None),
-                                    "reasoning_tokens",
-                                    0,
-                                )
-                                or 0
-                            ),
-                        }
-                    if not chunk.choices:
-                        continue
-                    choice = chunk.choices[0]
-                    finish_reason = choice.finish_reason or finish_reason
-                    delta = choice.delta
-                    reasoning = getattr(delta, "reasoning_content", None)
-                    if reasoning:
-                        yield StreamDelta(kind="reasoning", text=reasoning)
-                    if delta and delta.content:
-                        yield StreamDelta(kind="content", text=delta.content)
-                yield StreamDelta(
-                    kind="usage",
-                    usage=usage_payload,
-                    finish_reason=finish_reason,
-                    request_id=stream_request_id,
-                )
+                async with timeout(self._main_stream_remaining_seconds()):
+                    async for chunk in stream:
+                        chunk_request_id = request_id(chunk)
+                        if chunk_request_id and not stream_request_id:
+                            stream_request_id = chunk_request_id
+                            yield StreamDelta(kind="usage", request_id=stream_request_id)
+                        if chunk.usage is not None:
+                            usage_payload = {
+                                "input_tokens": chunk.usage.prompt_tokens or 0,
+                                "output_tokens": chunk.usage.completion_tokens or 0,
+                                "reasoning_tokens": (
+                                    getattr(
+                                        getattr(chunk.usage, "completion_tokens_details", None),
+                                        "reasoning_tokens",
+                                        0,
+                                    )
+                                    or 0
+                                ),
+                            }
+                        if not chunk.choices:
+                            continue
+                        choice = chunk.choices[0]
+                        finish_reason = choice.finish_reason or finish_reason
+                        delta = choice.delta
+                        reasoning = getattr(delta, "reasoning_content", None)
+                        if reasoning:
+                            yield StreamDelta(kind="reasoning", text=reasoning)
+                        if delta and delta.content:
+                            yield StreamDelta(kind="content", text=delta.content)
+                    yield StreamDelta(
+                        kind="usage",
+                        usage=usage_payload,
+                        finish_reason=finish_reason,
+                        request_id=stream_request_id,
+                    )
         except (TimeoutError, asyncio.TimeoutError, openai.APITimeoutError) as exc:
             raise ProviderError(
                 f"Doubao stream timed out after {self._main_timeout_seconds():g}s"

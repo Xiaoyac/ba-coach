@@ -144,7 +144,7 @@ export default function TestWorkbench({ onClose }: { onClose: () => void }) {
     (runFilter === "all" || (runFilter === "unreviewed" ? r.status === "completed" && (!r.latest_verdict || r.latest_verdict === "unreviewed") : r.status === runFilter)) &&
     `${r.case_snapshot.case_code} ${r.input_text}`.toLowerCase().includes(query.toLowerCase()));
 
-  return <div className="fixed inset-0 z-[75] bg-canvas/90 p-2 backdrop-blur-xl sm:p-5">
+  return <div className="default-style:fixed default-style:inset-0 default-style:z-[75] default-style:bg-canvas/90 default-style:p-2 default-style:backdrop-blur-xl default-style:sm:p-5 simple:fixed simple:inset-0 simple:z-[75] simple:bg-canvas/90 simple:p-2 simple:sm:p-5">
     <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="test-workbench-title"
       onKeyDown={e => {
         if (e.key === "Escape") { if (editing) setEditing(null); else if (preview) setPreview(null); else if (detail) setDetail(null); else close(); }
@@ -156,7 +156,7 @@ export default function TestWorkbench({ onClose }: { onClose: () => void }) {
           else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
         }
       }}
-      className={`${styles.workbench} workbench-shell relative mx-auto flex h-full max-w-[1800px] flex-col overflow-hidden rounded-[30px] border border-line-strong text-ink outline-none`}>
+      className={`${styles.workbench} workbench-shell default-style:relative default-style:mx-auto default-style:flex default-style:h-full default-style:max-w-[1800px] default-style:flex-col default-style:overflow-hidden default-style:rounded-[30px] default-style:border default-style:border-line-strong default-style:text-ink default-style:outline-none simple:relative simple:mx-auto simple:flex simple:h-full simple:max-w-[1800px] simple:flex-col simple:overflow-hidden simple:rounded-2xl simple:border simple:border-line-strong simple:text-ink simple:outline-none`}>
       <header className="workspace-card-header flex flex-wrap items-center gap-3 border-b border-line px-5 py-5 sm:px-6">
         <div className="mr-auto"><p className="mb-1 text-[10px] font-medium uppercase tracking-[.24em] text-accent-ink">BA COACH / EVALUATION</p><h2 id="test-workbench-title" className="text-xl font-semibold tracking-tight">测试工作台</h2>
           <p className="mt-1 text-xs text-ink-faint">让每一次对话测试，都有迹可循。</p></div>
@@ -180,7 +180,7 @@ export default function TestWorkbench({ onClose }: { onClose: () => void }) {
         <div className="ml-auto flex flex-wrap items-center gap-2">
         <span className="text-xs text-ink-faint">执行模型</span>
         <WorkbenchSelect aria-label="测试模型" disabled={batch || busy} className="w-32" value={provider} onChange={e => setProvider(e.target.value as TestProvider)}>
-          <option value="deepseek">Qwen3.8-Flash</option><option value="doubao">豆包</option><option value="claude">Claude</option>
+          <option value="deepseek">Kimi K3</option><option value="doubao">豆包</option><option value="claude">Claude</option>
         </WorkbenchSelect>
         <button className={buttonClass} disabled={busy || batch} onClick={() => edit("new")}><PlusMark className="mr-1 inline h-3 w-3"/>新增用例</button>
         {batch ? <button className={buttonClass} onClick={() => { stop.current = true; setNotice("将在当前用例完成后停止后续运行"); }}>停止后续运行</button> :
