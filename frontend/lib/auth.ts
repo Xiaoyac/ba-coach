@@ -41,7 +41,6 @@ export interface RegisterInput {
   invitation_code: string;
   username: string;
   password: string;
-  email: string;
   nickname: string;
   /** Stable enough to ask once — everything else is edited in the profile. */
   birth_date: string;
@@ -209,69 +208,6 @@ export async function changePassword(
     const detail = typeof body?.detail === "string" ? body.detail : null;
     throw new AuthError(detail ?? "修改失败，请稍后再试", res.status);
   }
-}
-
-export async function saveRecoveryEmail(email: string): Promise<Account> {
-  const res = await fetch(`${API_BASE}/api/auth/email`, {
-    method: "PUT",
-    headers: headers(true),
-    body: JSON.stringify({ email }),
-  });
-  return parseResponse<Account>(res, "邮箱保存失败，请稍后再试");
-}
-
-export async function resendEmailVerification(): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/auth/email/verification/resend`, {
-    method: "POST",
-    headers: headers(),
-  });
-  const body = await parseResponse<{ message: string }>(
-    res,
-    "验证邮件发送失败，请稍后再试",
-  );
-  return body.message;
-}
-
-export async function verifyEmail(token: string): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/auth/email/verify`, {
-    method: "POST",
-    headers: headers(true),
-    body: JSON.stringify({ token }),
-  });
-  const body = await parseResponse<{ message: string }>(
-    res,
-    "邮箱验证失败，请重新发送",
-  );
-  return body.message;
-}
-
-export async function requestPasswordReset(email: string): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/auth/password/forgot`, {
-    method: "POST",
-    headers: headers(true),
-    body: JSON.stringify({ email }),
-  });
-  const body = await parseResponse<{ message: string }>(
-    res,
-    "请求失败，请稍后再试",
-  );
-  return body.message;
-}
-
-export async function resetPassword(
-  token: string,
-  newPassword: string,
-): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/auth/password/reset`, {
-    method: "POST",
-    headers: headers(true),
-    body: JSON.stringify({ token, new_password: newPassword }),
-  });
-  const body = await parseResponse<{ message: string }>(
-    res,
-    "密码重置失败，请重新申请链接",
-  );
-  return body.message;
 }
 
 export async function logout(): Promise<void> {

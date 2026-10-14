@@ -88,9 +88,6 @@ export default function ConversationWorkspace({
   accountUsername,
   accountId,
   accountRole,
-  accountEmail,
-  accountEmailVerified,
-  emailDeliveryAvailable,
   onAccountRefresh,
   onLogout,
 }: {
@@ -98,9 +95,6 @@ export default function ConversationWorkspace({
   accountUsername: string;
   accountId: string;
   accountRole: "user" | "admin";
-  accountEmail: string | null;
-  accountEmailVerified: boolean;
-  emailDeliveryAvailable: boolean;
   onAccountRefresh: () => void | Promise<void>;
   onLogout: () => void;
 }) {

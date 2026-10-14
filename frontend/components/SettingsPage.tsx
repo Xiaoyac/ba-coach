@@ -4,9 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Account } from "@/lib/auth";
 import { showSettingsDialog } from "@/lib/settingsDialog";
-import { CloseMark, SunMark, IdCardMark, EnvelopeMark, KeyMark, SignOutMark } from "@/components/icons";
+import { CloseMark, SunMark, IdCardMark, KeyMark, SignOutMark } from "@/components/icons";
 import ProfileModal from "@/components/ProfileModal";
-import EmailSettingsModal from "@/components/EmailSettingsModal";
 import ChangePasswordModal from "@/components/ChangePasswordModal";
 import OverallStyleSelector from "@/components/OverallStyleSelector";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -14,7 +13,6 @@ import ThemeToggle from "@/components/ThemeToggle";
 const sections = [
   { id: "appearance", label: "外观", short: "外观", icon: SunMark },
   { id: "profile", label: "我的档案", short: "档案", icon: IdCardMark },
-  { id: "email", label: "邮箱与找回密码", short: "邮箱", icon: EnvelopeMark },
   { id: "password", label: "修改密码", short: "密码", icon: KeyMark },
   { id: "logout", label: "退出登录", short: "退出", icon: SignOutMark },
 ] as const;
@@ -78,7 +76,6 @@ export default function SettingsPage({ account, onAccountRefresh, onLogout, acti
               <p className="mt-5 text-xs leading-6 text-ink-faint">选择会自动保存在当前浏览器。</p>
             </div>}
             {visited.includes("profile") && <div id="settings-profile" hidden={section !== "profile"}><ProfileModal embedded onClose={returnToChat} onSaved={onAccountRefresh} /></div>}
-            {visited.includes("email") && <div id="settings-email" hidden={section !== "email"}><EmailSettingsModal embedded currentEmail={account.email} verified={account.email_verified} deliveryAvailable={account.email_delivery_available} onSaved={onAccountRefresh} onClose={returnToChat} /></div>}
             {visited.includes("password") && <div id="settings-password" hidden={section !== "password"}><ChangePasswordModal embedded onClose={returnToChat} /></div>}
             {visited.includes("logout") && <div id="settings-logout" hidden={section !== "logout"} className="max-w-xl">
               <h2 className="text-2xl font-semibold">退出登录</h2>

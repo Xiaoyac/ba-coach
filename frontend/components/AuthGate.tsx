@@ -7,7 +7,6 @@ import SettingsPage from "@/components/SettingsPage";
 import AuthScreen from "@/components/AuthScreen";
 import ThemeToggle from "@/components/ThemeToggle";
 import ConversationWorkspace from "@/components/ConversationWorkspace";
-import RequiredEmailModal from "@/components/RequiredEmailModal";
 import RequiredBirthDateModal from "@/components/RequiredBirthDateModal";
 import { clearToken, fetchMe, getToken, logout, type Account } from "@/lib/auth";
 
@@ -151,22 +150,14 @@ export default function AuthGate() {
         displayName={state.account.nickname || state.account.username}
         accountUsername={state.account.username}
         accountRole={state.account.role}
-        accountEmail={state.account.email}
-        accountEmailVerified={state.account.email_verified}
-        emailDeliveryAvailable={state.account.email_delivery_available}
         onAccountRefresh={handleAccountRefresh}
         onLogout={handleLogout}
       /></div>
       {settingsVisited && <SettingsPage
-        key={`${state.account.profile_uuid}:${state.account.role}`} active={inSettings && !state.account.email_required} account={state.account}
+        key={`${state.account.profile_uuid}:${state.account.role}`} active={inSettings} account={state.account}
         onAccountRefresh={handleAccountRefresh} onLogout={handleLogout}
       />}
-      {state.account.email_required && (
-        <RequiredEmailModal
-          deliveryAvailable={state.account.email_delivery_available}
-          onSaved={(account) => setState({ account, checking: false })}
-        />
-      )}
+
     </>
   );
 }
