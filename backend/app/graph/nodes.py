@@ -1072,16 +1072,16 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 if context.stream and verified:
                     _send({'type': 'delta', 'text': verified})
 
-        if not update.get('error'):
-            # The tool-produced display is the exact reviewed plan, not a
-            # model paraphrase. Bind it only after this reply is durable.
-            for display in state.get('pa_operation_displays') or []:
-                if display and display not in update.get('final_response', ''):
-                    suffix = ('\n\n' if update.get('final_response') else '') + display
-                    update['final_response'] = update.get('final_response', '') + suffix
-                    emitted_content.append(suffix)
-                    if context.stream:
-                        _send({'type': 'delta', 'text': suffix})
+        # Committed tool artifacts remain usable after a prose timeout.
+        # The tool-produced display is the exact reviewed plan, not a
+        # model paraphrase. Bind it only after this reply is durable.
+        for display in state.get('pa_operation_displays') or []:
+            if display and display not in update.get('final_response', ''):
+                suffix = ('\n\n' if update.get('final_response') else '') + display
+                update['final_response'] = update.get('final_response', '') + suffix
+                emitted_content.append(suffix)
+                if context.stream:
+                    _send({'type': 'delta', 'text': suffix})
 
         if context.stream:
             # Keep the saved answer byte-for-byte aligned with delivered deltas;

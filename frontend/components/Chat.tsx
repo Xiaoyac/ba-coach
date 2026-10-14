@@ -73,6 +73,7 @@ export default function Chat({
   onOpenGoals,
   onSendGoalCard,
   onGoalCardUpdated,
+  reuseDraft,
   onOpenPushSettings,
   displayName,
   accountUsername,
@@ -118,6 +119,7 @@ export default function Chat({
   onOpenAssessment: () => void;
   onOpenAssessmentHistory?: () => void;
   assessmentRefreshKey?: number;
+  reuseDraft?: {text:string; nonce:number} | null;
   onOpenGoals: () => void;
   onOpenCoreGoals?: () => void;
   onSendGoalCard: (text: string, metadata?: Record<string, string>) => Promise<void>;
@@ -144,6 +146,12 @@ export default function Chat({
   const [showLatest, setShowLatest] = useState(false);
   const logContentRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState("");
+  const consumedReuse = useRef<number | null>(null);
+  useEffect(() => {
+    if (!reuseDraft || consumedReuse.current === reuseDraft.nonce) return;
+    consumedReuse.current = reuseDraft.nonce;
+    setInput(current => current.trim() ? `${current}\n\n${reuseDraft.text}` : reuseDraft.text);
+  }, [reuseDraft]);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [headerExpanded, setHeaderExpanded] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);

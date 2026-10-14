@@ -10,7 +10,7 @@ import { fetchGoalHistory, goalKindLabel, scheduleKindLabel, eventKindLabel,
   type ProgramGoal, type GoalHistory, type ArchivedPlan, type ArchivedCycle, type ActivityRecord } from "@/lib/program";
 
 type Overview = { enabled: boolean; goals: ProgramGoal[]; pa_cards?: ProgramGoal[]; activity_records?: ActivityRecord[]; formulation_cards?: FormulationCard[] };
-type Props = { embedded?: boolean; open: boolean; initialKind?: "all" | "primary"; sessionId: string | null; busy?: boolean; refreshKey: number; onClose: () => void; onOpenReminders?: () => void };
+type Props = { embedded?: boolean; open: boolean; initialKind?: "all" | "primary"; sessionId: string | null; busy?: boolean; refreshKey: number; onClose: () => void; onOpenReminders?: () => void; onReuse?: (fields: GoalCardFields) => void };
 type HistoryTab = "plans" | "cycles" | "activities";
 const states: Record<string, string> = {draft:"待完善",active:"进行中",paused:"已暂停",completed:"本轮已结束",abandoned:"已结束",replaced:"已替换"};
 const cycleStates: Record<string, string> = {planning:"计划中",waiting_execution:"等待执行",reviewing:"复盘中",completed:"本轮已结束",cancelled:"已取消"};
@@ -27,7 +27,7 @@ function date(value?: string | null) { const time = timestamp(value); return tim
 function chronological(a: ProgramGoal, b: ProgramGoal) { return (timestamp(a.created_at) ?? Infinity) - (timestamp(b.created_at) ?? Infinity) || a.id.localeCompare(b.id); }
 function matches(goal: ProgramGoal, status: string) { return status === "all" || (status === "finished" ? finished.has(goal.status) : goal.status === status); }
 
-export default function GoalOverview({embedded = false,open,initialKind = "all",sessionId,refreshKey,onClose,onOpenReminders}:Props) {
+export default function GoalOverview({embedded = false,open,initialKind = "all",sessionId,refreshKey,onClose,onOpenReminders,onReuse,busy}:Props) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [overview,setOverview] = useState<Overview|null>(null);
   const [loading,setLoading] = useState(true);
@@ -109,7 +109,7 @@ export default function GoalOverview({embedded = false,open,initialKind = "all",
         <div>{!embedded && <p className={`text-xs tracking-[.16em] text-accent-ink ${selected ? "hidden sm:block" : ""}`}>PA · 行动档案</p>}<h2 id="goal-archive-title" className={`default-style:font-semibold default-style:tracking-tight simple:font-semibold simple:tracking-tight ${embedded ? "default-style:text-base simple:text-base" : `default-style:mt-1.5 default-style:sm:text-3xl simple:mt-1.5 simple:sm:text-2xl ${selected ? "default-style:text-xl simple:text-xl" : "default-style:text-2xl simple:text-2xl"}`}`}>我的目标</h2>{!embedded && <p className={`mt-2 text-sm text-ink-muted ${selected ? "hidden sm:block" : ""}`}>每一个小小的尝试，都有自己的轨迹。</p>}</div>
         {!embedded && <button onClick={onClose} aria-label="关闭目标总览" className="grid size-11 shrink-0 place-items-center rounded-full text-2xl text-ink-muted hover:bg-raised">×</button>}
       </header>
-      {selected ? <GoalDetails sessionId={sessionId} goal={selected} onBack={()=>setSelected(null)} /> : <>
+      {selected ? <GoalDetails onReuse={busy ? undefined : onReuse} sessionId={sessionId} goal={selected} onBack={()=>setSelected(null)} /> : <>
         <div className={`shrink-0 px-6 sm:px-9 ${embedded ? "pt-3" : ""}`}>
           <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-ink-muted"><span><b className="mr-1.5 text-base font-medium text-ink">{goals.length}</b>张 PA 卡</span>{secondaryCards.length>0&&<span>{secondaryCards.length} 项次要目标记录</span>}<span><b className="mr-1.5 text-base font-medium text-ink">{goals.filter(g=>g.status==="active").length}</b>个正在进行</span><span className="hidden sm:ml-auto sm:inline">在对话中制定，在这里回顾 · 不会自动切换当前目标</span></div>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -144,7 +144,7 @@ export default function GoalOverview({embedded = false,open,initialKind = "all",
               </li>)}
             </ol>
           </>:<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{visible.map(goal=><GoalCard key={goal.card_id??goal.id} goal={goal} current={currentGoal===goal.id&&!finished.has(goal.status)} onOpen={()=>openGoal(goal)} />)}</div>}
-          {!loading&&!error&&visibleSecondary.length>0&&<section className="mt-6" aria-label="已确认的次要目标"><h3 className="text-sm font-semibold text-ink">次要目标</h3><p className="mt-1 text-xs leading-5 text-ink-muted">这些额外活动保留了你确认的安排，不会替换核心目标。</p><div className="mt-3 grid gap-4 md:grid-cols-2">{visibleSecondary.map(card=><article key={card.id} className="rounded-2xl bg-panel p-5"><div className="flex items-center justify-between gap-3"><h4 className="text-base font-medium">{card.fields.activity_content||"次要活动"}</h4><span className="shrink-0 rounded-full bg-accent-wash px-2 py-1 text-xs text-accent-ink">已确认</span></div><dl className="mt-4 grid gap-3 sm:grid-cols-2">{(Object.keys(goalCardFieldLabels) as (keyof GoalCardFields)[]).filter(key=>key!=="activity_content"&&card.fields[key]!=null&&card.fields[key]!=="").map(key=><div key={key}><dt className="text-xs text-ink-faint">{goalCardFieldLabels[key]}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-sm leading-6">{goalCardFieldValue(key,card.fields[key])}</dd></div>)}</dl><p className="mt-4 text-xs text-ink-faint">{card.content_revision ? `内容第 ${card.content_revision} 版` : "已保存"}{card.confirmed_at?` · ${date(card.confirmed_at)} 确认`:""}</p></article>)}</div></section>}
+          {!loading&&!error&&visibleSecondary.length>0&&<section className="mt-6" aria-label="已确认的次要目标"><h3 className="text-sm font-semibold text-ink">次要目标</h3><p className="mt-1 text-xs leading-5 text-ink-muted">这些额外活动保留了你确认的安排，不会替换核心目标。</p><div className="mt-3 grid gap-4 md:grid-cols-2">{visibleSecondary.map(card=><article key={card.id} className="rounded-2xl bg-panel p-5"><div className="flex items-center justify-between gap-3"><h4 className="text-base font-medium">{card.fields.activity_content||"次要活动"}</h4><span className="shrink-0 rounded-full bg-accent-wash px-2 py-1 text-xs text-accent-ink">已确认</span></div><dl className="mt-4 grid gap-3 sm:grid-cols-2">{(Object.keys(goalCardFieldLabels) as (keyof GoalCardFields)[]).filter(key=>key!=="activity_content"&&card.fields[key]!=null&&card.fields[key]!=="").map(key=><div key={key}><dt className="text-xs text-ink-faint">{goalCardFieldLabels[key]}</dt><dd className="mt-1 whitespace-pre-wrap break-words text-sm leading-6">{goalCardFieldValue(key,card.fields[key])}</dd></div>)}</dl>{onReuse && <button type="button" disabled={busy} className="archive-action mt-3" onClick={()=>onReuse(card.fields)}>以此为基础制定新计划</button>}<p className="mt-4 text-xs text-ink-faint">{card.content_revision ? `内容第 ${card.content_revision} 版` : "已保存"}{card.confirmed_at?` · ${date(card.confirmed_at)} 确认`:""}</p></article>)}</div></section>}
           {!loading&&!error&&!!overview?.activity_records?.length&&<details className="mt-7 text-sm"><summary className="cursor-pointer py-3 text-ink-muted">未归属目标的近期活动 · {overview.activity_records.length}</summary><p className="mb-3 text-xs text-ink-faint">临时活动与想法不会自动成为目标，也不算完成其他目标。</p><div className="space-y-2">{overview.activity_records.map(record=><div key={record.id} className="flex items-start justify-between gap-4 rounded-xl bg-panel p-3"><span>{record.activity_content}</span><span className="shrink-0 text-xs text-ink-muted">{eventKindLabel[record.event_kind]}</span></div>)}</div></details>}
         </div>
         {!embedded && <footer className="shrink-0 px-6 py-3 text-xs leading-5 text-ink-faint sm:px-9">这里保留现有的计划版本与执行历史。过往的讨论可以在对应的历史对话中查看。</footer>}
@@ -166,7 +166,7 @@ function GoalCard({goal,current,onOpen,timeline=false}:{goal:ProgramGoal;current
   </button>;
 }
 
-function GoalDetails({goal,onBack,sessionId}:{goal:ProgramGoal;onBack:()=>void;sessionId:string|null}) {
+function GoalDetails({goal,onBack,sessionId,onReuse}:{goal:ProgramGoal;onBack:()=>void;sessionId:string|null;onReuse?: (fields:GoalCardFields)=>void}) {
   const [tab,setTab]=useState<HistoryTab>("plans"), [page,setPage]=useState(1);
   const [data,setData]=useState<GoalHistory|null>(null), [loading,setLoading]=useState(true);
   const [error,setError]=useState(""), [retry,setRetry]=useState(0);
@@ -186,7 +186,7 @@ function GoalDetails({goal,onBack,sessionId}:{goal:ProgramGoal;onBack:()=>void;s
     </div>
     <div ref={scroll} className="zen-scroll min-h-0 flex-1 overflow-y-auto bg-raised/25 px-6 py-5 sm:px-9">
       {loading?<Empty title="正在加载历史…"/>:error?<Empty title="暂时无法打开" detail={error}><button className="archive-action" onClick={()=>setRetry(x=>x+1)}>重试</button></Empty>:!total?<Empty title="这里还没有记录" detail={tab==="plans"?"教练与你讨论计划后，PA 卡片会出现在这里。":tab==="cycles"?"执行周期建立后，可以在这里查看每轮安排和复盘。":"在对话中反馈的、明确属于这个目标的活动会显示在这里。"}/>:<div className="space-y-4">
-        {tab==="plans"&&data?.plans.map(plan=><PlanCard key={plan.id} plan={plan}/>)}
+        {tab==="plans"&&data?.plans.map(plan=><PlanCard key={plan.id} plan={plan} onReuse={onReuse}/>)}
         {tab==="cycles"&&data?.cycles.map(cycle=><CycleCard key={cycle.id} cycle={cycle}/>)}
         {tab==="activities"&&data?.activities.map(event=><article key={event.id} className="rounded-2xl bg-panel p-5"><div className="flex flex-wrap justify-between gap-2"><h4 className="font-medium">{event.activity_content}</h4><span className="text-xs text-ink-muted">{eventKindLabel[event.event_kind]}{event.status==="superseded"?" · 已被更正":""}</span></div><p className="mt-2 text-xs text-ink-faint">{event.occurred_at_text??date(event.created_at)}{event.cycle_ordinal?` · 第 ${event.cycle_ordinal} 轮`:""}</p>{event.effect&&<p className="mt-3 text-sm leading-6 text-ink-muted">{event.effect}</p>}{event.status==="superseded"&&<p className="mt-2 text-xs text-ink-faint">仅供追溯，不作为当前有效记录。</p>}</article>)}
       </div>}
@@ -195,7 +195,7 @@ function GoalDetails({goal,onBack,sessionId}:{goal:ProgramGoal;onBack:()=>void;s
   </div>;
 }
 
-function PlanCard({plan}:{plan:ArchivedPlan}) {
+function PlanCard({plan,onReuse}:{plan:ArchivedPlan;onReuse?: (fields:GoalCardFields)=>void}) {
   return <article className="rounded-2xl bg-panel p-5 sm:p-6">
     <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-semibold">PA 目标卡 · 第 {plan.version_no} 版</h4><span className="text-xs text-accent-ink">{planStates[plan.record_status]??plan.record_status}</span></div>
     <p className="mt-1 text-xs text-ink-faint">{date(plan.created_at)} 建立 · {date(plan.updated_at)} 更新</p>
@@ -208,6 +208,7 @@ function PlanCard({plan}:{plan:ArchivedPlan}) {
       <Field label="难度感受" value={plan.difficulty_rating!=null?`${plan.difficulty_rating} / 10`:plan.difficulty}/>
     </dl>
     <details className="mt-5"><summary className="cursor-pointer py-2 text-sm text-accent-ink">价值与可用支持（可选）</summary><dl className="mt-3 grid gap-4 sm:grid-cols-2"><Field label="在意的价值" value={plan.core_values}/><Field label="与价值的关系" value={plan.core_values_impact}/><Field label="可用支持" value={plan.resources}/></dl></details>
+    {onReuse && plan.record_status !== "draft" && plan.activity_content && <div className="mt-4"><button type="button" className="archive-action" onClick={()=>onReuse({activity_content:plan.activity_content, location:plan.location, duration_minutes:plan.duration_minutes})}>以此为基础制定新计划</button><p className="mt-2 text-xs text-ink-muted">带回对话编辑；重新确定时间，再确认新安排。</p></div>}
     {plan.record_status==="draft"&&<p className="mt-4 text-xs leading-5 text-ink-muted">这是一份待完善的草稿，不代表你已经承诺执行。</p>}
   </article>;
 }

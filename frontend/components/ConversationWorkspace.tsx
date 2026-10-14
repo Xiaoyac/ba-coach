@@ -30,6 +30,7 @@ import Chat from "@/components/Chat";
 import ConversationShareModal from "@/components/ConversationShareModal";
 import ConversationModeModal from "@/components/ConversationModeModal";
 import ConversationSidebar from "@/components/ConversationSidebar";
+import { goalReuseDraft } from "@/lib/goal-reuse";
 import GoalsAndRecordsModal from "@/components/GoalsAndRecordsModal";
 import PromptManagerModal from "@/components/PromptManagerModal";
 import AdminAccountManagerModal from "@/components/AdminAccountManagerModal";
@@ -169,6 +170,7 @@ export default function ConversationWorkspace({
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [conversationsLoading, setConversationsLoading] = useState(true);
   const [programRefreshKey, setProgramRefreshKey] = useState(0);
+  const [reuseDraft, setReuseDraft] = useState<{text:string; sessionId:string|null; nonce:number} | null>(null);
   const [goalsOpen, setGoalsOpen] = useState(false);
   const [goalArchiveKind, setGoalArchiveKind] = useState<"all" | "primary">("all");
   const [pushSettingsOpen, setPushSettingsOpen] = useState(false);
@@ -1293,6 +1295,7 @@ export default function ConversationWorkspace({
           onOpenGoals={() => { setGoalArchiveKind("all"); setGoalsOpen(true); }}
           onOpenCoreGoals={() => { setGoalArchiveKind("primary"); setGoalsOpen(true); }}
           onSendGoalCard={handleSend}
+          reuseDraft={reuseDraft?.sessionId === sessionId ? reuseDraft : null}
           onGoalCardUpdated={() => setProgramRefreshKey(value => value + 1)}
           onOpenPushSettings={() => setPushSettingsOpen(true)}
           displayName={displayName}
@@ -1312,6 +1315,7 @@ export default function ConversationWorkspace({
         onChoose={handleModeChoice} onClose={() => { if (!creatingConversationRef.current) setModeChooserOpen(false); }} />}
 
       {dailyRecordsAvailable && (goalsOpen || assessmentOpen) && <GoalsAndRecordsModal key={`${accountId}:${sessionId}`} sessionId={sessionId}
+        busy={busy || loadingConversation} onReuse={fields => { setReuseDraft({text:goalReuseDraft(fields), sessionId, nonce:Date.now()}); setGoalsOpen(false); setAssessmentOpen(false); }}
         initialTab={assessmentOpen ? "record" : "goals"} initialGoalKind={goalArchiveKind} initialRecordView={assessmentView}
         refreshKey={programRefreshKey} onSaved={() => setAssessmentRefreshKey(key => key + 1)}
         onOpenReminders={() => setPushSettingsOpen(true)} onClose={() => { setGoalsOpen(false); setAssessmentOpen(false); }} />}

@@ -2,6 +2,7 @@
 
 import { useParticipantStyle } from "@/lib/useParticipantStyle";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { GoalCardFields } from "@/lib/goal-card";
 import GoalOverview from "@/components/GoalOverview";
 import DailyAssessmentModal from "@/components/DailyAssessmentModal";
 
@@ -9,7 +10,9 @@ type Tab = "goals" | "record";
 
 /** One modal owns focus; both panels stay mounted while changing tabs so a
  * partially filled daily record and the archive position remain intact. */
-export default function GoalsAndRecordsModal({ initialTab = "goals", initialRecordView = "record", initialGoalKind = "all", sessionId, refreshKey, onSaved, onClose, onOpenReminders }: {
+export default function GoalsAndRecordsModal({ initialTab = "goals", initialRecordView = "record", initialGoalKind = "all", sessionId, refreshKey, onSaved, onClose, onOpenReminders, onReuse, busy }: {
+  onReuse?: (fields: GoalCardFields) => void;
+  busy?: boolean;
   initialTab?: Tab;
   initialRecordView?: "record" | "history";
   initialGoalKind?: "all" | "primary";
@@ -67,7 +70,7 @@ export default function GoalsAndRecordsModal({ initialTab = "goals", initialReco
       <section id="workspace-goals-panel" role="tabpanel" aria-labelledby="workspace-goals-tab" hidden={tab !== 'goals'} className="min-h-0 flex-1">
         <div className="flex h-full min-h-0 flex-col">
           <div className="default-style:flex default-style:shrink-0 default-style:flex-wrap default-style:items-center default-style:justify-between default-style:gap-1 default-style:border-b default-style:border-line default-style:px-5 default-style:py-2 default-style:text-xs default-style:text-ink-muted default-style:sm:px-7 simple:flex simple:shrink-0 simple:flex-wrap simple:items-center simple:justify-between simple:gap-1 simple:px-5 simple:py-2 simple:text-xs simple:text-ink-muted simple:sm:px-7"><span>{participant ? "查看已保存的活动安排" : "在这里查看计划与执行；设置和确认目标仍在对话中完成。"}</span><button type="button" onClick={() => requestClose()} className="min-h-11 px-2 text-accent-ink">返回对话讨论目标</button></div>
-          <div className="min-h-0 flex-1"><GoalOverview embedded open initialKind={initialGoalKind} sessionId={sessionId} refreshKey={refreshKey} onClose={() => requestClose()} onOpenReminders={() => requestClose(() => { onClose(); onOpenReminders(); })} /></div>
+          <div className="min-h-0 flex-1"><GoalOverview busy={busy} onReuse={onReuse ? fields => requestClose(() => onReuse(fields)) : undefined} embedded open initialKind={initialGoalKind} sessionId={sessionId} refreshKey={refreshKey} onClose={() => requestClose()} onOpenReminders={() => requestClose(() => { onClose(); onOpenReminders(); })} /></div>
         </div>
       </section>
       <section id="workspace-record-panel" role="tabpanel" aria-labelledby="workspace-record-tab" hidden={tab !== 'record'} className="min-h-0 flex-1">
