@@ -36,18 +36,22 @@ def _raw(path="personalized"):
     return {"path": path, "fact_quotes": {"trigger": "昨晚下班回家看到学习资料", "feeling": "焦虑", "behavior": "躺下刷手机，没有开始学习", "consequence": "后来更焦虑，也错过了学习时间"}, "summary_quote": "当学习前躺下刷手机，可能暂时缓解压力，却减少了学习后的掌控感", "approval_quote": "嗯，这个总结基本符合。", "methods_quote": "我试过先列小清单。", "education_quotes": ["行动和情绪、精力会相互影响。", "活动和反馈减少，有时会让困扰更难变化。", "从可调整的行动入手，可能获得新的反馈。", "行为激活不保证做了就开心。", "可以尝试、观察反馈，再调整。"], "understanding_quote": "我理解了，这不是做了就立刻开心，而是观察反馈。", "consent_quote": "我愿意进入目标设定。", "core_questions_resolved": True}
 
 
-def test_personalized_requires_all_four_facts_and_allows_optional_nulls():
+def test_personalized_requires_behavior_and_consequence_and_allows_optional_nulls():
     c = normalize(_raw(), _data(distress_duration=None, distress_frequency=None, exception_positive_scene=None), _turns(), "s1")
     assert c["milestones"]["m1_milestone_2"] is True
-    bad = normalize(_raw(), _data(abc_event={"trigger": None, "feeling": "焦虑", "behavior": "躺下刷手机", "consequence": "后来更焦虑"}), _turns(), "s1")
+    # v3: an unknown situation is kept as null rather than demanded.
+    unknown = normalize(_raw(), _data(abc_event={"trigger": None, "feeling": "焦虑", "behavior": "躺下刷手机", "consequence": "后来更焦虑"}), _turns(), "s1")
+    assert unknown["milestones"]["m1_milestone_1"] is True
+    bad = normalize(_raw(), _data(abc_event={"trigger": "昨晚下班回家看到学习资料", "feeling": "焦虑", "behavior": None, "consequence": "后来更焦虑"}), _turns(), "s1")
     assert "m1_milestone_1" in bad["missing_fields"]
 
 
 def test_order_and_speaker_provenance_gate_completion():
+    # Approval is optional, but a coach line is never adopted as the user's.
     raw = _raw(); raw["approval_quote"] = "你昨晚看到资料后焦虑"
     c = normalize(raw, _data(), _turns(), "s1")
-    assert c["milestones"]["m1_milestone_2"] is False
-    raw = _raw(); raw["fact_quotes"]["feeling"] = "行动和情绪、精力会相互影响。"
+    assert c["user_approval_level"] is None
+    raw = _raw(); raw["fact_quotes"]["behavior"] = "行动和情绪、精力会相互影响。"
     c = normalize(raw, _data(), _turns(), "s1")
     assert "m1_milestone_1" in c["missing_fields"]
 
@@ -81,16 +85,22 @@ def test_methods_null_differs_from_empty_and_session_or_legacy_is_blocked():
     assert "m1_milestone_2" not in c["missing_fields"]
 
 
-@pytest.mark.parametrize("key", ["trigger", "feeling", "behavior", "consequence"])
-def test_each_fact_required(key):
+@pytest.mark.parametrize("key,required", [("trigger", False), ("feeling", False),
+                                          ("behavior", True), ("consequence", True)])
+def test_each_fact_required(key, required):
     data = _data()
     data["abc_event"][key] = None
-    assert not normalize(_raw(), data, _turns(), "s1")["milestones"]["m1_milestone_1"]
+    assert normalize(_raw(), data, _turns(), "s1")["milestones"]["m1_milestone_1"] is not required
 
 
-def test_corrected_summary_repeated_after_old_approval_requires_new_approval():
+def test_repeated_summary_does_not_require_new_approval():
     turns = _turns() + [("assistant", _raw()["summary_quote"])]
-    assert not normalize(_raw(), _data(), turns, "s1")["milestones"]["m1_milestone_2"]
+    assert normalize(_raw(), _data(), turns, "s1")["milestones"]["m1_milestone_2"]
+
+
+def test_explicit_objection_to_current_summary_blocks_formulation():
+    c = normalize(_raw(), _data(user_approval_level=0), _turns(), "s1")
+    assert c["milestones"]["m1_milestone_1"] and not c["milestones"]["m1_milestone_2"]
 
 
 def test_consent_before_education_is_not_current_understanding():

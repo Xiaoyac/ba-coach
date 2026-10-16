@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import BirthdayPicker from "@/components/BirthdayPicker";
+import { useParticipantStyle } from "@/lib/useParticipantStyle";
+import BirthYearInput from "@/components/BirthYearInput";
 import {
   ACTIVITY_ENVIRONMENT,
   ACTIVITY_INTENSITY,
   ACTIVITY_SOCIAL,
   BEHAVIOR_TABOO,
-  COMMUNICATION_PREFERENCE,
   CONTENT_TABOO,
   LIVING_STATUS,
   PHYSICAL_CONDITION,
@@ -39,10 +39,13 @@ import { CloseMark } from "@/components/icons";
 export default function ProfileModal({
   onClose,
   onSaved,
+  embedded = false,
 }: {
   onClose: () => void;
   onSaved?: () => void;
+  embedded?: boolean;
 }) {
+  const participant = useParticipantStyle();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [draft, setDraft] = useState<ProfilePatch>({});
   const [loading, setLoading] = useState(true);
@@ -83,12 +86,13 @@ export default function ProfileModal({
   }, [loadAttempt]);
 
   useEffect(() => {
+    if (embedded) return;
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  }, [onClose, embedded]);
 
   /** Current value: the pending edit if there is one, else what was loaded. */
   function value<K extends keyof ProfilePatch>(key: K): Profile[K] {
@@ -145,16 +149,12 @@ export default function ProfileModal({
 
   async function handleSave() {
     if (saving || Object.keys(draft).length === 0) return;
-    if ("birth_date" in draft && !draft.birth_date) {
-      setError("请选择完整的出生年、月、日。");
+    if ("birth_year" in draft && !draft.birth_year) {
+      setError("请填写四位出生年份。");
       return;
     }
-    if ("tag" in draft && !/^[0-9]{5}$/.test(draft.tag ?? "")) {
-      setError("标签必须是五位数字");
-      return;
-    }
-    if ("nickname" in draft && (!draft.nickname?.trim() || draft.nickname.includes("#"))) {
-      setError("昵称不能为空，也不能包含 #");
+    if ("nickname" in draft && !draft.nickname?.trim()) {
+      setError("昵称不能为空");
       return;
     }
     setSaving(true);
@@ -175,31 +175,31 @@ export default function ProfileModal({
   const dirty = Object.keys(draft).length > 0;
 
   return (
-    <div className="zen-overlay-enter fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4">
-      <div
+    <div className={embedded ? "w-full" : "zen-overlay-enter fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4"}>
+      {!embedded && <div
         aria-hidden
         onClick={onClose}
         className="fixed inset-0 bg-canvas/70 backdrop-blur-sm"
-      />
+      />}
 
       <div
-        role="dialog"
-        aria-modal="true"
+        role={embedded ? "region" : "dialog"}
+        aria-modal={embedded ? undefined : true}
         aria-label="我的档案"
-        className="relative my-auto w-full max-w-lg rounded-[28px] border border-line bg-panel p-6 depth-panel backdrop-blur-2xl"
+        className={embedded ? "default-style:w-full default-style:[&_input]:min-w-0 simple:w-full simple:[&_input]:min-w-0" : "default-style:relative default-style:my-auto default-style:w-full default-style:max-w-lg default-style:rounded-[28px] default-style:border default-style:border-line default-style:bg-panel default-style:p-6 default-style:depth-panel default-style:backdrop-blur-2xl simple:relative simple:my-auto simple:w-full simple:max-w-lg simple:rounded-2xl simple:border simple:border-line simple:bg-panel simple:p-6 simple:depth-panel "}
       >
-        <button
+        {!embedded && <button
           type="button"
           onClick={onClose}
           aria-label="关闭"
           className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-ink-faint transition-colors duration-300 hover:bg-raised hover:text-ink-muted"
         >
           <CloseMark className="h-4 w-4" />
-        </button>
+        </button>}
 
-        <h2 className="text-[0.95rem] text-ink">我的档案</h2>
+        <h2 className={embedded ? "text-xl font-semibold text-ink" : "text-[0.95rem] text-ink"}>我的档案</h2>
         <p className="mt-1.5 mb-5 text-[0.72rem] leading-relaxed text-ink-faint">
-              教练会参考这些资料。出生日期仅用于计算年龄，不会发送完整生日。改完点保存，下一句话就会按新的来。
+              {participant ? "AI 教练会参考已保存的资料，修改后从下一次回复生效。仅保存出生年份，不保存月份和日期；年龄按年份估算。" : "教练会参考这些资料。仅保存出生年份，不保存月份和日期；年龄按年份估算。改完点保存，下一句话就会按新的来。"}
         </p>
 
         {loading ? (
@@ -218,9 +218,9 @@ export default function ProfileModal({
             <Section title="基本信息">
               <div>
                 <p className="mb-2 text-[0.68rem] leading-relaxed text-ink-faint">
-                  公开身份由昵称与五位标签共同组成；昵称可以重复，但组合必须唯一。
+                  昵称用于页面显示，可以与其他用户同名。
                 </p>
-                <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(7.25rem,0.8fr)] gap-3">
+                <div className="grid grid-cols-1 gap-3">
                   <label className="rounded-xl border border-line bg-raised px-3 py-2.5 transition-colors duration-300 focus-within:border-accent-edge focus-within:bg-panel">
                     <span className="block text-[0.61rem] font-medium tracking-[0.12em] text-ink-faint">
                       公开昵称
@@ -233,35 +233,11 @@ export default function ProfileModal({
                       className="mt-1 w-full min-w-0 bg-transparent text-[0.92rem] text-ink outline-none placeholder:text-ink-faint"
                     />
                   </label>
-                  <label className="rounded-xl border border-line bg-raised px-3 py-2.5 transition-colors duration-300 focus-within:border-accent-edge focus-within:bg-panel">
-                    <span className="block text-[0.61rem] font-medium tracking-[0.12em] text-ink-faint">
-                      五位标签
-                    </span>
-                    <span className="mt-1 flex items-center gap-1.5">
-                      <span className="font-mono text-[0.92rem] text-ink-faint">#</span>
-                      <input
-                        aria-label="五位数字标签"
-                        value={(value("tag") as string) ?? ""}
-                        onChange={(e) =>
-                          set("tag", e.target.value.replace(/\D/g, "").slice(0, 5) || null)
-                        }
-                        inputMode="numeric"
-                        pattern="[0-9]{5}"
-                        minLength={5}
-                        maxLength={5}
-                        placeholder="12345"
-                        className="w-full min-w-0 bg-transparent font-mono text-[0.92rem] tracking-[0.1em] text-ink outline-none placeholder:tracking-normal placeholder:text-ink-faint"
-                      />
-                    </span>
-                  </label>
                 </div>
-                <p className="mt-2 text-[0.68rem] text-ink-faint">
-                  对外显示：{profile.display_id ?? "尚未设置标签"}
-                </p>
               </div>
               <div className="mb-4">
-                <p className="mb-1.5 text-[0.76rem] text-ink-muted">出生日期</p>
-                <BirthdayPicker value={(value("birth_date") as string) ?? ""} onChange={(next) => set("birth_date", next || null)} disabled={saving} />
+                <p className="mb-1.5 text-[0.76rem] text-ink-muted">出生年份</p>
+                <BirthYearInput value={String(value("birth_year") ?? "")} onChange={(next) => set("birth_year", next ? Number(next) : null)} disabled={saving} />
               </div>
               <Field label="居住状况">
                 <Choices
@@ -279,7 +255,7 @@ export default function ProfileModal({
               <div role="radiogroup" aria-label="对话模型" className="grid grid-cols-2 gap-2">
                 {(
                   [
-                    ["deepseek", "Qwen3.8-Flash", "当前主要模型"],
+                    ["deepseek", "Kimi K3", "当前主要模型"],
                     ["doubao", "豆包 Doubao", "火山方舟"],
                   ] as const
                 ).map(([provider, label, description]) => {
@@ -321,7 +297,7 @@ export default function ProfileModal({
 
             <Section
               title="安全边界"
-              hint="教练建议任何活动前都必须先看这两项，绝不会给出与之冲突的建议。"
+              hint={participant ? "记录活动时需要注意的身体状况或限制，供 AI 教练参考。" : "教练建议任何活动前都必须先看这两项，绝不会给出与之冲突的建议。"}
             >
               <Field label="身体状况">
                 <Multi
@@ -330,7 +306,7 @@ export default function ProfileModal({
                   onToggle={(v) => toggle("physical_condition", v)}
                 />
               </Field>
-              <Field label="有什么是你做不了的">
+              <Field label={participant ? "活动限制" : "有什么是你做不了的"}>
                 <Multi
                   options={BEHAVIOR_TABOO}
                   selected={(value("behavior_taboo") as string[]) ?? []}
@@ -339,28 +315,23 @@ export default function ProfileModal({
               </Field>
             </Section>
 
-            <Section title="沟通方式">
-              <Field label="你希望我用什么方式和你说话">
-                <Choices
-                  options={COMMUNICATION_PREFERENCE}
-                  selected={value("communication_preference") as string | null}
-                  onSelect={(v) => set("communication_preference", v)}
-                />
-              </Field>
-              <Field label="不想聊的话题" hint="选了之后我不会主动提起">
+            <Section title="话题偏好">
+              {participant ? <details className="participant-topic-options"><summary>话题偏好（选填）{((value("content_taboo") as string[]) ?? []).length > 0 ? " · 已设置" : ""}</summary>
+                <Field label="希望 AI 教练避免主动提起的话题"><Multi options={CONTENT_TABOO} selected={(value("content_taboo") as string[]) ?? []} onToggle={v => toggle("content_taboo", v)} /></Field>
+              </details> : <Field label="不想聊的话题" hint="选了之后我不会主动提起">
                 <Multi
                   options={CONTENT_TABOO}
                   selected={(value("content_taboo") as string[]) ?? []}
                   onToggle={(v) => toggle("content_taboo", v)}
                 />
-              </Field>
+              </Field>}
             </Section>
 
             <Section
               title="身边的人"
-              hint="需要有人一起的活动会优先考虑 ta 们；没有填就不会假设你有人可以一起。"
+              hint={participant ? "选填。可以记录你愿意邀请一起参与活动的人。" : "需要有人一起的活动会优先考虑 ta 们；没有填就不会假设你有人可以一起。"}
             >
-              <Field label="有可以支持你的人吗">
+              <Field label={participant ? "是否添加活动伙伴" : "有可以支持你的人吗"}>
                 <Choices
                   options={["有", "暂时没有"] as const}
                   selected={
@@ -442,7 +413,7 @@ export default function ProfileModal({
               </p>
             )}
 
-            <div className="sticky bottom-0 -mx-6 -mb-6 mt-6 rounded-b-[28px] border-t border-line bg-panel px-6 py-4 backdrop-blur-2xl">
+            <div className={embedded ? "default-style:sticky default-style:bottom-0 default-style:mt-6 default-style:border-t default-style:border-line default-style:bg-panel default-style:py-4 simple:sticky simple:bottom-0 simple:mt-6 simple:bg-panel simple:py-4" : "default-style:sticky default-style:bottom-0 default-style:-mx-6 default-style:-mb-6 default-style:mt-6 default-style:rounded-b-[28px] default-style:border-t default-style:border-line default-style:bg-panel default-style:px-6 default-style:py-4 default-style:backdrop-blur-2xl simple:sticky simple:bottom-0 simple:-mx-6 simple:-mb-6 simple:mt-6 simple:rounded-b-2xl simple:bg-panel simple:px-6 simple:py-4 "}>
               <button
                 type="button"
                 onClick={handleSave}
@@ -471,9 +442,13 @@ function Section({
   hint?: string;
   children: React.ReactNode;
 }) {
+  const participant = useParticipantStyle();
+  if (participant) return <details className="participant-profile-group" open={title === "基本信息" || title === "安全边界" ? true : undefined}>
+    <summary>{title}</summary><div className="participant-profile-body">{hint && <p className="mb-3 text-xs leading-6 text-ink-muted">{hint}</p>}{children}</div>
+  </details>;
   return (
-    <section className="mb-6 border-t border-line pt-4 first:border-t-0 first:pt-0">
-      <h3 className="text-[0.82rem] text-ink">{title}</h3>
+    <section className="default-style:mb-6 default-style:border-t default-style:border-line default-style:pt-4 default-style:first:border-t-0 default-style:first:pt-0 simple:mb-8 simple:pt-6 simple:first:pt-0">
+      <h3 className="default-style:text-[0.82rem] default-style:text-ink simple:text-sm simple:font-medium simple:text-ink">{title}</h3>
       {hint && (
         <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-faint">{hint}</p>
       )}
@@ -587,7 +562,7 @@ function SupporterRow({
   // text here — picking a chip fills the box, and anything typed over it is
   // equally valid. See the backend's `Supporter`.
   return (
-    <div className="mb-4 rounded-2xl border border-line p-3 last:mb-0">
+    <div className="default-style:mb-4 default-style:rounded-2xl default-style:border default-style:border-line default-style:p-3 default-style:last:mb-0 simple:mb-4 simple:rounded-xl simple:bg-raised/50 simple:p-4 simple:last:mb-0">
       <div className="mb-2.5 flex items-center justify-between">
         <p className="text-[0.72rem] text-ink-faint">支持者 {index}</p>
         <button

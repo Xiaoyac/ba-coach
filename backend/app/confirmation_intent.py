@@ -2,6 +2,23 @@
 import asyncio
 import json
 import re
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class ConfirmationEvidence:
+    """An internal interpretation bound to the exact immutable source texts."""
+    user_message_id: int
+    assistant_message_id: int
+    user_text: str
+    assistant_text: str
+    module: str
+    accepted: bool
+
+    def matches(self, *, user, assistant, module):
+        return bool(self.accepted and self.module == module
+            and user.id == self.user_message_id and user.content == self.user_text
+            and assistant.id == self.assistant_message_id and assistant.content == self.assistant_text)
 
 
 def confirmation_candidate(text):

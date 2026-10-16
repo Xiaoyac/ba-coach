@@ -17,7 +17,7 @@ def auth_headers(sandbox_admin_headers):
     return sandbox_admin_headers
 
 
-REQUEST_FIELDS = {"stage", "request_id", "provider", "model", "recorded_at", "duration_ms", "error_code"}
+REQUEST_FIELDS = {"stage", "request_id", "provider", "model", "recorded_at", "duration_ms", "error_code", "router_calls"}
 
 
 def run(awaitable):
@@ -241,3 +241,28 @@ def test_request_timestamp_schema_keeps_database_utc_explicit():
         requests=[ModelRequestInfo(stage="main_generation", recorded_at=naive)]).model_dump(mode="json")
     assert data["user_sent_at"].endswith("Z")
     assert data["assistant_created_at"] == data["requests"][0]["recorded_at"]
+
+@pytest.mark.parametrize('recovery', [False, True])
+def test_router_wire_details_are_owned_and_allowlisted(client, auth_headers, db_sessionmaker, recovery):
+    chat=seed(client,auth_headers,db_sessionmaker,turns=1)
+    user_id,reply_id=chat['ids'][0]
+    call={'request':{'model':'deepseek-v4.1-flash','reasoning_effort':'low','thinking':{'type':'enabled'},
+        'messages':[{'role':'system','content':'ROUTER_PROMPT'},{'role':'user','content':'USER_INPUT'}],
+        'api_key':'SECRET_KEY'},'request_id':'request-one','http_status':200,
+        'response':{'model':'deepseek-v4-1-flash','content':'{"target_module":"2"}','reasoning_content':'NATIVE_REASONING'},
+        'headers':{'Authorization':'SECRET_KEY'}}
+    metadata={'user_message_id':user_id,'router_calls':[call]}
+    if recovery:
+        metadata['router_calls'].append({**call,'request_id':'request-two'})
+        metadata['json_recovery']={'status':'recovered','original_request_id':'request-one','request_id':'request-two'}
+    async def arrange():
+        async with db_sessionmaker() as db:
+            db.add(model_event(chat,'module_router','request-one',metadata=metadata));await db.commit()
+    run(arrange())
+    response=fetch(client,auth_headers,reply_id);assert response.status_code==200
+    records=[r for r in response.json()['requests'] if r['stage'].startswith('module_router')]
+    assert len(records)==(2 if recovery else 1)
+    assert records[0]['router_calls'][0]['request']['reasoning_effort']=='low'
+    assert records[0]['router_calls'][0]['response']['reasoning_content']=='NATIVE_REASONING'
+    if recovery:assert records[1]['router_calls'][0]['request_id']=='request-two'
+    assert 'SECRET_KEY' not in response.text and 'Authorization' not in response.text

@@ -255,31 +255,22 @@ active sessions.
 
 ## Login accounts and display IDs
 
-Login and public identity are deliberately separate:
+Login and display names are separate. `user_accounts.username` is the unique,
+case-insensitive ASCII login account. `user_profile.nickname` is the editable
+display name and may repeat. Login never resolves a nickname. Permissions,
+conversations and records remain linked to account IDs and profile UUIDs.
+Registration and profile editing do not accept or return a public numeric tag.
+Administrator audit entries use the unique login account.
 
-```
-user_accounts       unique ASCII login account + credentials + profile link
-  ├── account_handles   nickname + normalized nickname + user-chosen tag
-  └── account_settings  role and temporary model preference
-```
-
-`user_accounts.username` is the login account: 3–32 ASCII letters/digits,
-case-insensitively unique. Login accepts this account only — never a nickname or
-display ID. `account_handles` enforces
-`UNIQUE(normalized_base, tag)`; its legacy-named `base_username` column now
-stores the display nickname. Nicknames may repeat, but each person chooses an
-exact five-digit tag and the resulting `昵称#12345` must be unique. The server
-does not generate tags.
-
-The one-time v2 migration removes all former random tags and every non-admin
-login account while preserving clinical profiles and conversations. The
-retained `admin` account starts without a display tag and can choose one in
-“我的档案”. New registrations must provide account, nickname, and tag.
+Existing installations can retire the unused `account_handles` table with
+`scripts/remove_public_tags_1012.py` after deploying the tag-free application.
+The migration backs up the table before removal, supports restoration, and
+never deletes accounts or clinical records. The earlier destructive identity
+reset script is retired.
 
 Administrator account APIs:
 
-- `GET /api/admin/accounts?query=...` — list/search by login account, nickname,
-  tag, or exact display ID.
+- `GET /api/admin/accounts?query=...` — list/search by login account or nickname.
 - `PATCH /api/admin/accounts/{account_id}/role` with `{"role":"admin"}` — grant
   administrator access. The endpoint is administrator-only and intentionally
   has no demotion payload.

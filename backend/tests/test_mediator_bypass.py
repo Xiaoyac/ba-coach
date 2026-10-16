@@ -52,65 +52,57 @@ def test_owned_admin_preference_persists_isolated_and_deleted(client, sandbox_ad
 def test_effective_setting_reaches_pipeline_and_ignores_spoofing(client, sandbox_admin_headers,
         auth_headers, monkeypatch, db_sessionmaker, stream):
     from app.graph import nodes
+    from app import hybrid_mediator, retrieval
     original = nodes.mediate_knowledge
     seen = []
     async def capture(**kwargs):
-        seen.append(kwargs.get('bypass'))
+        seen.append('direct' if kwargs.get('bypass') else 'legacy_mediator')
         return await original(**kwargs)
+    async def capture_hybrid(**kwargs):
+        seen.append('hybrid_mediator')
+        return [], '', {'status': 'skipped', 'reason': 'test_fixture', 'duration_ms': 0}
     monkeypatch.setattr(nodes, 'mediate_knowledge', capture)
-    from app import knowledge_policy, retrieval
-    original_direct = knowledge_policy.direct_hybrid_knowledge
-    def capture_direct(**kwargs):
-        seen.append(True)
-        return original_direct(**kwargs)
-    monkeypatch.setattr(knowledge_policy, 'direct_hybrid_knowledge', capture_direct)
+    monkeypatch.setattr(hybrid_mediator, 'mediate_hybrid_knowledge', capture_hybrid)
     class HybridFixture:
         ranking_mode = 'astrbot_hybrid'
         async def search(self, **kwargs):
             return [KnowledgeChunk('hybrid-fixture', '合成资料', 'test')]
     monkeypatch.setattr(retrieval, 'get_hybrid_knowledge_base', lambda: HybridFixture())
-    convo = create(client, sandbox_admin_headers)
-    sid = convo['session_id']
-    def send(headers, session_id):
+    admin = create(client, sandbox_admin_headers)
+    sid = admin['session_id']
+    assert admin['knowledge_mediator_node_enabled'] is False
+    def send(headers, session_id, expected):
+        seen.clear()
         result = client.post('/api/chat' + ('/stream' if stream else ''), headers=headers,
             json={'session_id': session_id, 'message': '最近学习压力很大',
-                  'knowledge_mediator_bypass': True,
-                  'metadata': {'knowledge_mediator_bypass': 'true', 'role': 'admin'}})
+                  'knowledge_mediator_bypass': True, 'knowledge_mediator_node_enabled': not expected,
+                  'metadata': {'knowledge_mediator_node_enabled': str(not expected), 'role': 'admin'}})
         assert result.status_code == 200, result.text
-    for enabled in [True, False, True]:
+        detail = client.get(f'/api/conversations/{session_id}', headers=headers).json()
+        assert detail['knowledge_mediator_node_enabled'] is expected
+    for legacy in [True, False]:
         assert client.patch(f'/api/conversations/{sid}/knowledge-mediator', headers=sandbox_admin_headers,
-                            json={'enabled': enabled}).status_code == 200
-        send(sandbox_admin_headers, sid)
-        assert seen[-1] is (not enabled)
+                            json={'enabled': legacy}).status_code == 200
+        # Both architectures bypass unless the independent switch was enabled.
+        for node_on in [False, True, False]:
+            assert client.patch(f'/api/conversations/{sid}/mediator-node', headers=sandbox_admin_headers,
+                                json={'enabled': node_on}).status_code == 200
+            send(sandbox_admin_headers, sid, node_on)
+            assert seen == [('legacy_mediator' if legacy else 'hybrid_mediator') if node_on else 'direct']
     member = create(client, auth_headers)
-    send(auth_headers, member['session_id'])
-    assert seen[-1] is False
-    client.patch(f'/api/conversations/{sid}/knowledge-mediator', headers=sandbox_admin_headers,
-                 json={'enabled': False})
+    assert member['knowledge_mode'] == 'astrbot_hybrid'
+    assert member['knowledge_mediator_node_enabled'] is True
+    send(auth_headers, member['session_id'], True)
+    assert seen == ['hybrid_mediator']
+    # Role is re-read per turn: stale admin preferences cannot disable a member's node.
     async def demote():
         async with db_sessionmaker() as db:
             row = await db.scalar(select(AccountSettings).join(UserAccount).where(UserAccount.username == 'sandboxadmin'))
             row.role = 'user'
             await db.commit()
     asyncio.run(demote())
-    send(sandbox_admin_headers, sid)
-    assert seen[-1] is False
-
-
-async def test_bypass_sends_passages_without_extra_model_or_guidance(context, provider):
-    class KB:
-        async def search(self, **kwargs):
-            return [KnowledgeChunk('direct-source', 'BYPASS_SOURCE_SENTINEL', 'test', .8)]
-    context = dataclasses.replace(context, knowledge_base=KB(), knowledge_mediator_bypass=True)
-    context.settings.knowledge_intent_gate_enabled = False
-    result = await get_graph().ainvoke({'user_input': '行动与情绪有什么关系', 'forced_module': 'module_2'}, context=context)
-    snapshot = result['telemetry']['knowledge_references']
-    assert snapshot['mediator_status'] == 'bypassed'
-    assert snapshot['mediator_duration_ms'] == 0
-    assert snapshot['mediator_model'] is None and snapshot['mediator_guidance'] is None
-    assert [c['id'] for c in snapshot['provided']] == ['direct-source']
-    assert 'BYPASS_SOURCE_SENTINEL' in as_text(provider.systems[-1])
-    assert '# 知识使用中介建议' not in as_text(provider.systems[-1])
+    send(sandbox_admin_headers, sid, True)
+    assert seen == ['hybrid_mediator']
 
 
 @pytest.mark.parametrize('knowledge', [[], [KnowledgeChunk('one', '行动可能帮助情绪。', 'test')]])

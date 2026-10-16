@@ -111,7 +111,7 @@ async def create_share(
             messages=[SharedMessage(
                 id=index, role=message.role, content=message.content,
                 created_at=message.created_at,
-                reply_status=("interrupted" if message.error_code in {
+                reply_status=("incomplete" if message.error_code == "reply_length_limit" else "interrupted" if message.error_code in {
                     "generation_cancelled", "client_disconnected", "continuation_error",
                     "continuation_timeout", "continuation_empty", "continuation_protocol",
                 } else None),

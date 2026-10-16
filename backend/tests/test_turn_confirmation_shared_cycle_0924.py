@@ -56,6 +56,7 @@ async def test_shared_cycle_review_reaches_other_chat_and_preserves_its_memory(g
     context.settings.module_router_reasoning_effort = "disabled"
     context.router_prompt = None
     context.router_provider.name = "isolated-router"
+    context.router_provider.model = "test"  # read by execution-status tracking
     context.router_provider.route_detailed = AsyncMock(return_value=Completion(
         text='{"target_module":"4","knowledge_task":"general"}', model="test"))
     from app.router_agent import RouterDecision

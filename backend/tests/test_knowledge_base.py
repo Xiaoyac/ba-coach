@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.knowledge_store import chunk_markdown, import_knowledge_source
-from app.models import AccountHandle, AccountSettings, UserAccount
+from app.models import AccountSettings, UserAccount
 from app.providers.base import as_text
 from app.retrieval import DatabaseKnowledgeBase, expand_knowledge_query
 
@@ -24,8 +24,7 @@ def knowledge_admin_headers(register, db_sessionmaker) -> dict[str, str]:
                 await db.execute(
                     select(AccountSettings)
                     .join(UserAccount, UserAccount.id == AccountSettings.account_id)
-                    .join(AccountHandle, AccountHandle.account_id == UserAccount.id)
-                    .where(AccountHandle.normalized_base == "knowledge admin")
+                    .where(UserAccount.username == "knowledgeadmin")
                 )
             ).scalar_one()
             settings.role = "admin"
@@ -195,7 +194,6 @@ async def test_duplicate_legacy_ba_aliases_are_kept_but_never_indexed(
 def test_imported_knowledge_reaches_the_next_agent_turn(
     client: TestClient,
     knowledge_admin_headers: dict[str, str],
-    auth_headers: dict[str, str],
     provider,
     approved_mediator,
 ) -> None:
@@ -211,10 +209,18 @@ def test_imported_knowledge_reaches_the_next_agent_turn(
     )
     assert response.status_code == 201, response.text
 
+    # Members always use hybrid retrieval, whose index rebuilds in the
+    # background. This wiring check uses an administrator chat explicitly on
+    # the legacy architecture (mediation is covered by approved_mediator).
+    sid = client.post("/api/conversations", headers=knowledge_admin_headers, json={}).json()["session_id"]
+    assert client.patch(f"/api/conversations/{sid}/knowledge-mediator",
+        headers=knowledge_admin_headers, json={"enabled": True}).status_code == 200
+    assert client.patch(f"/api/conversations/{sid}/mediator-node",
+        headers=knowledge_admin_headers, json={"enabled": True}).status_code == 200
     turn = client.post(
         "/api/chat",
-        json={"message": sentinel, "module": "module_1"},
-        headers=auth_headers,
+        json={"session_id": sid, "message": sentinel, "module": "module_1"},
+        headers=knowledge_admin_headers,
     )
     assert turn.status_code == 200, turn.text
     assert sentinel in as_text(provider.systems[-1])

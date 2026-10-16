@@ -14,6 +14,10 @@ async def scoped_context(monkeypatch):
     engine = create_async_engine("sqlite+aiosqlite://")
     async with engine.begin() as connection:
         await connection.run_sync(metadata.create_all)
+        # Goal scope reads the account role (administrator chats are isolated).
+        from app.models import AccountSettings, UserAccount
+        await connection.run_sync(UserAccount.__table__.create)
+        await connection.run_sync(AccountSettings.__table__.create)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         await db.execute(insert(metadata.tables["user_profile"]), {"uuid":"a"})

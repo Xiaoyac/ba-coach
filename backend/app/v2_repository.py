@@ -45,9 +45,9 @@ def can_reuse_m1(state) -> bool:
             and state["confirmed_formulation_id"] is not None)
 
 
-async def initial_module(db: AsyncSession, *, user_id: str) -> str:
-    states = metadata.tables["user_module_one_state"]
-    state = (await db.execute(select(states).where(states.c.user_id == user_id))).mappings().one_or_none()
+async def initial_module(db: AsyncSession, *, user_id: str, conversation_id=None) -> str:
+    from .goal_scope import m1_state
+    state = await m1_state(db, user_id, conversation_id)
     return "module_2" if can_reuse_m1(state) else "module_1"
 
 
@@ -78,8 +78,8 @@ async def create_goal(db: AsyncSession, *, user_id: str, title: str,
     if not title or len(title) > 255:
         raise V2Conflict("目标标题需为 1–255 字")
     await check_conversation_owner(db, user_id, conversation_id)
-    m1 = metadata.tables["user_module_one_state"]
-    state = (await db.execute(select(m1).where(m1.c.user_id == user_id))).mappings().one_or_none()
+    from .goal_scope import m1_state
+    state = await m1_state(db, user_id, conversation_id)
     goal_id = new_id()
     await db.execute(insert(metadata.tables["pa_goals"]), {
         "id": goal_id, "user_id": user_id, "title": title,
@@ -91,6 +91,8 @@ async def create_goal(db: AsyncSession, *, user_id: str, title: str,
 
 async def start_cycle(db: AsyncSession, *, user_id: str, goal_id: str,
                       conversation_id: int | None = None):
+    from .goal_scope import require_goal
+    await require_goal(db, user_id, goal_id, conversation_id)
     # Lock the parent even when there are no children, preventing ordinal races.
     await check_conversation_owner(db, user_id, conversation_id)
     goal = await owned_goal(db, user_id, goal_id, lock=True)
@@ -120,6 +122,8 @@ async def continue_reviewed_cycle(db: AsyncSession, *, user_id: str, goal_id: st
     goal serializes all cycle creation; the latest-ordinal check also prevents
     replay after a successor has itself finished.
     """
+    from .goal_scope import require_goal
+    await require_goal(db, user_id, goal_id, conversation_id)
     await owned_goal(db, user_id, goal_id, lock=True)
     cycles = metadata.tables["pa_cycles"]
     source = (await db.execute(select(cycles).where(
@@ -181,6 +185,8 @@ PLAN_WRITABLE_FIELDS = {"pa_understanding_status", "pa_willingness_status", "cor
 
 async def resume_paused_goal(db, *, user_id, goal_id, conversation_id, retained=False):
     """Explicit new-chat action resumes the last confirmed plan, never a draft."""
+    from .goal_scope import require_goal
+    await require_goal(db, user_id, goal_id, conversation_id)
     goal = await owned_goal(db, user_id, goal_id, lock=True)
     if goal["status"] != ("active" if retained else "paused"):
         raise V2Conflict("目标状态已更新，请重新选择")
@@ -261,6 +267,7 @@ async def confirm_plan(db: AsyncSession, *, user_id: str, goal_id: str, cycle_id
     # Never modify an older confirmed plan: historical cycles still reference it.
     goals = metadata.tables["pa_goals"]
     await db.execute(update(goals).where(goals.c.id == goal_id).values(
+        title=plan["activity_content"].strip()[:255],
         current_plan_record_id=plan_id, status="active", updated_at=now(), row_version=goal["row_version"] + 1))
     await db.execute(update(cycles).where(cycles.c.id == cycle_id).values(
         module_two_record_id=plan_id, updated_at=now()))
@@ -356,11 +363,17 @@ async def active_memories(db: AsyncSession, *, user_id: str):
     ).order_by(memories.c.created_at))).mappings().all()
 
 
-async def reply_memories(db: AsyncSession, *, user_id: str):
+async def reply_memories(db: AsyncSession, *, user_id: str, conversation_id=None):
     """Keep inferred summaries for audit, without recalling unverified claims.
 
     A source-message ID on a generated paragraph proves provenance, not the
     truth of every claim in it. User statements and confirmed memories remain.
     """
-    return [row for row in await active_memories(db, user_id=user_id)
-            if row["source_kind"] != "ai_inference" or row["confirmation_status"] == "confirmed"]
+    from .goal_scope import isolated
+    from .models import ConversationMessage
+    rows = await active_memories(db, user_id=user_id)
+    if await isolated(db, user_id):
+        message_ids = set((await db.execute(select(ConversationMessage.id).where(
+            ConversationMessage.conversation_id == conversation_id))).scalars()) if conversation_id is not None else set()
+        rows = [row for row in rows if row["source_message_id"] in message_ids]
+    return [row for row in rows if row["source_kind"] != "ai_inference" or row["confirmation_status"] == "confirmed"]

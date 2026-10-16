@@ -139,9 +139,12 @@ async def _move_from_m3(db, conversation, runtime, user, proof, target):
             "active_cycle_id": new_cycle, "evidence": proof}, "evidence_message_ids": [user.id]})
     # Shared business facts remain shared. Only ordinary chats inherit this
     # phase change; an authorized Router-only chat owns its own stage/flow.
+    # Administrator test chats own separate goals, as in plan confirmation.
+    from .goal_scope import isolated
     from .program_confirmation import confirmation_memory
     from .routing_modes import effective_routing_mode, ROUTER_ONLY
-    other_rows = (await db.execute(select(rt.c.conversation_id, rt.c.memory, Conversation.subject_id).join(
+    other_rows = [] if await isolated(db, conversation.subject_id) else (await db.execute(
+        select(rt.c.conversation_id, rt.c.memory, Conversation.subject_id).join(
         Conversation, Conversation.id == rt.c.conversation_id).where(
         Conversation.subject_id == conversation.subject_id, Conversation.id != conversation.id,
         rt.c.active_cycle_id == cycle["id"]).with_for_update())).mappings().all()
@@ -212,6 +215,8 @@ async def apply_pre_reply_decision(state, context, decision):
                 rt = schema.tables["conversation_runtime_states"]
                 runtime = (await db.execute(select(rt).where(rt.c.conversation_id == conversation.id)
                     .with_for_update())).mappings().one()
+                from .goal_scope import scoped_runtime
+                runtime = await scoped_runtime(db, conversation, runtime)
                 latest = await _messages(db, conversation.id, lock=True)
                 if (runtime["current_module"] == module and runtime["row_version"] == source_version
                         and runtime["active_cycle_id"] == source_cycle and latest and latest[-1].id == boundary):

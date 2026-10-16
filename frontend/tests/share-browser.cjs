@@ -121,7 +121,7 @@ const snapshot = {
         const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
         const conversation = { session_id: 'share-fixture', title: '待分享对话', updated_at: '2026-09-28T08:00:00Z', pinned: false, revision: 1,
           messages: [{ id: 1, role: 'assistant', content: '欢迎，已有对话。' }], next_module: 'module_2' };
-        if (path === '/api/auth/me') return json({ username: 'fixture-owner', nickname: '测试用户', role: 'user', profile_uuid: 'fixture-owner', email_required: false, birth_date_required: false });
+        if (path === '/api/auth/me') return json({ username: 'fixture-owner', nickname: '测试用户', role: 'user', profile_uuid: 'fixture-owner', email_required: false, birth_year_required: false });
         if (path === '/api/conversations') return json([conversation]);
         if (path === '/api/conversations/share-fixture' || path === '/api/conversations/current') return json(conversation);
         if (path.endsWith('/revision')) return json({ revision: 1 });

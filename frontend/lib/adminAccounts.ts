@@ -5,8 +5,6 @@ export interface AdminAccountItem {
   id: number;
   username: string;
   nickname: string | null;
-  tag: string | null;
-  display_id: string | null;
   role: "user" | "admin";
   created_at: string;
   last_login_at: string | null;

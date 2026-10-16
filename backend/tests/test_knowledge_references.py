@@ -24,12 +24,16 @@ class KB:
 @pytest.mark.parametrize("mode", ["approved", "rejected", "timeout", "disabled", "invalid", "empty", "gated"])
 async def test_capture_matches_actual_prompt(context, provider, mode):
     kb = KB()
-    context = dataclasses.replace(context, knowledge_base=kb)
+    context = dataclasses.replace(context, knowledge_base=kb, knowledge_mediator_node_enabled=mode != "disabled")
     context.settings.knowledge_intent_gate_enabled = mode == "gated"
     context.settings.knowledge_mediator_enabled = mode != "disabled"
     provider.route_result = json.dumps({"decision": "use" if mode == "approved" else "not_needed", "selections": [{"id": "one", "quote": "行动可能帮助情绪", "application": "根据证据回应。"}] if mode == "approved" else [], "note": "" if mode == "approved" else "根据证据回应。"})
     if mode == "timeout":
+        original = provider.route_detailed
         async def timeout(**kwargs):
+            # Only the mediator times out; the fail-closed risk screen still answers.
+            if "风险信号检测器" in kwargs.get("system", ""):
+                return await original(**kwargs)
             raise TimeoutError
         provider.route_detailed = timeout
     if mode == "invalid":
@@ -48,12 +52,12 @@ async def test_capture_matches_actual_prompt(context, provider, mode):
     if mode in ("empty", "gated", "timeout", "disabled"):
         assert snapshot["mediator_reasoning_content"] is None
     assert len(snapshot["recalled"]) == (0 if mode in ("empty", "gated") else 2)
-    assert [x["id"] for x in snapshot["provided"]] == (["one"] if mode == "approved" else [])
+    assert [x["id"] for x in snapshot["provided"]] == (["one"] if mode == "approved" else ["one", "two"] if mode == "disabled" else [])
     prompt = as_text(provider.systems[-1])
     if mode == "rejected":
         assert "根据证据回应。" not in prompt
-    assert ("行动可能帮助情绪，不保证立即改善。" in prompt) == (mode == "approved")
-    assert "记录活动和感受。" not in prompt
+    assert ("行动可能帮助情绪，不保证立即改善。" in prompt) == (mode in {"approved", "disabled"})
+    assert ("记录活动和感受。" in prompt) == (mode == "disabled")
     if mode == "timeout":
         assert snapshot["mediator_reason"] == "timeout"
     if mode == "gated":
@@ -93,6 +97,8 @@ def test_durable_snapshot_owned_lazy_and_deleted(client, sandbox_admin_headers, 
         return await original(**kwargs)
     monkeypatch.setattr(provider, "route_detailed", mediator_with_thought)
     sid = client.post("/api/conversations", headers=sandbox_admin_headers).json()["session_id"]
+    assert client.patch(f"/api/conversations/{sid}/mediator-node",
+        headers=sandbox_admin_headers, json={"enabled": True}).status_code == 200
     # Native reasoning now requires an explicit choice on an admin-owned conversation.
     enabled = client.patch(f"/api/conversations/{sid}/thinking",
         headers=sandbox_admin_headers, json={"enabled": True})

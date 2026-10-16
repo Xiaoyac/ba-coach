@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.models import AccountHandle, AccountSettings, UserAccount
+from app.models import AccountSettings, UserAccount
 from app.providers.base import Completion, as_text
 
 
@@ -22,8 +22,7 @@ def admin_headers(register, db_sessionmaker) -> dict[str, str]:
                 await db.execute(
                     select(AccountSettings)
                     .join(UserAccount, UserAccount.id == AccountSettings.account_id)
-                    .join(AccountHandle, AccountHandle.account_id == UserAccount.id)
-                    .where(AccountHandle.normalized_base == "prompt admin")
+                    .where(UserAccount.username == "promptadmin")
                 )
             ).scalar_one()
             settings.role = "admin"
@@ -40,7 +39,7 @@ def test_regular_account_cannot_read_or_write_prompts(
     assert (
         client.put(
             "/api/admin/prompts/global",
-            json={"content": "not allowed"},
+            json={"base_revision": 1, "content": "not allowed"},
             headers=auth_headers,
         ).status_code
         == 403
@@ -76,20 +75,20 @@ def test_admin_can_save_and_restore_an_override(
 ) -> None:
     saved = client.put(
         "/api/admin/prompts/module_2",
-        json={"content": "  CUSTOM MODULE TWO  "},
+        json={"base_revision": 1, "content": "  CUSTOM MODULE TWO  "},
         headers=admin_headers,
     )
     assert saved.status_code == 200
     assert saved.json()["content"] == "CUSTOM MODULE TWO"
     assert saved.json()["is_overridden"] is True
-    assert saved.json()["updated_by"].startswith("Prompt Admin#")
+    assert saved.json()["updated_by"] == "promptadmin"
 
     listed = client.get("/api/admin/prompts", headers=admin_headers).json()["prompts"]
     module_two = next(item for item in listed if item["key"] == "module_2")
     assert module_two["content"] == "CUSTOM MODULE TWO"
 
     reset = client.delete(
-        "/api/admin/prompts/module_2", headers=admin_headers
+        "/api/admin/prompts/module_2?base_revision=2", headers=admin_headers
     )
     assert reset.status_code == 200
     assert reset.json()["is_overridden"] is False
@@ -101,7 +100,7 @@ def test_blank_override_is_rejected(
 ) -> None:
     response = client.put(
         "/api/admin/prompts/global",
-        json={"content": "   \n  "},
+        json={"base_revision": 1, "content": "   \n  "},
         headers=admin_headers,
     )
     assert response.status_code == 400
@@ -115,12 +114,12 @@ def test_saved_override_is_used_by_the_next_model_turn(
 ) -> None:
     client.put(
         "/api/admin/prompts/global",
-        json={"content": "GLOBAL OVERRIDE SENTINEL"},
+        json={"base_revision": 1, "content": "GLOBAL OVERRIDE SENTINEL"},
         headers=admin_headers,
     )
     client.put(
         "/api/admin/prompts/module_1",
-        json={"content": "MODULE ONE OVERRIDE SENTINEL"},
+        json={"base_revision": 1, "content": "MODULE ONE OVERRIDE SENTINEL"},
         headers=admin_headers,
     )
 
@@ -159,7 +158,7 @@ def test_saved_web_override_changes_the_agent_reply(
     expected = "网页提示词已经实际改变 Agent 回复"
     saved = client.put(
         "/api/admin/prompts/module_1",
-        json={"content": sentinel},
+        json={"base_revision": 1, "content": sentinel},
         headers=admin_headers,
     )
     assert saved.status_code == 200
@@ -190,7 +189,7 @@ def test_saved_router_override_is_used_by_the_next_routing_call(
 ) -> None:
     client.put(
         "/api/admin/prompts/router_agent",
-        json={"content": "ROUTER OVERRIDE SENTINEL"},
+        json={"base_revision": 1, "content": "ROUTER OVERRIDE SENTINEL"},
         headers=admin_headers,
     )
 

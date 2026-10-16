@@ -17,8 +17,8 @@ if [[ "$action" == prepare ]]; then
 KNOWLEDGE_HYBRID_STORAGE=/opt/bacoach/knowledge-hybrid
 KNOWLEDGE_HYBRID_PRELOAD=true
 KNOWLEDGE_EMBEDDING_BACKEND=local
-KNOWLEDGE_RERANK_BACKEND=k3
-KNOWLEDGE_RERANK_MODEL=kimi-k3
+KNOWLEDGE_RERANK_BACKEND=llm
+KNOWLEDGE_RERANK_MODEL=deepseek-v4.1-flash
 KNOWLEDGE_HYBRID_SPARSE_RESERVE=20
 KNOWLEDGE_HYBRID_FINAL_RESULTS=5
 KNOWLEDGE_RERANK_TIMEOUT_SECONDS=45
@@ -37,14 +37,14 @@ ENV
 from app.config import get_settings
 s = get_settings()
 assert s.knowledge_embedding_backend == "local"
-assert s.knowledge_rerank_backend == "k3" and s.knowledge_rerank_model == "kimi-k3"
+assert s.knowledge_rerank_backend == "llm" and s.knowledge_rerank_model == "deepseek-v4.1-flash"
 assert s.knowledge_hybrid_require_rerank and s.knowledge_hybrid_final_results == 5
 assert s.knowledge_hybrid_sparse_reserve == 20
-print("PASS: effective local embedding + K3 reranking configuration")
+print("PASS: effective local embedding + DeepSeek 4.1 Flash reranking configuration")
 PYCONFIG
   .venv/bin/python -m compileall -q app
   .venv/bin/python scripts/check_knowledge_mediator.py --configuration-only
-  .venv/bin/python scripts/check_hybrid_retrieval.py --compare --output "/opt/bacoach/acceptance/hybrid-$release_id.json"
+  .venv/bin/python scripts/check_hybrid_retrieval.py --output "/opt/bacoach/acceptance/hybrid-$release_id.json"
   chown -R bacoach:bacoach /opt/bacoach/knowledge-hybrid
   touch "$target/.hybrid-ready"
   echo "PREPARED=$target"

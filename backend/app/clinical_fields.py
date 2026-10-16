@@ -58,7 +58,7 @@ MODULE_ONE: tuple[Spec, ...] = (
     ),
     Spec("coping_behavior", "text", "同一事件实际行动或不行动，不是未来计划；刷手机、躺着不等于回避"),
     Spec("coping_consequence", "text", "同一事件的实际反馈；没有明显变化也有效，不写假设结果或推断因果"),
-    Spec("ai_depression_cycle_summary", "text", "逻辑名 behavior_state_relation_summary：教练让用户核对的当前具体事件行为—状态/结果关系原文，完整连续逐字提取，与m1_contract.summary_quote一致。不要用后续一般性BA教育或收尾回顾替换已获认可的事件总结；只有事实被纠正才更新并重新确认。不是必须存在抑郁循环，机制标签需要额外的重复证据"),
+    Spec("ai_depression_cycle_summary", "text", "逻辑名 behavior_state_relation_summary：教练基于真实应对和实际结果提出的当前关系解释原文，完整连续逐字提取，与m1_contract.summary_quote一致。可保留未知与不确定性，不要求整套总结正式获认可；明确反对或纠正后应修正理解。不要用后续一般性BA教育或收尾回顾替换仍然有效的具体关系解释。一般解释路径可为null，不强求抑郁循环，机制标签需要额外的重复证据"),
     Spec("user_approval_level", "level", f"仅对最新关系总结的认可，非 BA 理解或目标意愿；纠正使旧认可失效，{LEVEL_SCALE}"),
     Spec(
         "attempted_relief_methods",
@@ -95,7 +95,7 @@ MODULE_TWO: tuple[Spec, ...] = (
     Spec(
         "barrier_coping_plan",
         "json",
-        '针对障碍的应对方案，数组，每项 {"barrier":"障碍","plan":"应对"}；没谈到给 []',
+        '针对实际障碍的应对方案，数组，每项 {"barrier":"障碍","plan":"应对"}；未知/没谈到给 []。只有用户明确表达当前计划没有障碍时，使用 [{"status":"not_applicable","source_message_id":真实用户消息ID,"source_quote":"无障碍的用户逐字原话"}]，并将potential_barriers设为同一条原话的单项数组；不编造plan，不把未谈到当成没有障碍。',
     ),
     Spec(
         "has_target_card_generated",
@@ -116,11 +116,11 @@ MODULE_THREE: tuple[Spec, ...] = (
 )
 
 MODULE_FOUR: tuple[Spec, ...] = (
-    Spec("scenario_type", "varchar", "仅当前焦点目标：A 实际PA且情绪改善；B 尚未开始且明确执行前障碍；C 执行窗口已过且排除A/B；信息不足null，服务器另核验证据", 8),
+    Spec("scenario_type", "varchar", "仅当前焦点目标：A 实际PA后用户确认积极反馈（情绪/身体感觉改善、成就/满足、自我积极认识或促进后续行动意愿）；B 尚未开始且明确执行前障碍；C 执行窗口已过且排除A/B。情绪未改善不等于没有其他积极反馈；信息不足null，服务器另核验证据", 8),
     Spec(
         "execution_result",
         "int",
-        "当前周期焦点 PA 客观执行：1=按计划完成活动，2=未开始无明确障碍，3=未开始有明确障碍，4=部分完成。情绪效果单独记scenario_type，不把已完成但无情绪改善记为未执行",
+        "当前周期焦点 PA 客观执行：1=按计划完成活动，2=未开始无明确障碍，3=未开始有明确障碍，4=部分完成。情绪变化与其他实际反馈分别记录在phase_c及m4_contract；不把已完成但无情绪改善或无积极反馈记为未执行",
     ),
     Spec(
         "phase_a",
@@ -135,7 +135,7 @@ MODULE_FOUR: tuple[Spec, ...] = (
     Spec(
         "phase_c",
         "json",
-        '后果对象：schema_version=1，short_term={emotion_change:用户实际观察的变化}，long_term={action_willingness:已表达的后续意愿或null}，functional_analysis（有依据的功能分析）。未知null，不预测长期效果',
+        '后果对象：schema_version=1，short_term={emotion_change:实际情绪变化或null, physical_change:实际身体感觉变化或null, achievement:实际成就感/满足感或null, self_view:对自身状态的实际认识或null}，long_term={action_willingness:本次体验对后续行动意愿的实际影响或null}，functional_analysis（有依据的功能分析）。情绪与其他反馈分开；未知null，不预测长期效果，不用未执行期待代替实际反馈，不要求逐项补齐',
     ),
     Spec("ai_abc_chain_summary", "text", "逻辑名abc_chain_summary：教练给用户核对的A→B→C事件分析原文，完整连续逐字引用。取用户认可之前的该段分析，不要选末尾的复盘收尾(review_summary)。收尾提到ABC已核对不代表提出了新的ABC分析；只有事实/解释被纠正才用修正后的ABC"),
     Spec("user_chain_approval_level", "level", f"用户对该 ABC 分析的认可程度，{LEVEL_SCALE}"),

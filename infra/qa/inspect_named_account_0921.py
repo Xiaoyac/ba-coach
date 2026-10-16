@@ -6,11 +6,9 @@ from app.db import get_sessionmaker, dispose_db
 async def main(name):
     try:
         async with get_sessionmaker()() as db:
-            rows = (await db.execute(text("""SELECT a.id,a.username,a.profile_uuid,p.nickname,h.base_username,h.tag
+            rows = (await db.execute(text("""SELECT a.id,a.username,a.profile_uuid,p.nickname
                 FROM user_accounts a LEFT JOIN user_profile p ON p.uuid=a.profile_uuid
-                LEFT JOIN account_handles h ON h.account_id=a.id
-                WHERE LOWER(a.username)=:name OR LOWER(p.nickname)=:name
-                   OR LOWER(h.normalized_base)=:name"""), {"name": name.lower()})).mappings().all()
+                WHERE LOWER(a.username)=:name OR LOWER(p.nickname)=:name"""), {"name": name.lower()})).mappings().all()
             result=[]
             for row in rows:
                 uid=row['profile_uuid']

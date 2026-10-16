@@ -45,7 +45,6 @@ def main() -> int:
         "tag": str(int(stamp, 16) % 100000).zfill(5),
         "birth_date": "1995-06-15",
         "living_status": "和家人",
-        "communication_preference": "温柔引导",
         "physical_condition": [],
         "behavior_taboo": [],
     }

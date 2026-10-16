@@ -24,7 +24,7 @@ def test_real_confirmed_state_allows_claim():
     assert validate_answer(reply=BAD,module='module_3',evidence_ids=[],workflow={**PENDING,'current_module':'module_3','plan_confirmed':True})['status']=='passed'
 
 @pytest.mark.parametrize('stream',[True,False])
-async def test_authority_findings_are_diagnostic_only(context,provider,monkeypatch,stream):
+async def test_uncommitted_workflow_claims_are_held_before_publication(context,provider,monkeypatch,stream):
     async def authority(*args): return PENDING
     monkeypatch.setattr('app.reply_workflow.read_reply_workflow',authority)
     async def bad_stream(**kwargs): yield StreamDelta(kind='content',text=BAD)
@@ -39,11 +39,11 @@ async def test_authority_findings_are_diagnostic_only(context,provider,monkeypat
     async for kind,value in get_graph().astream({'user_input':'请确认计划','forced_module':'module_2','subject_id':'synthetic'},context=context,stream_mode=['custom','values']):
         if kind=='custom': events.append(value)
         else: final=value
-    assert final['final_response']==BAD
-    assert not final['reply_held']
-    assert final['telemetry']['answer_validator']['status']=='review'
+    assert final['final_response']==''
+    assert final['reply_held']
+    assert final['telemetry']['workflow_truth']['status']=='blocked'
     if stream:
-        assert BAD == ''.join(e.get('text','') for e in events if e.get('type')=='delta')
+        assert '' == ''.join(e.get('text','') for e in events if e.get('type')=='delta')
 
 
 @pytest.mark.asyncio

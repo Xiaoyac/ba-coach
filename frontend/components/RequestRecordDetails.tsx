@@ -80,6 +80,16 @@ export default function RequestRecordDetails({ message, snapshot, pending }: {
       <p>记录时间：{time(entry.recorded_at)}</p>
       <p>调用耗时：{entry.duration_ms == null ? "未记录" : `${(entry.duration_ms / 1000).toFixed(2)} 秒`}</p>
       {entry.error_code && <p>异常：{entry.error_code}</p>}
+      {entry.router_calls?.map((call, callIndex) => <details key={callIndex} className="mt-2 rounded-lg border border-line p-3">
+        <summary className="cursor-pointer text-ink">Router 第 {callIndex + 1} 次调用 · {call.request.reasoning_effort ? `${call.request.reasoning_effort} 思考` : call.request.thinking?.type === "disabled" ? "关闭思考的恢复调用" : "按请求参数执行"}</summary>
+        <div className="mt-3 space-y-3 text-xs">
+          <p>请求模型：{call.request.model} · HTTP：{call.http_status ?? "未收到响应"}</p>
+          <p>Request ID：<code className="break-all">{call.request_id || "未返回"}</code></p>
+          <details><summary className="cursor-pointer">实际发送的完整参数与输入</summary><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-panel p-3">{JSON.stringify(call.request, null, 2)}</pre></details>
+          <details><summary className="cursor-pointer">上游返回的思考内容</summary><div className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words">{call.response?.reasoning_content || "上游未返回独立思考内容。"}</div></details>
+          <details><summary className="cursor-pointer">实际返回结果</summary><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-panel p-3">{JSON.stringify(call.response ?? { status: "未收到完整响应" }, null, 2)}</pre></details>
+        </div>
+      </details>)}
     </div>;
   }
   return <div className="space-y-3">

@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useParticipantStyle } from "@/lib/useParticipantStyle";
 import { fetchContextUsage, type ContextUsage } from "@/lib/conversations";
 
 export default function ContextUsageRing({ sessionId, busy, version, draft }: {
   sessionId?: string; busy: boolean; version: string; draft: string;
 }) {
+  const participant = useParticipantStyle();
   const [usage, setUsage] = useState<ContextUsage | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
@@ -39,17 +41,17 @@ export default function ContextUsageRing({ sessionId, busy, version, draft }: {
   const label = percent === null ? "上下文用量暂不可用" : `对话上下文已用约 ${percent}%`;
   const amount = (value: number) => value.toLocaleString("zh-CN");
   return (
-    <div ref={root} className="group relative flex h-8 w-8 shrink-0 items-center justify-center">
-      <button type="button" aria-label={label} aria-expanded={open}
+    <div ref={root} className={`group relative flex h-8 shrink-0 items-center justify-center ${participant ? "" : "w-8"}`}>
+      <button type="button" aria-label={participant ? `对话信息：${label}` : label} aria-expanded={open}
         title={usage?.token_budget ? `${label} · ${amount(tokens)} / ${amount(usage.token_budget)} tokens（估算）；点击查看详情` : `${label}；点击查看详情`}
         onClick={() => setOpen((value) => !value)}
-        className="flex h-8 w-8 items-center justify-center rounded-full text-ink-muted transition-colors hover:bg-accent-wash focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
-        <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" className={ratio !== null && ratio >= 0.85 ? "text-amber-600 dark:text-amber-400" : ""}>
+        className={`flex min-h-8 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-accent-wash focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${participant ? "px-2 text-xs" : "w-8"}`}>
+        {participant ? "对话信息" : <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" className={ratio !== null && ratio >= 0.85 ? "text-amber-600 dark:text-amber-400" : ""}>
           <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="3" opacity="0.2" />
           {ratio !== null && ratio > 0 && <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="3"
             strokeLinecap="round" pathLength="100" strokeDasharray={`${Math.min(100, Math.max(0, ratio * 100))} 100`}
             transform="rotate(-90 12 12)" className="transition-all duration-300 motion-reduce:transition-none" />}
-        </svg>
+        </svg>}
       </button>
       <div role="tooltip" className={`absolute bottom-full right-0 z-30 mb-2 w-64 max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-panel p-4 text-xs leading-relaxed text-ink shadow-lg ${open ? "block" : "hidden"}`}>
         <p className="mb-2 flex items-center justify-between font-medium"><span>对话上下文</span><span>{percent === null ? "—" : `约 ${percent}%`}</span></p>

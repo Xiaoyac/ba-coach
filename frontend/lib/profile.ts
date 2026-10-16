@@ -18,9 +18,6 @@ export const SUPPORTER_RELATION = [
   "父母", "恋人", "子女", "朋友", "兄弟姐妹", "同事",
 ] as const;
 export const SUPPORTER_INFLUENCE = ["弱", "中", "强"] as const;
-export const COMMUNICATION_PREFERENCE = [
-  "直接明了", "温柔引导", "理性分析", "轻松幽默",
-] as const;
 export const REMINDER_FREQUENCY = [
   "每天一次", "隔天一次", "每三天一次", "每周一次",
   "仅在我主动找你时提醒", "暂时不需要提醒",
@@ -75,10 +72,8 @@ export function hhmmToMinutes(value: string): number | null {
 
 export interface Profile {
   nickname: string | null;
-  tag: string | null;
-  display_id: string | null;
   age: number | null;
-  birth_date: string | null;
+  birth_year: number | null;
   living_status: string | null;
 
   has_supporter: boolean;
@@ -89,7 +84,6 @@ export interface Profile {
   supporter2_nickname: string | null;
   supporter2_influence: string | null;
 
-  communication_preference: string | null;
   reminder_frequency: string | null;
   reminder_time_slot: string | null;
 
@@ -126,7 +120,7 @@ export interface Profile {
  * silently revert a change made on another device.
  */
 export type ProfilePatch = Partial<
-  Omit<Profile, "current_module" | "available_providers" | "display_id" | "can_manage_models">
+  Omit<Profile, "current_module" | "available_providers" | "can_manage_models">
 >;
 
 async function parse<T>(res: Response, what: string): Promise<T> {

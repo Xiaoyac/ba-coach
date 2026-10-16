@@ -30,7 +30,7 @@ export default function ReasoningDetails({ message, replyPending, routingPending
       pending: replyPending, empty: replyPending ? "回复仍在生成，思考内容尚未返回。" : "本轮回复模型未提供独立的思考内容。" },
     { key: "router", label: "路由深度思考", text: router, model: message.router_model_name,
       pending: routingPending && !router,
-      empty: routingPending ? "回复已完成，路由正在后台判断，请稍候。" : replyPending ? "回复完成后才会进行路由判断。" : "本轮尚无可查看的路由思考记录。" },
+      empty: routingPending ? "Router 正在判断本轮所属模块，请稍候。" : replyPending ? "Router 在主回复前判断模块，结果返回后会显示在这里。" : "本轮尚无可查看的路由思考记录。" },
   ] as const;
 
   return (
@@ -83,7 +83,7 @@ export default function ReasoningDetails({ message, replyPending, routingPending
                 <p className="mt-1 text-ink-faint">思考阶段按首个思考片段到首个正文片段的间隔估算，不含前置风险检查。</p>
               </> : <>
                 <p>路由处理耗时：{durationLabel(message.timing?.router_processing_ms, channel.pending)}</p>
-                <p className="mt-1 text-ink-faint">包含字段提取和模块判断，并非纯思考时间。</p>
+                <p className="mt-1 text-ink-faint">包含路由请求与必要的结果恢复，并非纯思考时间。完整参数和返回内容可在请求记录中查看。</p>
               </>}
             </div>
             <div>{channel.text || <span role="status">{channel.empty}</span>}</div>

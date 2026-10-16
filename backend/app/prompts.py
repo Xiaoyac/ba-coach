@@ -334,6 +334,9 @@ def build_system_segments(
         ),
     ]
     segments.append(SystemPromptSegment(_workflow_state_block(module_name), cacheable=True))
+    if module_name == "module_2":
+        from .goal_card_interaction import M2_SCHEDULE_POLICY
+        segments.append(SystemPromptSegment(M2_SCHEDULE_POLICY, cacheable=True))
 
     reference = "\n\n".join(
         block

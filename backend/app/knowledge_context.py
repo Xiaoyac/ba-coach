@@ -61,6 +61,114 @@ async def read_recording_state(db, user_id, runtime):
     return result
 
 
+async def read_previous_recording_arrangement(db, user_id, runtime, *, conversation_id=None):
+    """Sourced historical context only; never grants consent to the active cycle.
+
+    A new goal or plan deliberately has no current recording arrangement. Keep
+    that business state intact while allowing M3 to acknowledge a previously
+    expressed preference, including a refusal of just the activity record.
+    """
+    from .evidence_quotes import literal_span
+    from .goal_scope import goal_filter, isolated
+    from .m3_contract import RECORDING_SCOPES, contract_for
+    from .models import Conversation, ConversationMessage
+
+    cycles, goals, records, plans = (metadata.tables[name] for name in
+        ("pa_cycles", "pa_goals", "module_three_record", "module_two_record"))
+    is_isolated = await isolated(db, user_id)
+    if is_isolated and conversation_id is None:
+        return None
+    if conversation_id is not None and not await db.scalar(select(Conversation.id).where(
+            Conversation.id == conversation_id, Conversation.subject_id == user_id)):
+        return None
+    owned_goals = await goal_filter(db, user_id, conversation_id)
+    current = (await db.execute(select(cycles).join(goals,
+        goals.c.id == cycles.c.goal_id).join(plans,
+        (plans.c.id == cycles.c.module_two_record_id) & (plans.c.goal_id == goals.c.id)).where(
+        cycles.c.id == runtime.get("active_cycle_id"), goals.c.id == runtime.get("active_goal_id"),
+        owned_goals))).mappings().one_or_none()
+    if not current:
+        return None
+
+    query = (select(records, cycles.c.id.label("historical_cycle_id"),
+        plans.c.activity_content.label("historical_activity"),
+        ConversationMessage.id.label("decision_message_id"),
+        ConversationMessage.content.label("decision_content"),
+        ConversationMessage.created_at.label("decision_created_at"),
+        ConversationMessage.position.label("decision_position"),
+        Conversation.id.label("decision_conversation_id"),
+        Conversation.session_id.label("decision_session_id"))
+        .select_from(records)
+        .join(cycles, (cycles.c.module_three_record_id == records.c.id)
+              & (cycles.c.module_two_record_id == records.c.module_two_record_id)
+              & (cycles.c.goal_id == records.c.goal_id))
+        .join(goals, goals.c.id == records.c.goal_id)
+        .join(plans, (plans.c.id == records.c.module_two_record_id)
+              & (plans.c.goal_id == records.c.goal_id))
+        .join(ConversationMessage, ConversationMessage.id == records.c.confirmation_message_id)
+        .join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+        .where(owned_goals, Conversation.subject_id == user_id,
+               ConversationMessage.role == "user", records.c.record_status == "confirmed",
+               records.c.recording_status.in_(["accepted", "declined"]),
+               cycles.c.id != current["id"])
+        .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc(),
+                  cycles.c.created_at.desc(), cycles.c.id.desc()))
+    if is_isolated:
+        # An administrator's other test conversation is not personal history,
+        # even when both conversations use the same account/profile.
+        query = query.where(Conversation.id == conversation_id)
+    if current["module_three_record_id"]:
+        # A deliberately inherited same-plan arrangement is already current.
+        query = query.where(records.c.id != current["module_three_record_id"])
+    for row in (await db.execute(query)).mappings():
+        contract = contract_for(row)
+        evidence = contract.get("evidence")
+        evidence = evidence if isinstance(evidence, dict) else {}
+        decision = evidence.get("decision")
+        decision = decision if isinstance(decision, dict) else {}
+        status = row["recording_status"]
+        if (contract.get("verified") is not True
+                or contract.get("recording_status") != status
+                or contract.get("session_id") != row["decision_session_id"]
+                or contract.get("cycle_id") != row["historical_cycle_id"]
+                or type(decision.get("message_id")) is not int
+                or decision["message_id"] != row["decision_message_id"]
+                or decision.get("role") != "user" or decision.get("status") != status
+                or decision.get("scope") not in RECORDING_SCOPES
+                or not isinstance(decision.get("quote"), str)):
+            continue
+        quote = literal_span(decision["quote"], row["decision_content"])
+        if not quote:
+            continue
+
+        # An accepted historical plan is optional context. Recheck its source
+        # separately rather than trusting a free-text field or a later proposal.
+        plan_text = None
+        plan_evidence = evidence.get("plan")
+        saved_plan = row["negotiated_record_plan"]
+        if (status == "accepted" and isinstance(plan_evidence, dict)
+                and isinstance(saved_plan, dict)
+                and type(plan_evidence.get("message_id")) is int
+                and isinstance(plan_evidence.get("quote"), str)
+                and saved_plan.get("text") == plan_evidence["quote"]):
+            plan_message = (await db.execute(select(ConversationMessage).where(
+                ConversationMessage.id == plan_evidence["message_id"],
+                ConversationMessage.conversation_id == row["decision_conversation_id"],
+                ConversationMessage.role.in_(["user", "assistant"]),
+                ConversationMessage.position <= row["decision_position"]))).scalar_one_or_none()
+            if plan_message:
+                plan_text = literal_span(plan_evidence["quote"], plan_message.content)
+        return {"scope": "historical", "applies_to_current_cycle": False,
+            "record_id": row["id"], "goal_id": row["goal_id"],
+            "cycle_id": row["historical_cycle_id"], "plan_id": row["module_two_record_id"],
+            "activity_content": row["historical_activity"],
+            "recording_status": status, "recording_decision_scope": decision["scope"],
+            "decision_quote": quote, "recording_plan": plan_text,
+            "source_message_id": row["decision_message_id"],
+            "source_created_at": row["decision_created_at"].isoformat()}
+    return None
+
+
 async def load_recording_state(maker, user_id, session_id):
     async with maker() as db:
         conversation, runtime = await runtime_for(db, session_id)
@@ -121,7 +229,10 @@ async def assemble_knowledge_context(maker, user_id, session_id, *, module=None,
             table = metadata.tables["module_one_record"]
             # Preserve the actual confirmation state, including recent drafts.
             from .v2_workflow import fresh_m1, m1_draft
-            if fresh_m1(state):
+            from .goal_scope import isolated, m1_record
+            if await isolated(db, user_id):
+                row = await m1_record(db, user_id, conversation.id)
+            elif fresh_m1(state):
                 row = await m1_draft(db, user_id, state=state, session_id=session_id)
             else:
                 row = (await db.execute(select(table).where(

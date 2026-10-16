@@ -53,6 +53,7 @@ async def test_real_wait_for_timeout_cancels_request(context):
     cancelled = asyncio.Event()
     calls = 0
     class SlowProvider:
+        name = model = "slow-stub"
         async def route_detailed(self, **kwargs):
             nonlocal calls
             calls += 1

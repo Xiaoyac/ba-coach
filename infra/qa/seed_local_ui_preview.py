@@ -41,7 +41,6 @@ async def main():
             await add("user_module_one_state", user_id=uid, completed_steps=[], status="completed", completion_source="legacy_imported", evidence_status="missing")
             await c.execute(insert(models.UserAccount), dict(id=account_id, username=username, password_hash=hash_password("LocalPreview0917!"), profile_uuid=uid))
             await c.execute(insert(models.AccountSettings), dict(account_id=account_id, role=role))
-            await c.execute(insert(models.AccountHandle), dict(account_id=account_id, base_username=username, normalized_base=username, tag="09170"))
             await c.execute(insert(models.AccountEmail), dict(account_id=account_id, email=f"{username}@example.com", normalized_email=f"{username}@example.com", verified_at=now))
         uid = "local-demo-1"
         await c.execute(insert(models.Conversation), dict(id=1, subject_id=uid, session_id="local-preview-chat", title="给自己一点散步的时间 · 演示", revision=1))

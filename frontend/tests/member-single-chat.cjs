@@ -15,11 +15,11 @@ const artifacts = path.resolve(__dirname, "../../runtime-logs/member-single-chat
 const opening = "你好！很高兴认识你。你可能是第一次来，我先自我介绍一下：\n\n我是基于行为激活理论工作的AI教练，简单来说就是帮你通过行动来改善情绪。\n\n我不能替代医生或心理咨询师，但我可以帮助你理解自己的行为和情绪的关系，和你一起找到适合的身体活动，制定可行的运动计划，陪伴支持你准备、行动、复盘和调整。我是你的伙伴，而你是自己生活的专家，我们一起讨论，你来决定要不要尝试、怎么调整。\n\n这里是一个安全、不被评判的空间，你可以真实地表达自己。\n\n在开始之前，你希望我怎么称呼你呢？";
 
 const profile = {
-  nickname: "测试成员", tag: "12345", display_id: "测试成员12345", age: 30,
+  nickname: "测试成员", age: 30,
   birth_date: "1996-01-01", living_status: null, has_supporter: false,
   supporter1_relation: null, supporter1_nickname: null, supporter1_influence: null,
   supporter2_relation: null, supporter2_nickname: null, supporter2_influence: null,
-  communication_preference: null, reminder_frequency: null, reminder_time_slot: null,
+  reminder_frequency: null, reminder_time_slot: null,
   physical_condition: [], behavior_taboo: [], content_taboo: [], activity_environment: null,
   activity_social: null, activity_intensity: null, supporters: [], reminder_window: null,
   preferred_provider: "deepseek", available_providers: { deepseek: true, doubao: false },
@@ -52,9 +52,9 @@ async function fixture(browser, { role = "user", width = 1280, failed = false, m
     requests.push({ path: url.pathname, method: request.method(), body: request.postData() });
     const json = (data, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(data) });
     if (url.pathname === "/api/auth/me") return json({
-      username: "fixture", nickname: "测试成员", tag: "12345", display_id: "测试成员12345",
+      username: "fixture", nickname: "测试成员",
       role, profile_uuid: "fixture", current_module: module,
-      email_required: false, email_verified: true, birth_date_required: false,
+      email_required: false, email_verified: true, birth_year_required: false,
     });
     if (url.pathname === "/api/conversations/current") {
       assert.equal(request.method(), "POST");

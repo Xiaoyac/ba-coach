@@ -69,20 +69,24 @@ def test_low_disclosure_completes_without_personal_facts_or_summary():
     assert not any(result["verified_facts"].values())
 
 
-@pytest.mark.parametrize("field,value", [
-    ("limitation_explained_quote", None),
-    ("limitation_explained_quote", {"turn": 2}),
-    ("limitation_acknowledged_quote", None),
-    ("limitation_acknowledged_quote", {"turn": 0}),
-    ("limitation_acknowledged_quote", {"turn": 1}),
-])
-def test_low_disclosure_requires_explained_and_acknowledged_limits(field, value):
+@pytest.mark.parametrize("value", [None, {"turn": 2}])
+def test_low_disclosure_requires_explained_limits(value):
     turns, raw = low_disclosure_fixture()
-    raw[field] = value
+    raw["limitation_explained_quote"] = value
     result = normalize(raw, {}, turns, "manual")
     assert result["disclosure_declined"]
     assert not result["milestones"]["m1_milestone_3"]
     assert "m1_milestone_2" in result["missing_fields"]
+
+
+@pytest.mark.parametrize("value", [None, {"turn": 0}, {"turn": 1}])
+def test_low_disclosure_acknowledgement_is_optional(value):
+    # v3: the user is not asked to formally acknowledge the limitation.
+    turns, raw = low_disclosure_fixture()
+    raw["limitation_acknowledged_quote"] = value
+    result = normalize(raw, {}, turns, "manual")
+    assert result["disclosure_declined"] and not result["limitation_acknowledged"]
+    assert "m1_milestone_2" not in result["missing_fields"]
 
 
 def test_latest_semantic_assessment_controls_reuse_not_question_keywords():

@@ -119,11 +119,11 @@ async def test_truncated_mediator_never_releases_retrieved_chunks(settings, prov
 
 def test_prompt_editor_supports_mediator(client,admin_headers):
     path = "/api/admin/prompts/knowledge_mediator"
-    response = client.put(path,headers=admin_headers,json={"content":"只指导知识的使用，不替代模块回答。"})
+    response = client.put(path,headers=admin_headers,json={"base_revision":1,"content":"只指导知识的使用，不替代模块回答。"})
     assert response.status_code == 200 and response.json()["is_overridden"] is True
     bundle = client.get("/api/admin/prompts",headers=admin_headers).json()["prompts"]
     assert next(p for p in bundle if p["key"]=="knowledge_mediator")["content"] == response.json()["content"]
-    assert client.delete(path,headers=admin_headers).status_code == 200
+    assert client.delete(path+"?base_revision=2",headers=admin_headers).status_code == 200
 
 
 @pytest.mark.parametrize("change", ["invented_quote", "too_many", "duplicate", "nonuse_with_selection", "use_with_note"])

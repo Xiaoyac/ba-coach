@@ -73,7 +73,7 @@ class AgentState(TypedDict, total=False):
     # PA card, which later modules reference but never hold their own copy of.
     # Loaded by recall_memory_node alongside long-term memory.
     clinical_context: list[str]
-    # The subject's own registration profile (nickname, tone preference,
+    # The subject's own registration profile (nickname,
     # physical limits, movement taboos). Unlike the two above this is loaded
     # on *every* turn — see recall_memory_node on why a safety constraint
     # cannot be gated to the turns where it is cheap.
@@ -107,6 +107,11 @@ class AgentState(TypedDict, total=False):
     # Present only after the chat transaction has actually committed consent.
     confirmation_receipt: dict
     pa_tools_used: bool
+    # Native PA operations belong to the detached background worker.
+    pa_background_pending: bool
+    pa_operations_completed: bool
+    pa_operation_displays: list[str]
+    structured_goal_action_handled: bool
 
     # ---- Output -------------------------------------------------------
     final_response: str
@@ -136,6 +141,8 @@ class GraphContext:
     store: SessionStore
     knowledge_base: KnowledgeBase
     settings: Settings
+    # A single request-owned result, consumed only after exact state matching.
+    prepared_retrieval: Any = None
     # None when MEMOS_BASE_URL / MEMOS_API_KEY aren't configured — every call
     # site treats that the same as "no long-term memory available" rather
     # than erroring.
@@ -159,9 +166,19 @@ class GraphContext:
     generation: GenerationControl | None = None
     # Set before any native write so interrupted streams cannot persist a stale graph cache.
     pa_tools_started: bool = False
+    # Per-turn PA worker; independent from the main reply and routing queue.
+    pa_background_task: Any | None = None
+    pa_background_turn: int | None = None
     # Server-owned transport metadata, never model instructions or business state.
     generation_id: str | None = None
     reply_progress: dict[str, Any] = field(default_factory=dict)
     reply_lead_prompt: str | None = None
+    reply_lead_context: Any | None = None
+    # Owned by SSE: take a finished opening when main is ready, otherwise cancel it.
+    reply_lead_task: Any | None = None
+    reply_lead_resolve: Any | None = None
     # Authorized from an owned admin preference each turn, never client metadata.
+    # Historic name: true selects hybrid retrieval; it is not a node switch.
     knowledge_mediator_bypass: bool = False
+    # Resolved separately from role and owned preference before each turn.
+    knowledge_mediator_node_enabled: bool = True

@@ -24,10 +24,16 @@ _turn_scope: ContextVar[tuple[str, int | None] | None] = ContextVar("ai_event_tu
 
 @asynccontextmanager
 async def request_event_scope(session_id: str, user_message_id: int | None):
+    from .execution_status import begin, end_request
+    outer = _turn_scope.get() != (session_id, user_message_id)
     token = _turn_scope.set((session_id, user_message_id))
+    if outer:
+        begin(session_id, user_message_id)
     try:
         yield
     finally:
+        if outer:
+            end_request(session_id, user_message_id)
         _turn_scope.reset(token)
 
 
@@ -102,6 +108,13 @@ async def add_ai_event(
     metadata = dict(event_metadata) if event_metadata is not None else None
     if cache_metrics:
         metadata = {**(metadata or {}), **cache_metrics}
+    # Persist safe failure details alongside existing event JSON for reloads.
+    from .execution_status import snapshot, event_status
+    from .execution_errors import safe_failure
+    turn = snapshot(session_id, (metadata or {}).get('user_message_id'))
+    failure = safe_failure(((turn or {}).get('stages', {}).get(stage) or {}).get('failure'))
+    if failure and event_status(stage, metadata, error_code) == 'failed':
+        metadata = {**(metadata or {}), 'execution_failure': failure}
     event = AIExecutionEvent(
         conversation_id=conversation_id,
         assistant_message_id=assistant_message_id,
@@ -123,6 +136,9 @@ async def add_ai_event(
         event_metadata=metadata,
     )
     db.add(event)
+    from .execution_status import record_event
+    record_event(stage, session_id=session_id, metadata=metadata, model=model_name,
+                 error=error_code, duration_ms=duration_ms)
     return event
 
 

@@ -25,7 +25,7 @@ def _rebuild_seeded_m4_payload(review):
         "next_coping_strategy": review["next_coping_strategy"],
         "review_decision": review["review_decision"], "review_summary": review["review_summary"],
         "review_followup": {"action": "continue", "source_quote": quotes["decision_quote"]},
-        "m4_contract": {**quotes, "emotion_improved": True, "chain_status": "confirmed",
+        "m4_contract": {**quotes, "execution_ref": contract.get("execution_ref"), "emotion_improved": True, "chain_status": "confirmed",
                         "core_questions_resolved": True, "difficulty_status": "none"},
         "_source_session_id": "chat-a", "_source_assistant_message_id": 20,
     }

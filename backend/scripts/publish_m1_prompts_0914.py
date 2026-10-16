@@ -12,6 +12,8 @@ from pathlib import Path
 from sqlalchemy import select
 from app.db import get_sessionmaker, dispose_db
 from app.models import PromptOverride
+from app.prompt_history_models import PromptHistoryState
+from sqlalchemy import update
 from app.prompts import GLOBAL_PROMPT, MODULE_PROMPTS
 
 KEYS = ("global", "module_1")
@@ -44,6 +46,7 @@ async def main(args):
                        "published_hashes": {k: digest(v) for k, v in defaults.items()}}, handle, ensure_ascii=False, indent=2)
         by_key = {r.prompt_key: r for r in rows}
         for key, value in defaults.items():
+            await db.execute(update(PromptHistoryState).where(PromptHistoryState.prompt_key == key).values(pending_actor="deployment:m1-20260914"))
             row = by_key.get(key)
             if row is None:
                 row = PromptOverride(prompt_key=key, content=value, updated_by="deployment:m1-20260914")

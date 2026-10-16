@@ -93,6 +93,20 @@ async def seed_review(db, *, decision, with_contract=True):
             "review_summary_quote": review_summary,
         },
     }, messages, session_id="chat-a", cycle_id="reviewed-cycle", assistant_message_id=20)
+    # The fixture represents already resolved current-cycle execution facts;
+    # new production writes must establish this identity from sourced input.
+    await db.execute(insert(schema.tables["pa_executions"]), {
+        "id": "reviewed-execution", "user_id": "a", "goal_id": "g1", "plan_id": "cycle-plan",
+        "cycle_id": "reviewed-cycle", "activity_content": "散步", "source_conversation_id": 1,
+        "origin_message_id": 11, "origin_event_index": 1})
+    await db.execute(insert(schema.tables["pa_activity_events"]), {
+        "id": "reviewed-observation", "user_id": "a", "goal_id": "g1", "cycle_id": "reviewed-cycle",
+        "source_conversation_id": 1, "source_message_id": 11, "event_index": 1,
+        "event_kind": "performed", "activity_content": "散步", "source_quote": messages[1].content})
+    await db.execute(insert(schema.tables["pa_activity_attributions"]), {
+        "event_id": "reviewed-observation", "execution_id": "reviewed-execution",
+        "attribution_status": "linked", "reason_code": "source_verified", "evidence": {}})
+    review_values["phase_c"]["_m4_contract"]["execution_ref"] = {"execution_id": "reviewed-execution"}
     await db.execute(insert(schema.tables["module_four_record"]), {
         "id": "review-draft", "cycle_id": "reviewed-cycle", **review_values,
     })

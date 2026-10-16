@@ -49,11 +49,14 @@ def _evidence(*, scenario="A", decision=1, difficulty="none", correction=False):
     elif scenario == "C":
         messages.extend([
             _message(4, 4, "user", "开始时我以为会轻松一点。"),
-            _message(5, 5, "user", "做完后其实情绪没有改善。"),
+            _message(5, 5, "user", "做完后其实情绪没有改善，也没什么收获。"),
             _message(6, 6, "user", "这周的执行窗口已经结束。"),
         ])
-        raw.update(phase_c_quote="做完后其实情绪没有改善。", emotion_improved=False,
-                   emotion_quote="做完后其实情绪没有改善。", window_closed=True,
+        # v3: C after execution needs no positive feedback at all, not only
+        # an unchanged mood (body or achievement benefits would make it A).
+        raw.update(phase_c_quote="做完后其实情绪没有改善，也没什么收获。", emotion_improved=False,
+                   emotion_quote="做完后其实情绪没有改善", positive_feedback=False,
+                   positive_feedback_quote="做完后其实情绪没有改善，也没什么收获。", window_closed=True,
                    window_quote="这周的执行窗口已经结束。")
     elif scenario == "unknown":
         raw.pop("emotion_improved")

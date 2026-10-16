@@ -22,6 +22,7 @@ and directly unit-testable.
 """
 
 from __future__ import annotations
+from ..execution_status import track_call, track_stream, routing_model
 
 import asyncio
 import hashlib
@@ -40,6 +41,7 @@ from langgraph.types import StreamWriter
 from ..ai_telemetry import save_ai_event
 from ..trace_timing import record_span, prompt_source
 from ..clinical_extraction import assess_risk_detailed, extract_module_record_detailed
+from ..risk_provider import risk_provider
 from ..clinical_store import (
     coerce,
     load_clinical_context,
@@ -548,17 +550,8 @@ MODULE_CONFIGS: dict[str, ModuleConfig] = {
 
 def _knowledge_query(state: AgentState) -> str:
     """Build retrieval context without sending the whole transcript to search."""
-    pieces = [state["user_input"]]
-    for message in reversed(state.get("chat_history") or []):
-        if message.role != "user" or message.content in pieces:
-            continue
-        pieces.append(message.content)
-        if len(pieces) == 3:
-            break
-    pa_card = (state.get("memory") or {}).get("pa_card")
-    if pa_card:
-        pieces.append(pa_card)
-    return "\n".join(pieces)[:6000]
+    from ..reply_retrieval import knowledge_query
+    return knowledge_query(state)
 
 
 def make_module_node(module_name: str, config: ModuleConfig):
@@ -590,77 +583,48 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 return await read_reply_workflow(runtime.context.sessionmaker, state['subject_id'], state['session_id'])
             except Exception:
                 return {"available": False}
-        # Validation is diagnostic only. Once sent, visible text must also be
-        # the text persisted, including when the provider fails mid-stream.
+        # Ordinary coaching diagnostics do not alter replies. Persistence
+        # claims in owned non-tool replies are checked before publication.
         emitted_content: list[str] = []
+        published_content: list[str] = []
+        workflow_stream_guard = None
+        continuation_prefix = None
         force_reply_validation = False
         def emit_output(event):
             if context.stream:
                 if event.get("type") == "delta":
+                    if continuation_prefix is not None:
+                        event = {**event, "text": continuation_prefix.push(event["text"])}
+                        if not event["text"]:
+                            return
                     emitted_content.append(event["text"])
+                    if hold_workflow_claims:
+                        if workflow_stream_guard is not None:
+                            for sentence in workflow_stream_guard.push(event['text']):
+                                published_content.append(sentence)
+                                _send({'type': 'delta', 'text': sentence})
+                        return
                 _send(event)
         context = runtime.context
         user_input = state["user_input"]
-        from ..pa_card_tools import enabled as pa_tools_enabled
-        use_pa_tools = pa_tools_enabled(context.settings, state) and module_name in {"module_2", "module_4"}
+        from ..pa_card_tools import enabled as pa_tools_enabled, form_ui_enabled
+        use_goal_card_ui = module_name == 'module_2' and form_ui_enabled(context.settings, state)
+        use_pa_tools = use_goal_card_ui or (pa_tools_enabled(context.settings, state) and module_name in {"module_2", "module_4"})
+        hold_workflow_claims = authoritative
 
-        knowledge = []
-        retrieval_metrics = {}
-        if module_config.retrieve:
-            gate_started = perf_counter()
-            decision = decide_retrieval(
-                state, enabled=context.settings.knowledge_intent_gate_enabled
-            )
-            gate_ms = (perf_counter() - gate_started) * 1000
-            retrieval_started = perf_counter()
-            outcome = "skipped"
-            cache_metrics = {"cache": "bypass_custom_or_skipped"}
-            try:
-                if decision.retrieve:
-                    outcome = "error"
-                    search_args = {"module": module_name, "query": _knowledge_query(state), "top_k": module_config.top_k}
-                    if getattr(context.knowledge_base, "ranking_mode", None) == "astrbot_hybrid":
-                        search_args["top_k"] = context.settings.knowledge_hybrid_final_results
-                    if isinstance(context.knowledge_base, DatabaseKnowledgeBase):
-                        subject, session = state.get("subject_id"), state.get("session_id")
-                        scope = (subject, session, str(bool((state.get("memory") or {}).get("sandbox_mode")))) if subject and session else None
-                        knowledge, cache_metrics = await context.knowledge_base.search_with_diagnostics(
-                            **search_args, cache_scope=scope)
-                    else:
-                        knowledge = await context.knowledge_base.search(**search_args)
-                    outcome = "returned" if knowledge else "empty"
-                    if cache_metrics.get("status", "").startswith("withheld_"):
-                        outcome = "error"
-            finally:
-                retrieval_ms = (perf_counter() - retrieval_started) * 1000 if decision.retrieve else 0.0
-                retrieval_metrics = {
-                    "gate": decision.as_dict(),
-                    "gate_duration_ms": round(gate_ms, 4),
-                    "search_duration_ms": round(retrieval_ms, 4),
-                    "total_duration_ms": round(gate_ms + retrieval_ms, 4),
-                    "outcome": outcome,
-                    "returned": len(knowledge),
-                    "context_chars": sum(len(chunk.text) for chunk in knowledge),
-                    "retriever": type(context.knowledge_base).__name__,
-                    "ranking_mode": getattr(context.knowledge_base, "ranking_mode", "custom"),
-                    "module": module_name,
-                    "exact_cache": cache_metrics,
-                }
-                # Structured server log: no query, transcript, user ID, or reference text.
-                logger.info("retrieval_gate %s", json.dumps(retrieval_metrics, ensure_ascii=False))
-            _send(
-                {
-                    "type": "trace",
-                    "node": module_name,
-                    "detail": {
-                        "retrieved": [chunk.id for chunk in knowledge],
-                        "top_score": knowledge[0].score if knowledge else None,
-                        "score_type": knowledge[0].score_type if knowledge else None,
-                        "duration_ms": round(gate_ms + retrieval_ms),
-                        "intent_gate": retrieval_metrics,
-                    },
-                }
-            )
+        from ..reply_retrieval import request_key, retrieve, corpus_is_current
+        prepared_retrieval = getattr(context, 'prepared_retrieval', None)
+        context.prepared_retrieval = None
+        key = request_key(state, context, module_name, module_config)
+        if (prepared_retrieval is not None and prepared_retrieval[0] == key
+                and await corpus_is_current(context, prepared_retrieval[1][4])):
+            knowledge, retrieval_metrics, retrieval_started, retrieval_events, _corpus_token = prepared_retrieval[1]
+        else:
+            knowledge, retrieval_metrics, retrieval_started, retrieval_events, _corpus_token = await retrieve(
+                state, context, module_name, module_config)
+        for event in retrieval_events:
+            _send(event)
+        outcome = retrieval_metrics.get('outcome', 'skipped')
 
         global_prompt = None
         module_prompt = None
@@ -675,7 +639,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
                     global_prompt, module_prompt = await effective_prompt_pair(
                         prompt_db, module_name
                     )
-                    if knowledge and context.settings.knowledge_mediator_enabled:
+                    if knowledge and context.knowledge_mediator_node_enabled:
                         mediator_prompt = await effective_mediator_prompt(prompt_db)
             except Exception:  # noqa: BLE001
                 # Prompt administration is an operational convenience, not a
@@ -705,20 +669,29 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 logger.warning("knowledge_context unavailable; withholding retrieved knowledge")
         mediator_debug = {}
         mediator_started = perf_counter()
-        if context.knowledge_mediator_bypass:
-            from ..knowledge_policy import direct_hybrid_knowledge
-            guided_knowledge, guidance_block, mediator_metrics = direct_hybrid_knowledge(
-                state=mediator_state, module=module_name, knowledge=knowledge)
+        if not context.knowledge_mediator_node_enabled:
+            # Keep retrieval and its policy checks, but make no mediator LLM call.
+            guided_knowledge, guidance_block, mediator_metrics = await mediate_knowledge(
+                state=mediator_state, module=module_name, knowledge=knowledge, provider=None,
+                settings=context.settings, debug_output=mediator_debug, bypass=True)
+        elif context.knowledge_mediator_bypass:
+            from ..hybrid_mediator import mediate_hybrid_knowledge
+            guided_knowledge, guidance_block, mediator_metrics = await mediate_hybrid_knowledge(
+                state=mediator_state, module=module_name, knowledge=knowledge,
+                settings=context.settings, prompt=mediator_prompt, debug_output=mediator_debug)
         else:
             guided_knowledge, guidance_block, mediator_metrics = await mediate_knowledge(
                 state=mediator_state, module=module_name, knowledge=knowledge, provider=context.router_provider,
-                settings=context.settings, prompt=mediator_prompt, debug_output=mediator_debug,
-                bypass=False)
+                settings=context.settings.model_copy(update={"knowledge_mediator_enabled": True}),
+                prompt=mediator_prompt, debug_output=mediator_debug, bypass=False)
+        mediator_metrics.update(
+            knowledge_mode="astrbot_hybrid" if context.knowledge_mediator_bypass else "legacy_mediator",
+            node_enabled=context.knowledge_mediator_node_enabled)
         _send({"type":"trace", "node":"knowledge_mediator", "detail":mediator_metrics})
         logger.info("knowledge_mediator %s", json.dumps({k:v for k,v in mediator_metrics.items() if k not in ("guidance","cautions","selections","applications","note")},ensure_ascii=False))
         if context.sessionmaker is not None and mediator_metrics["status"] != "skipped":
             await save_ai_event(context.sessionmaker, stage="knowledge_mediator", session_id=state.get("session_id"),
-                subject_id=state.get("subject_id"), provider=context.router_provider.name,
+                subject_id=state.get("subject_id"), provider=mediator_metrics.get("provider", context.router_provider.name),
                 model_name=mediator_metrics.get("model"), duration_ms=mediator_metrics["duration_ms"],
                 usage=mediator_metrics.get("usage"), error_code=mediator_metrics["reason"] if mediator_metrics["status"] == "fallback" else None,
                 request_id=mediator_metrics.get("request_id"),
@@ -771,6 +744,9 @@ def make_module_node(module_name: str, config: ModuleConfig):
         )
         if guidance_block:
             system.append(SystemPromptSegment(guidance_block, cacheable=False, always_current=True))
+        if use_pa_tools and not state.get("structured_goal_action_handled") and not state.get('pa_operations_completed'):
+            from ..pa_background import FOREGROUND_POLICY
+            system.append(SystemPromptSegment(FOREGROUND_POLICY, always_current=True))
         authority = await reply_authority()
         if authority is not None:
             system.append(SystemPromptSegment(workflow_prompt(authority,
@@ -781,7 +757,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
         from ..dialogue_confirmation import affirmative
         card = (authority or {}).get('confirmation_summary')
         show_confirmation_card = False
-        if authoritative and not router_only and not use_pa_tools and card and module_name == 'module_2':
+        if authoritative and not use_pa_tools and card and module_name == 'module_2':
             show_confirmation_card = affirmative(user_input)
             if not show_confirmation_card:
                 from ..confirmation_intent import may_redisplay_unchanged_plan
@@ -817,6 +793,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
             retrieval=retrieval_metrics, mediator=mediator_metrics,
             context_withheld=context_withheld,
             mediator_reasoning=mediator_debug.get("reasoning_content"),
+            mediator_response=mediator_debug.get("response_content"),
         )
         if (cache_layout and context.sessionmaker is not None
                 and state.get("subject_id") and state.get("user_message_id") is not None):
@@ -834,9 +811,17 @@ def make_module_node(module_name: str, config: ModuleConfig):
             user_created_at=state.get("user_created_at"),
             prefix_cache=cache_layout, history_summary=history_summary)
         system, messages = prepared.system, prepared.messages
+        lead_text = ""
         if context.stream and (state.get("telemetry") or {}).get("reply_mode") == "ack_deep":
-            from ..provisional_reply import parallel_reply_system
-            system = parallel_reply_system(system)
+            from ..provisional_reply import take_ready_lead, parallel_reply_system
+            lead_context = getattr(context, "reply_lead_context", None)
+            if lead_context is not None and not lead_context.done():
+                lead_context.set_result(as_text(system))
+            lead_text = take_ready_lead(context)
+            system = parallel_reply_system(system, lead_text)
+            if lead_text:
+                from ..provisional_reply import ContinuationPrefix
+                continuation_prefix = ContinuationPrefix(lead_text)
         telemetry["prompt_version"] = hashlib.sha256(
             as_text(system).encode("utf-8")
         ).hexdigest()[:16]
@@ -865,46 +850,32 @@ def make_module_node(module_name: str, config: ModuleConfig):
         reasoning_parts: list[str] = []
         generation_started = perf_counter()
         generation_provider = context.provider
-        if use_pa_tools:
-            context.pa_tools_started = True
-            from ..pa_card_tools import PACardTools
-            from ..pa_tool_loop import PAToolReply
-            executor = PACardTools(maker=context.sessionmaker, session_id=state['session_id'],
-                user_id=state['subject_id'], user_message_id=state['user_message_id'],
-                module=module_name, provider=context.router_provider)
-            async def pa_transition_prompt(target):
-                # Confirmation commits before M3 coaching, just like the
-                # existing pre-reply path. Do not continue with stale M2 policy.
-                if context.prompt_snapshot is not None:
-                    global_text=context.prompt_snapshot.get('global')
-                    module_text=context.prompt_snapshot.get(target)
-                else:
-                    async with context.sessionmaker() as db:
-                        global_text,module_text=await effective_prompt_pair(db,target)
-                async with context.sessionmaker() as db:
-                    from ..v2_workflow import runtime_for
-                    conversation,fresh=await runtime_for(db,state['session_id'])
-                    snapshot=await executor.snapshot(db,conversation,fresh)
-                transitioned = build_system_segments(target,global_prompt=global_text,module_prompt=module_text,
-                    clinical_context=['工具提交后的数据库事实：'+json.dumps(snapshot,ensure_ascii=False)],
-                    profile_context=state.get('profile_context'),long_term_memory=state.get('long_term_memory'),
-                    history=messages)
-                if cache_layout:
-                    return prepare_context(system=transitioned, history=[], user_input=user_input,
-                        max_history_messages=0, user_created_at=state.get('user_created_at'),
-                        prefix_cache=True, history_summary=history_summary).system
-                return transitioned
-            generation_provider = PAToolReply(context.provider, executor,
-                max_rounds=context.settings.pa_card_tool_max_rounds, telemetry=telemetry,
-                timeout_seconds=context.settings.pa_card_tool_timeout_seconds,transition_prompt=pa_transition_prompt)
-            update['pa_tools_used'] = True
+        if context.stream and getattr(generation_provider, "main_reply_enabled", False):
+            def on_main_retry(event):
+                from ..execution_status import update as progress
+                progress('main_generation', 'retrying' if event.get('retrying') else 'running',
+                         detail='重新连接中(网络超时)' if event.get('retrying') else None)
+                _send({"type": "retry", "generation_id": context.generation_id, **event})
+            generation_provider.on_main_retry = on_main_retry
+        if hold_workflow_claims and context.stream:
+            from ..reply_integrity import SentenceSaveGuard
+            workflow_stream_guard = SentenceSaveGuard(authority, module_name,
+                current_turn_committed=bool(state.get('confirmation_receipt')))
+        # The graph starts the independent writer before retrieval. Direct
+        # module callers retain the post-reply fallback. Neither path exposes
+        # native tools to the conversational provider.
+        if use_pa_tools and not state.get('structured_goal_action_handled') and not state.get('pa_operations_completed'):
+            update['pa_background_pending'] = True
+            telemetry['pa_background_tools'] = ({'status': 'running_in_parallel',
+                'timing': 'parallel_with_main_reply'} if context.pa_background_task is not None
+                else {'status': 'scheduled_after_reply'})
         first_reasoning_seen = False
         first_content_seen = False
         try:
             if context.stream:
-                async for delta in generation_provider.stream(
+                async for delta in track_stream('main_generation', generation_provider.stream(
                     system=system, messages=messages
-                ):
+                ), model=generation_provider.model):
                     elapsed_ms = int((perf_counter() - generation_started) * 1000)
                     if delta.kind == "usage":
                         if delta.usage:
@@ -940,9 +911,9 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 update["reasoning_content"] = disclosed_reasoning
                 update.setdefault("usage", {})
             else:
-                completion = await generation_provider.complete(
+                completion = await track_call('main_generation', generation_provider.complete(
                     system=system, messages=messages
-                )
+                ), model=generation_provider.model)
                 telemetry["raw_model_reply"] = completion.text
                 normalized = normalize_reasoning_channels(
                     unwrap_chat_reply(completion.text), completion.reasoning_content
@@ -991,7 +962,14 @@ def make_module_node(module_name: str, config: ModuleConfig):
             if telemetry["error_code"] == "provider_timeout":
                 telemetry["finish_reason"] = "timeout"
 
+        telemetry["overload_retries"] = list(getattr(generation_provider, "overload_retries", []))
+        telemetry["main_timeout_seconds"] = generation_provider._main_timeout_seconds() if hasattr(generation_provider, "_settings") else None
         if context.stream:
+            if continuation_prefix is not None:
+                tail = continuation_prefix.finish()
+                if tail:
+                    emit_output({"type": "delta", "text": tail})
+                telemetry["repeated_lead_removed"] = continuation_prefix.removed
             telemetry["raw_model_reply"] = content_guard.raw
         invalid_protocol = contains_internal_protocol(telemetry.get("raw_model_reply"))
         if invalid_protocol and not update.get("error"):
@@ -1004,6 +982,16 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 telemetry["error_code"] = "invalid_protocol_completion"
         if emitted_content:
             update["final_response"] = "".join(emitted_content)
+        if (not update.get("error") and telemetry.get("finish_reason") == "length"
+                and update.get("final_response", "").strip()):
+            # A nonempty prefix is still incomplete when the provider reports
+            # its output limit. Preserve delivered bytes, but never retry or
+            # use this candidate to advance memory or background PA work.
+            update.update(error="reply_length_limit：本次回复因长度限制未完成，已显示内容已保留，请勿重复发送。",
+                          reply_held=True, pa_background_pending=False)
+            telemetry.update(error_code="reply_length_limit", reply_held=True)
+            if telemetry.get("pa_background_tools", {}).get("status") == "scheduled_after_reply":
+                telemetry["pa_background_tools"] = {"status": "skipped", "reason": "reply_length_limit"}
         telemetry["normalized_reply"] = update.get("final_response", "")
         receipt = state.get('confirmation_receipt') or {}
         if update.get('error') and not update.get('final_response') and receipt.get('module') == module_name:
@@ -1014,25 +1002,7 @@ def make_module_node(module_name: str, config: ModuleConfig):
                               model='BA Coach 状态机')
                 emit_output({'type': 'delta', 'text': receipt_text})
 
-        # Budget exhaustion or an invalid provider envelope is a generation
-        # failure, not inappropriate user input or a semantic validator rejection.
-        if use_pa_tools:
-            # A committed tool action survives a later provider failure. Show
-            # its actual artifact, never regenerate using pre-tool context.
-            for display in executor.displays:
-                if display not in update.get('final_response', ''):
-                    suffix = ('\n\n' if update.get('final_response') else '') + display
-                    update['final_response'] = update.get('final_response', '') + suffix
-                    emit_output({'type': 'delta', 'text': suffix})
-            if not update.get('final_response', '').strip():
-                update['error'] = update.get('error') or '工具操作后未收到完整回复，请重试；已保存的数据不会丢失。'
-            from ..v2_workflow import runtime_for
-            async with context.sessionmaker() as db:
-                _, durable = await runtime_for(db, state['session_id'])
-                update.update(memory=durable['memory'] or {}, current_module=durable['current_module'],
-                    next_module=durable['current_module'], active_cycle_id=durable['active_cycle_id'])
-            _send({'type':'trace', 'node':'pa_tools', 'detail':telemetry['pa_tools']})
-        if not use_pa_tools and not update.get("error") and not update.get("final_response", "").strip():
+        if not update.get("error") and not update.get("final_response", "").strip():
             from ..reply_recovery import recover_empty_reply, GENERATION_INTERRUPTED_REPLY
             recovered, recovery = await recover_empty_reply(
                 provider=context.provider, system=system, messages=messages,
@@ -1056,6 +1026,10 @@ def make_module_node(module_name: str, config: ModuleConfig):
             if recovered:
                 normalized = normalize_reasoning_channels(unwrap_chat_reply(recovered.text), "")
                 update["final_response"] = normalized.reply
+                if lead_text:
+                    from ..provisional_reply import ContinuationPrefix
+                    recovered_prefix = ContinuationPrefix(lead_text)
+                    update["final_response"] = recovered_prefix.push(normalized.reply) + recovered_prefix.finish()
                 if not normalized.reply:
                     recovery["status"] = "invalid_normalized_completion"
                 update["model"] = recovered.model
@@ -1070,6 +1044,57 @@ def make_module_node(module_name: str, config: ModuleConfig):
                 telemetry["error_code"] = ("invalid_protocol_completion" if invalid_protocol else
                     "reasoning_budget_exhausted" if recovery.get("original_finish_reason") == "length" else "empty_completion")
                 emit_output({"type": "delta", "text": update["final_response"]})
+
+        if hold_workflow_claims:
+            from ..reply_integrity import verify_reply
+            published_prefix = ''.join(published_content)
+            proposed = update.get('final_response', '')
+            pending_suffix = proposed[len(published_prefix):] if context.stream else proposed
+            verified, truth_audit = await verify_reply(
+                reply=pending_suffix, read_authority=reply_authority,
+                module=module_name, provider=context.provider, system=system, messages=messages,
+                elapsed_seconds=perf_counter() - generation_started,
+                total_timeout_seconds=(context.provider._main_timeout_seconds()
+                    if hasattr(context.provider, '_settings')
+                    else context.settings.provider_request_timeout_seconds),
+                allow_recovery=not update.get('error'),
+                current_turn_committed=bool(state.get('confirmation_receipt')),
+                visible_prefix=published_prefix)
+            telemetry['workflow_truth'] = truth_audit
+            if truth_audit.get('usage'):
+                usage = update.get('usage', {})
+                for key, value in truth_audit['usage'].items():
+                    usage[key] = usage.get(key, 0) + value
+                update['usage'] = telemetry['usage'] = usage
+            if verified is None:
+                # Preserve any already published safe prefix byte-for-byte.
+                # The suspect sentence is never displayed or persisted.
+                emitted_content[:] = [published_prefix] if published_prefix else []
+                update.update(final_response=published_prefix, reasoning_content='', reply_held=True,
+                    error='暂时无法核实后续回复中的保存结果，相关内容未展示；已有信息无需重新填写。')
+                telemetry['error_code'] = 'uncommitted_workflow_claim'
+            else:
+                if truth_audit['status'] == 'recovered':
+                    if lead_text and not published_prefix:
+                        from ..provisional_reply import ContinuationPrefix
+                        prefix = ContinuationPrefix(lead_text)
+                        verified = prefix.push(verified) + prefix.finish()
+                    update['reasoning_content'] = ''
+                emitted_content[:] = [published_prefix + verified]
+                update['final_response'] = published_prefix + verified
+                if context.stream and verified:
+                    _send({'type': 'delta', 'text': verified})
+
+        if not update.get('error'):
+            # The tool-produced display is the exact reviewed plan, not a
+            # model paraphrase. Bind it only after this reply is durable.
+            for display in state.get('pa_operation_displays') or []:
+                if display and display not in update.get('final_response', ''):
+                    suffix = ('\n\n' if update.get('final_response') else '') + display
+                    update['final_response'] = update.get('final_response', '') + suffix
+                    emitted_content.append(suffix)
+                    if context.stream:
+                        _send({'type': 'delta', 'text': suffix})
 
         if context.stream:
             # Keep the saved answer byte-for-byte aligned with delivered deltas;
@@ -1139,32 +1164,27 @@ async def risk_gate_node(state: AgentState, runtime: Runtime[GraphContext], writ
     normal coaching reply has already been delivered by the time anyone knows
     the turn was a crisis.
 
-    Costs one extra router-model call per turn. `risk_gate_enabled` turns it
-    off for anyone who would rather have the latency back.
-
-    Fails **open** on error: if the check itself breaks, the turn proceeds as
-    normal coaching rather than being blocked. A crisis reply generated from a
-    failed screen would be both wrong and alarming, and the module prompts
-    still carry their own risk-handling instructions underneath.
+    Only an explicit valid safe verdict permits ordinary conversation. Failed,
+    invalid or disabled screening goes to a deterministic retry notice; it must
+    never be interpreted as either a safe verdict or a detected crisis.
     """
     # Explicit injection also works in async graphs on Python 3.10.
     _send = _node_writer(writer, config)
     telemetry = dict(state.get("telemetry") or {})
     if not runtime.context.settings.risk_gate_enabled:
         telemetry["risk_gate_duration_ms"] = 0
+        telemetry["risk_gate_status"] = "disabled"
         return {"risk": None, "telemetry": telemetry}
 
     started = perf_counter()
     try:
-        raw, completion = await assess_risk_detailed(
-            # Safety classification is a short deterministic extraction job,
-            # not part of the user's model preference. Keep it on DeepSeek's
-            # fast non-thinking router so choosing Doubao does not add a
-            # second Ark call before every visible reply.
-            runtime.context.router_provider,
-            user_message=state["user_input"],
-        )
+        async with risk_provider(runtime.context.router_provider, runtime.context.settings) as screener:
+            raw, completion = await track_call('risk_gate', assess_risk_detailed(
+                screener, user_message=state["user_input"],
+            ), model=routing_model(screener))
         risk = coerce(RISK_SPECS, raw)
+        valid_risk_result = (bool(completion.text) and risk.get("risk_status") in (0, 1)
+                             and completion.finish_reason in (None, "stop"))
         if runtime.context.sessionmaker is not None:
             # This write is local and tiny; keeping it in the already-blocking
             # safety gate avoids racing the main transcript transaction on
@@ -1174,25 +1194,33 @@ async def risk_gate_node(state: AgentState, runtime: Runtime[GraphContext], writ
                     stage="risk_gate",
                     session_id=state.get("session_id"),
                     subject_id=state.get("subject_id"),
-                    provider=runtime.context.router_provider.name,
+                    provider=screener.name,
                     model_name=completion.model,
                     duration_ms=int((perf_counter() - started) * 1000),
                     usage=completion.usage,
                     request_id=completion.request_id,
                     finish_reason=completion.finish_reason,
-                    error_code=None if completion.text else "empty_completion",
+                    error_code=None if valid_risk_result else "invalid_risk_result",
                     prompt_version=hashlib.sha256(b"risk_gate_v1").hexdigest()[:16],
             )
-    except Exception:  # noqa: BLE001 — see docstring: fail open
-        logger.exception("risk gate failed; continuing as a normal turn")
+    except Exception as exc:  # noqa: BLE001 — fail closed with a retry notice
+        logger.exception("risk gate failed; ordinary conversation blocked")
         telemetry["risk_gate_duration_ms"] = int((perf_counter() - started) * 1000)
+        telemetry["risk_gate_status"] = "failed"
         record_span(telemetry, "risk_gate", started, origin=state.get("turn_started_monotonic"), status="failed")
+        if runtime.context.sessionmaker is not None:
+            await save_ai_event(runtime.context.sessionmaker, stage='risk_gate',
+                session_id=state.get('session_id'), subject_id=state.get('subject_id'),
+                provider='deepseek', model_name=runtime.context.settings.risk_gate_model,
+                duration_ms=telemetry['risk_gate_duration_ms'], error_code=type(exc).__name__)
         return {"risk": None, "telemetry": telemetry}
 
     telemetry["risk_gate_duration_ms"] = int((perf_counter() - started) * 1000)
 
-    record_span(telemetry, "risk_gate", started, origin=state.get("turn_started_monotonic"))
-    flagged = bool(risk.get("risk_status"))
+    record_span(telemetry, "risk_gate", started, origin=state.get("turn_started_monotonic"),
+                status="completed" if valid_risk_result else "failed")
+    flagged = valid_risk_result and risk.get("risk_status") == 1
+    telemetry["risk_gate_status"] = "blocked" if flagged else "passed" if valid_risk_result else "failed"
     _send({"type": "trace", "node": "risk_gate", "detail": {"flagged": flagged}})
 
     if flagged:
@@ -1204,10 +1232,44 @@ async def risk_gate_node(state: AgentState, runtime: Runtime[GraphContext], writ
     return {"risk": risk if flagged else None, "telemetry": telemetry}
 
 
+RISK_CHECK_RETRY_REPLY = "本次安全检查未能完成，暂时无法继续对话。请稍后重试。"
+
+
+async def risk_check_failed_node(state: AgentState, runtime: Runtime[GraphContext],
+                                 writer: StreamWriter = None, config: RunnableConfig = None) -> dict:
+    """Persist only the transcript notice; no model, routing or business writes."""
+    context = runtime.context
+    _send = _node_writer(writer, config)
+    session_id = state['session_id']
+    live = await context.store.get(session_id)
+    module = state.get('current_module') or (live.module if live else None) or DEFAULT_MODULE
+    created = utc_now()
+    if context.generation is not None:
+        context.generation.seal()
+    await context.store.append(session_id, Message(role='user', content=state['user_input'],
+                                                   created_at=state.get('user_created_at')))
+    await context.store.append(session_id, Message(role='assistant', content=RISK_CHECK_RETRY_REPLY,
+                                                   created_at=created))
+    telemetry = {**(state.get('telemetry') or {}), 'error_code':'risk_check_failed',
+                 'main_generation_duration_ms':0,
+                 'reply_trace':{'visible_reply':RISK_CHECK_RETRY_REPLY,
+                                'display_source':'risk_check_retry_notice'}}
+    _send({'type':'delta', 'text':RISK_CHECK_RETRY_REPLY})
+    _send({'type':'done', 'session_id':session_id, 'reply_module':module, 'next_module':module,
+           'routing_pending':False, 'assistant_created_at':created.isoformat(), 'usage':{}})
+    return {'final_response':RISK_CHECK_RETRY_REPLY, 'reasoning_content':'', 'error':None,
+            'provider':'system', 'model':'系统提示（未调用主回复）', 'usage':{},
+            'next_module':module, 'extracted_intent':module, 'routing_pending':False,
+            'pa_background_pending':False, 'reply_held':True, 'telemetry':telemetry,
+            'assistant_created_at':created}
+
+
 def route_after_risk(state: AgentState) -> str:
     """Crisis branch, or the module the intent analysis picked."""
     if state.get("risk"):
         return "crisis"
+    if (state.get('telemetry') or {}).get('risk_gate_status') != 'passed':
+        return 'risk_check_failed'
     return route_after_intent(state)
 
 
@@ -1231,6 +1293,24 @@ async def crisis_node(state: AgentState, runtime: Runtime[GraphContext], writer:
         max_history_messages=context.settings.max_history_messages,
         user_created_at=state.get("user_created_at"))
     system, messages = prepared.system, prepared.messages
+    crisis_prefix = None
+    crisis_emitted = []
+    if context.stream and getattr(context, "reply_lead_task", None) is not None:
+        from ..provisional_reply import take_ready_lead, parallel_reply_system, ContinuationPrefix
+        lead_context = getattr(context, "reply_lead_context", None)
+        if lead_context is not None and not lead_context.done():
+            lead_context.set_result(as_text(system))
+        lead_text = take_ready_lead(context)
+        system = parallel_reply_system(system, lead_text)
+        if lead_text:
+            crisis_prefix = ContinuationPrefix(lead_text)
+
+    def emit_crisis_text(text):
+        text = crisis_prefix.push(text) if crisis_prefix is not None else text
+        if text:
+            crisis_emitted.append(text)
+            _send({"type": "delta", "text": text})
+
     _send({"type": "trace", "node": "context_pipeline", "detail": prepared.metrics})
 
     reply_buffer = VisibleReplyBuffer.create()
@@ -1254,7 +1334,7 @@ async def crisis_node(state: AgentState, runtime: Runtime[GraphContext], writer:
 
     try:
         if context.stream:
-            async for delta in context.provider.stream(system=system, messages=messages):
+            async for delta in track_stream('main_generation', context.provider.stream(system=system, messages=messages), model=context.provider.model):
                 elapsed_ms = int((perf_counter() - generation_started) * 1000)
                 if delta.kind == "usage":
                     if delta.usage:
@@ -1276,9 +1356,9 @@ async def crisis_node(state: AgentState, runtime: Runtime[GraphContext], writer:
                     first_content_seen = True
                 for guarded_delta in content_guard.push(delta.text):
                     for visible_delta in reply_buffer.push(guarded_delta):
-                        _send({"type": "delta", "text": visible_delta})
+                        emit_crisis_text(visible_delta)
         else:
-            completion = await context.provider.complete(system=system, messages=messages)
+            completion = await track_call("main_generation", context.provider.complete(system=system, messages=messages), model=context.provider.model)
             normalized = normalize_reasoning_channels(
                 unwrap_chat_reply(completion.text), completion.reasoning_content
             )
@@ -1309,7 +1389,13 @@ async def crisis_node(state: AgentState, runtime: Runtime[GraphContext], writer:
             content_guard, reply_buffer, reasoning_parts
         )
         for visible_delta in final_deltas:
-            _send({"type": "delta", "text": visible_delta})
+            emit_crisis_text(visible_delta)
+        if crisis_prefix is not None:
+            tail = crisis_prefix.finish()
+            if tail:
+                emit_crisis_text(tail)
+            telemetry["repeated_lead_removed"] = crisis_prefix.removed
+        visible = "".join(crisis_emitted)
         if disclosed_reasoning:
             _send({"type": "reasoning_delta", "text": disclosed_reasoning})
         _send({"type": "delta", "text": CRISIS_RESOURCES})
@@ -1343,7 +1429,7 @@ async def route_next_module_node(
     result = {"next_module": state.get('next_module', current) if state.get('pa_tools_used') else current,
         "routing_reasoning_content": state.get("routing_reasoning_content", ""),
         "router_model_name": state.get("router_model_name", ""),
-        "routing_pending": not bool(state.get("pa_tools_used") or state.get("reply_held") or state.get("error")
+        "routing_pending": not bool(state.get("pa_tools_used") or state.get("pa_background_pending") or state.get("reply_held") or state.get("error")
             or state.get("risk") or state.get("forced_module")
             or (state.get("memory") or {}).get("sandbox_mode") == "true")}
     if state.get("risk"):
@@ -1409,7 +1495,8 @@ async def _summarize_and_save(
     """
     try:
         started = perf_counter()
-        completion = await provider.route_detailed(
+        from ..module_summary import summarize_module
+        completion = await summarize_module(provider,
             system=SUMMARIZER_PROMPT,
             user=f"（本轮从 {from_module} 切换到 {to_module}）\n\n{transcript}",
             max_tokens=settings_summarizer_max_tokens,
@@ -1421,7 +1508,7 @@ async def _summarize_and_save(
                 stage="module_summarizer",
                 session_id=session_id,
                 subject_id=subject_id,
-                provider=provider.name,
+                provider="deepseek" if hasattr(provider, "_settings") else provider.name,
                 model_name=completion.model,
                 duration_ms=int((perf_counter() - started) * 1000),
                 usage=completion.usage,
@@ -1474,8 +1561,8 @@ async def _extract_module_data(
     evidence_turns: list[tuple[str, str]] | None = None,
     evidence_messages=None,
     evidence_context=None,
-) -> dict:
-    """Extract and audit validated module data without writing a record."""
+) -> dict | None:
+    """Extract/audit data; None is failure, never a new empty snapshot."""
     started = perf_counter()
     if module == "module_1" and evidence_turns is not None:
         from ..m1_contract import indexed_transcript
@@ -1492,21 +1579,29 @@ async def _extract_module_data(
             for message in evidence_messages], ensure_ascii=False)
     if evidence_messages is not None:
         transcript += "\n\n" + temporal_context(evidence_messages)
-    raw, completion = await extract_module_record_detailed(
+    if module in {"module_2", "module_4"} and sessionmaker is not None:
+        from ..activity_attribution import activity_candidates, ATTRIBUTION_SCHEMA
+        async with sessionmaker() as attribution_db:
+            attribution_cid = evidence_messages[0].conversation_id if evidence_messages else None
+            candidates = await activity_candidates(attribution_db, subject_id, conversation_id=attribution_cid,
+                source_text=next((m.content for m in reversed(evidence_messages or []) if m.role == "user"), None))
+        transcript += "\n\n活动归属候选（只读数据库事实，不代表本轮已执行）：\n" + json.dumps(candidates, ensure_ascii=False)
+        transcript += "\n" + ATTRIBUTION_SCHEMA
+    raw, completion = await track_call("clinical_extraction", extract_module_record_detailed(
         provider, module=module, transcript=transcript, max_tokens=max_tokens
-    )
-    data = coerce(MODULE_SPECS[module], raw)
-    if module == "module_2":
+    ), model=routing_model(provider))
+    data = None if completion.extraction_error_code else coerce(MODULE_SPECS[module], raw)
+    if data is not None and module == "module_2":
         from ..temporal_evidence import normalize_plan_time
         data = normalize_plan_time(data, evidence_messages, timezone_name="Asia/Shanghai",
             output_key="target_activity_time")
-    if module == "module_4" and isinstance(raw.get("m4_contract"), dict):
+    if data is not None and module == "module_4" and isinstance(raw.get("m4_contract"), dict):
         data["m4_contract"] = raw["m4_contract"]
-    if module in {"module_2", "module_4"}:
+    if data is not None and module in {"module_2", "module_4"}:
         for key in ("core_goal_choice", "goal_proposal", "plan_context", "m2_activity_context", "activity_observations", "review_followup", "activity_corrections"):
             if key in raw and isinstance(raw[key], (dict, list)):
                 data[key] = raw[key]
-    if module == "module_1" and evidence_turns is not None:
+    if data is not None and raw and module == "module_1" and evidence_turns is not None:
         from ..m1_contract import snapshot
         data = snapshot(raw, data, evidence_turns, session_id)
     await save_ai_event(
@@ -1520,14 +1615,17 @@ async def _extract_module_data(
         usage=completion.usage,
         request_id=completion.request_id,
         finish_reason=completion.finish_reason,
-        error_code=None if completion.text else "empty_completion",
+        error_code=completion.extraction_error_code,
         prompt_version=hashlib.sha256(
             ("clinical_" + module + ("_20260914" if module == "module_1" else "_20260917" if module == "module_4" else "_v1")).encode("utf-8")
         ).hexdigest()[:16],
-        event_metadata={"module": module, **({"contract_version": data["m1_contract"]["version"],
+        event_metadata={"module": module,
+            "extraction_status": "failed" if data is None else "completed" if data else "empty",
+            "json_repair": completion.extraction_repair,
+            **({"contract_version": data["m1_contract"]["version"],
             "contract_path": data["m1_contract"]["path"], "missing_fields": data["m1_contract"]["missing_fields"],
             "validation_issues": data["m1_contract"].get("validation_issues", [])}
-            if "m1_contract" in data else {})},
+            if data and "m1_contract" in data else {})},
     )
     return data
 
@@ -1825,7 +1923,7 @@ async def _run_background_routing(
                 max_tokens=context.settings.extraction_max_tokens, session_id=session_id,
                 evidence_turns=turns, evidence_messages=extraction_messages,
                 evidence_context=state.get("clinical_context") if current in {"module_2", "module_4"} else None)
-            telemetry["extraction"] = {"status": "completed" if data else "empty", "module": current,
+            telemetry["extraction"] = {"status": "failed" if data is None else "completed" if data else "empty", "module": current,
                                         "source_message_id": assistant_message_id, "result": data}
         except Exception:
             logger.exception("post-reply extraction failed session=%s", session_id)
@@ -1835,6 +1933,19 @@ async def _run_background_routing(
         record_span(telemetry, "extraction", extract_started, origin=origin,
                     status=telemetry["extraction"]["status"], after_display=True)
         if not still_current():
+            return
+        if not data:
+            # No source refresh means no record/progress/confirmation refresh.
+            # Preserve the previous snapshot with its previous message boundary;
+            # the existing freshness checks keep it from confirming this turn.
+            telemetry["database_write"] = {"status": "skipped",
+                "reason_code": "extraction_failed" if data is None else "empty_extraction",
+                "source_message_id": assistant_message_id}
+            await save_ai_event(context.sessionmaker, stage="post_reply_persistence",
+                session_id=session_id, subject_id=subject_id,
+                assistant_message_id=assistant_message_id, provider=None, model_name=None,
+                error_code="clinical_extraction_failed" if data is None else None,
+                event_metadata=telemetry)
             return
         turn_lock = await context.store.get_turn_lock(session_id)
         async with turn_lock:
@@ -1894,6 +2005,20 @@ async def _run_background_routing(
                         rt = schema.tables["conversation_runtime_states"]
                         await db.execute(update(rt).where(rt.c.conversation_id == conversation.id).values(
                             current_module=current))
+                if mode == ROUTER_ONLY and current == 'module_2' and data:
+                    from ..dialogue_confirmation import advance_from_dialogue
+                    await advance_from_dialogue(db, session_id=session_id, user_id=subject_id,
+                        assistant_message_id=assistant_message_id, allow_transition=False)
+                    # Readiness here only enables acceptance of a displayed
+                    # version; it cannot change the Router-owned module.
+                    _, refreshed = await runtime_for(db, session_id)
+                    marker = (refreshed['memory'] or {}).get('dialogue_draft') or {}
+                    if (marker.get('summary_verified') and marker.get('field_complete')
+                            and marker.get('assistant_message_id') == assistant_message_id
+                            and marker.get('cycle_id') == refreshed['active_cycle_id']):
+                        rt = schema.tables['conversation_runtime_states']
+                        await db.execute(update(rt).where(rt.c.conversation_id == conversation.id).values(
+                            last_transition_reason='awaiting_record_confirmation'))
                 if mode == ROUTER_ONLY:
                     # Source-backed drafts and activities may be refreshed,
                     # but code progress/confirmation must not reinterpret the
@@ -1940,6 +2065,10 @@ def schedule_background_routing(
     assistant_message_id: int | None,
 ) -> None:
     """Start sourced fact extraction after the visible reply is durable."""
+    if state.get("pa_background_pending"):
+        from ..pa_background import schedule_pa_background
+        schedule_pa_background(state, context, assistant_message_id=assistant_message_id)
+        return
     if not state.get("routing_pending") or state.get("reply_held"):
         return
     session_id = state["session_id"]
@@ -2081,6 +2210,10 @@ def _derive_memory(state: AgentState) -> dict[str, str]:
     no extra model call.
     """
     memory = dict(state.get("memory") or {})
+    if state.get("error") or state.get("reply_held"):
+        # The transcript retains partial text for the user; derived cards and
+        # anchors must not promote a failed generation into established facts.
+        return memory
     memory["turn_count"] = str(int(memory.get("turn_count", "0")) + 1)
     memory["last_module"] = state.get("extracted_intent", DEFAULT_MODULE)
 

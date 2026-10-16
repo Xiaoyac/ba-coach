@@ -1,4 +1,6 @@
 import { apiHeaders, checkAuthentication } from "@/lib/http";
+import { chatRequestError, safeGenerationError } from "@/lib/chatRecovery";
+import type { GoalCardConfirmationResult } from "@/lib/goal-card";
 
 /**
  * Where the backend lives, from the browser's point of view.
@@ -29,6 +31,7 @@ export interface ModelRequestInfo {
   recorded_at?: string | null;
   duration_ms?: number | null;
   error_code?: string | null;
+  router_calls?: { request: { model: string; messages: { role: string; content: string }[]; max_tokens?: number; reasoning_effort?: string; thinking?: { type?: string }; temperature?: number }; response?: { model?: string; content?: string; reasoning_content?: string; finish_reason?: string; error_code?: string }; request_id?: string; http_status?: number; duration_ms?: number }[];
 }
 
 export interface MessageRequests {
@@ -44,7 +47,10 @@ export interface ChatMessage {
   role: Role;
   created_at?: string | null;
   content: string;
-  reply_status?: "interrupted" | null;
+  /** Transient SSE presentation state; never sent back as conversation history. */
+  stream_phase?: "lead" | "body";
+  stream_lead_length?: number;
+  reply_status?: "interrupted" | "incomplete" | null;
   /** Provider-supplied thinking, disclosed separately from the final answer. */
   reasoning_content?: string | null;
   model_name?: string | null;
@@ -60,6 +66,7 @@ export interface ChatMessage {
 export interface ChatRequest {
   message: string;
   generation_id?: string;
+  retry_of_message_id?: number;
   session_id?: string | null;
   provider?: "claude" | "deepseek" | "doubao";
   /** Pin a module and skip the router, e.g. "module_3". */
@@ -97,13 +104,13 @@ export async function sendChat(body: ChatRequest): Promise<ChatResponse> {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`Chat request failed (${res.status}): ${detail}`);
+    throw new Error(chatRequestError(res.status));
   }
   return res.json();
 }
 
 export interface RoutingMeta {
+  goal_card_confirmation?: GoalCardConfirmationResult;
   session_id: string;
   user_message_id: number;
   user_created_at?: string;
@@ -120,6 +127,7 @@ export interface RoutingMeta {
 
 export interface StreamHandlers {
   /** Pause between the visible opening and its continuation in one reply. */
+  onRetry?: (value: { retrying: boolean; attempt: number; max_retries: number; generation_id: string }) => void;
   onReplyWait?: (value: { waiting: boolean; generation_id: string }) => void;
   onCancelled?: () => void;
   /**
@@ -133,8 +141,9 @@ export interface StreamHandlers {
   onMeta?: (meta: Partial<RoutingMeta>) => void;
   onReasoningDelta?: (text: string) => void;
   onRoutingReasoning?: (text: string, model: string) => void;
-  onDelta?: (text: string) => void;
+  onDelta?: (text: string, phase?: "lead" | "body") => void;
   onDone?: () => void;
+  onPersisted?: (saved: boolean) => void;
   onError?: (message: string) => void;
 }
 
@@ -156,7 +165,22 @@ export async function streamChat(
   checkAuthentication(res);
 
   if (!res.ok || !res.body) {
-    handlers.onError?.(`Chat request failed (${res.status})`);
+    let message = chatRequestError(res.status);
+    if (body.retry_of_message_id && res.status === 409) {
+      const result = await res.json().catch(() => null);
+      if (typeof result?.detail === "string") message = result.detail;
+    }
+    if (body.metadata?.goal_card_action === "confirm") {
+      if (res.status === 409) {
+        const result = await res.json().catch(() => null);
+        if (typeof result?.detail === "string") message = result.detail;
+      }
+      handlers.onMeta?.({goal_card_confirmation: {
+        card_id: body.metadata.goal_card_id, revision: Number(body.metadata.goal_card_revision),
+        user_message_id: null, request_id: body.generation_id, saved: false, message,
+      }});
+    }
+    handlers.onError?.(message);
     return;
   }
 
@@ -168,7 +192,7 @@ export async function streamChat(
 
   try { while (true) {
     const { done, value } = await reader.read();
-    if (done) throw new Error(generationError ?? "连接已中断，正在同步已保存的回复；请勿重复发送。");
+    if (done) throw new Error(generationError ?? "连接已中断，原文已保留。请检查记录后重新尝试。");
     buffer += decoder.decode(value, { stream: true });
     buffer = buffer.replace(/\r\n/g, "\n");
 
@@ -187,6 +211,11 @@ export async function streamChat(
 
       const payload = JSON.parse(dataLines.join("\n"));
       switch (event) {
+        case "retry":
+          if (typeof payload.retrying === "boolean" && typeof payload.generation_id === "string"
+            && Number.isInteger(payload.attempt) && payload.attempt >= 1 && payload.attempt <= 5
+            && payload.max_retries === 5) handlers.onRetry?.(payload);
+          break;
         case "reply_wait":
           if (typeof payload.waiting === "boolean" && typeof payload.generation_id === "string") {
             handlers.onReplyWait?.(payload);
@@ -201,7 +230,7 @@ export async function streamChat(
           break;
         case "delta":
           if (typeof payload.text === "string" && payload.text.trim()) replyReceived = true;
-          handlers.onDelta?.(payload.text);
+          handlers.onDelta?.(payload.text, payload.phase === "lead" ? "lead" : "body");
           break;
         case "reasoning_delta":
           handlers.onReasoningDelta?.(payload.text);
@@ -210,12 +239,12 @@ export async function streamChat(
           handlers.onRoutingReasoning?.(payload.text, payload.model ?? "");
           break;
         case "error":
-          generationError = typeof payload.detail === "string" && payload.detail.trim()
-            ? payload.detail as string : "模型生成失败，请稍后重试或切换模型。";
+          generationError = safeGenerationError(payload.detail);
           handlers.onError?.(generationError);
           break;
         case "persisted":
           handlers.onDone?.();
+          handlers.onPersisted?.(payload.saved === true);
           if (payload.saved === false) {
             if (replyReceived) {
               const saveError = "回复已生成，但保存失败，请先复制回复后再刷新。";

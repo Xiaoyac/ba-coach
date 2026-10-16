@@ -57,7 +57,7 @@ def test_admin_can_search_the_account_directory(
             "email": "quietriver@example.com",
             "nickname": "小河",
             "tag": "24680",
-            "birth_date": "1998-01-01",
+            "birth_year": 1998,
         }),
     ).json()["account"]
 
@@ -68,9 +68,8 @@ def test_admin_can_search_the_account_directory(
     accounts = response.json()["accounts"]
     assert len(accounts) == 1
     assert accounts[0]["username"] == "quietriver"
-    assert accounts[0]["tag"] == "24680"
+    assert "tag" not in accounts[0] and "display_id" not in accounts[0]
     assert accounts[0]["nickname"] == "小河"
-    assert accounts[0]["display_id"] == "小河#24680"
     assert accounts[0]["role"] == "user"
 
 
@@ -85,7 +84,7 @@ def test_admin_grants_role_and_existing_session_observes_it(
             "email": "newmoderator@example.com",
             "nickname": "New Moderator",
             "tag": "13579",
-            "birth_date": "1998-01-01",
+            "birth_year": 1998,
         }),
     )
     target_headers = {
@@ -149,7 +148,7 @@ def test_admin_can_delete_another_account_and_cannot_delete_self(
             "email": "deletecandidate@example.com",
             "nickname": "待删除用户",
             "tag": "81023",
-            "birth_date": "1998-01-01",
+            "birth_year": 1998,
         }),
     )
     assert created.status_code == 201, created.text
@@ -195,15 +194,15 @@ def test_same_nickname_can_use_distinct_user_chosen_tags(
                 "email": f"{username}@example.com",
                 "nickname": "Shared Name",
                 "tag": tag,
-                "birth_date": "1998-01-01",
+                "birth_year": 1998,
             }),
         )
         assert response.status_code == 201, response.text
-        ids.append(response.json()["account"]["display_id"])
+        ids.append(response.json()["account"]["username"])
 
     assert ids[0] != ids[1]
     listed = client.get(
         "/api/admin/accounts", params={"query": "Shared Name"}, headers=admin_headers
     )
     assert listed.status_code == 200, listed.text
-    assert {item["display_id"] for item in listed.json()["accounts"]} == set(ids)
+    assert {item["username"] for item in listed.json()["accounts"]} == set(ids)

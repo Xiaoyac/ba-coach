@@ -24,60 +24,39 @@ def _get(client: TestClient, headers: dict[str, str]) -> dict:
     return response.json()
 
 
-def test_profile_changes_public_nickname_and_chosen_tag(
-    client: TestClient, register
-) -> None:
-    account_headers = register(
-        username="identityowner", nickname="旧昵称", tag="12345"
-    )
-    updated = client.patch(
-        "/api/profile",
-        json={"nickname": "新昵称", "tag": "54321"},
-        headers=account_headers,
-    )
+def test_profile_changes_nickname_without_tag(client: TestClient, register) -> None:
+    headers = register(username="identityowner", nickname="旧昵称")
+    before = client.get("/api/auth/me", headers=headers).json()
+    updated = client.patch("/api/profile", json={"nickname": " 新昵称 "}, headers=headers)
     assert updated.status_code == 200, updated.text
-    assert updated.json()["display_id"] == "新昵称#54321"
-    me = client.get("/api/auth/me", headers=account_headers).json()
+    assert updated.json()["nickname"] == "新昵称"
+    assert "tag" not in updated.json() and "display_id" not in updated.json()
+    me = client.get("/api/auth/me", headers=headers).json()
     assert me["username"] == "identityowner"
-    assert me["display_id"] == "新昵称#54321"
+    assert me["nickname"] == "新昵称"
+    assert me["profile_uuid"] == before["profile_uuid"]
 
 
-def test_existing_untagged_account_can_choose_its_first_tag(
-    client: TestClient, register, db_sessionmaker
-) -> None:
-    import asyncio
-
-    from sqlalchemy import delete
-
-    from app.models import AccountHandle
-
-    account_headers = register(username="untaggedowner", nickname="保留昵称")
-
-    async def remove_handle() -> None:
-        async with db_sessionmaker() as db:
-            await db.execute(delete(AccountHandle))
-            await db.commit()
-
-    asyncio.run(remove_handle())
-    assert _get(client, account_headers)["display_id"] is None
-
-    updated = client.patch(
-        "/api/profile", json={"tag": "33333"}, headers=account_headers
-    )
+def test_old_client_tag_does_not_change_profile(client: TestClient, register) -> None:
+    headers = register(username="untaggedowner", nickname="保留昵称")
+    updated = client.patch("/api/profile", json={"tag": "33333", "nickname": "保留昵称"}, headers=headers)
     assert updated.status_code == 200, updated.text
-    assert updated.json()["display_id"] == "保留昵称#33333"
+    assert updated.json()["nickname"] == "保留昵称"
+    assert "tag" not in updated.json()
 
 
-def test_profile_rejects_duplicate_nickname_and_tag(
-    client: TestClient, register
-) -> None:
-    register(username="identityfirst", nickname="同名", tag="11111")
-    second = register(username="identitysecond", nickname="同名", tag="22222")
-    conflict = client.patch(
-        "/api/profile", json={"tag": "11111"}, headers=second
-    )
-    assert conflict.status_code == 409
-    assert conflict.json()["detail"] == "这个昵称与标签组合已被使用"
+def test_profile_allows_duplicate_nickname(client: TestClient, register) -> None:
+    first = register(username="identityfirst", nickname="同名")
+    second = register(username="identitysecond", nickname="原来昵称")
+    updated = client.patch("/api/profile", json={"nickname": "同名"}, headers=second)
+    assert updated.status_code == 200, updated.text
+    assert _get(client, first)["nickname"] == _get(client, second)["nickname"] == "同名"
+
+
+@pytest.mark.parametrize("nickname", [None, "", "   "])
+def test_profile_rejects_empty_nickname(client: TestClient, register, nickname) -> None:
+    headers = register()
+    assert client.patch("/api/profile", json={"nickname": nickname}, headers=headers).status_code == 422
 
 
 def _patch(client: TestClient, headers: dict[str, str], **changes) -> dict:
@@ -102,7 +81,6 @@ def test_registration_fields_are_visible(client: TestClient, register) -> None:
         nickname="南瓜",
         age=28,
         living_status="独居",
-        communication_preference="温柔引导",
         physical_condition=["易疲劳"],
         behavior_taboo=["不能剧烈运动"],
     )
@@ -110,7 +88,6 @@ def test_registration_fields_are_visible(client: TestClient, register) -> None:
     assert body["nickname"] == "南瓜"
     assert body["age"] == 28
     assert body["living_status"] == "独居"
-    assert body["communication_preference"] == "温柔引导"
     assert body["physical_condition"] == ["易疲劳"]
     assert body["behavior_taboo"] == ["不能剧烈运动"]
     assert body["current_module"] == "开场"
@@ -139,7 +116,6 @@ def test_a_partial_edit_leaves_everything_else_alone(
         username="partial",
         nickname="南瓜",
         age=28,
-        communication_preference="温柔引导",
         physical_condition=["易疲劳"],
     )
     body = _patch(client, headers, reminder_frequency="每天一次")
@@ -147,7 +123,6 @@ def test_a_partial_edit_leaves_everything_else_alone(
     assert body["reminder_frequency"] == "每天一次"
     assert body["nickname"] == "南瓜"
     assert body["age"] == 28
-    assert body["communication_preference"] == "温柔引导"
     assert body["physical_condition"] == ["易疲劳"]
 
 
@@ -171,10 +146,10 @@ def test_unknown_model_preference_is_rejected(
 
 def test_an_explicit_null_clears_a_field(client: TestClient, register) -> None:
     """"Absent" and "set to null" are genuinely different requests."""
-    headers = register(username="clearing", communication_preference="温柔引导")
-    assert _get(client, headers)["communication_preference"] == "温柔引导"
-    assert _patch(client, headers, communication_preference=None)[
-        "communication_preference"
+    headers = register(username="clearing", living_status="独居")
+    assert _get(client, headers)["living_status"] == "独居"
+    assert _patch(client, headers, living_status=None)[
+        "living_status"
     ] is None
 
 
@@ -189,12 +164,12 @@ def test_a_healed_injury_can_be_removed(client: TestClient, register) -> None:
 
 
 def test_every_editable_section_round_trips(client: TestClient, headers) -> None:
-    from app.birth_dates import today
+    from app.birth_years import today
     body = _patch(
         client,
         headers,
         nickname="小林",
-        birth_date=today().replace(year=today().year - 31, month=1, day=1).isoformat(),
+        birth_year=today().year - 31,
         living_status="和家人",
         has_supporter=True,
         supporter1_relation="朋友",
@@ -223,7 +198,6 @@ def test_an_empty_patch_is_rejected(client: TestClient, headers) -> None:
 def test_values_outside_the_enum_are_rejected(client: TestClient, headers) -> None:
     for bad in (
         {"living_status": "和室友"},
-        {"communication_preference": "随便聊聊"},
         {"activity_intensity": "超级激烈"},
         {"content_taboo": ["不谈天气"]},
         {"age": 3},

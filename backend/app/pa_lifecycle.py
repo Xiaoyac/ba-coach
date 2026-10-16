@@ -27,7 +27,7 @@ async def read_pa_cards(db, *, user_id, goals):
         plans.c.id.label('plan_id'), plans.c.activity_content, plans.c.schedule_text,
         plans.c.location, plans.c.duration_minutes, reviews.c.record_status.label('review_status'),
         reviews.c.execution_result, reviews.c.scenario_type).select_from(source)
-        .where(owned.c.user_id == user_id).order_by(cycles.c.created_at.desc(), cycles.c.id))).mappings().all()
+        .where(owned.c.user_id == user_id, owned.c.id.in_([g['id'] for g in goals])).order_by(cycles.c.created_at.desc(), cycles.c.id))).mappings().all()
     by_goal = {g['id']: g for g in goals}
     cards, seen = [], set()
     for row in rows:
@@ -54,7 +54,9 @@ async def read_pa_cards(db, *, user_id, goals):
                     for g in goals if g['id'] not in seen]
 
 
-async def unfinished_core_goals(db, *, user_id):
+async def unfinished_core_goals(db, *, user_id, conversation_id=None):
+    from .goal_scope import goal_filter
+    scope = await goal_filter(db, user_id, conversation_id)
     goals, cycles, plans, details = (schema.tables[n] for n in
         ('pa_goals', 'pa_cycles', 'module_two_record', 'pa_goal_details'))
     rows = (await db.execute(select(goals.c.id, goals.c.title, goals.c.row_version,
@@ -63,7 +65,7 @@ async def unfinished_core_goals(db, *, user_id):
         .select_from(goals.join(details, details.c.goal_id == goals.c.id)
             .join(cycles, cycles.c.goal_id == goals.c.id).join(plans,
                 (plans.c.id == cycles.c.module_two_record_id) & (plans.c.goal_id == goals.c.id)))
-        .where(goals.c.user_id == user_id, goals.c.status == 'active', details.c.goal_kind == 'primary',
+        .where(scope, goals.c.status == 'active', details.c.goal_kind == 'primary',
             cycles.c.status.in_(OPEN_CYCLES), plans.c.record_status == 'confirmed',
             plans.c.confirmation_status == 'confirmed').order_by(cycles.c.ordinal.desc()))).mappings().all()
     found = {}
@@ -99,6 +101,9 @@ def core_choice(raw, candidates, messages):
 
 async def replace_core_goal(db, *, user_id, old_goal_id, new_goal_id, conversation_id, choice):
     """Archive only the explicitly selected owned core, atomically with creation."""
+    from .goal_scope import require_goal
+    await require_goal(db, user_id, old_goal_id, conversation_id)
+    await require_goal(db, user_id, new_goal_id, conversation_id)
     goals, cycles = schema.tables['pa_goals'], schema.tables['pa_cycles']
     old = (await db.execute(select(goals).where(goals.c.id == old_goal_id,
         goals.c.user_id == user_id).with_for_update())).mappings().one_or_none()
@@ -116,9 +121,11 @@ async def replace_core_goal(db, *, user_id, old_goal_id, new_goal_id, conversati
     from .routing_modes import effective_routing_mode, ROUTER_ONLY
     from types import SimpleNamespace
     rt = schema.tables['conversation_runtime_states']
+    from .goal_scope import isolated
+    isolate = await isolated(db, user_id)
     others = (await db.execute(select(rt).join(Conversation, Conversation.id == rt.c.conversation_id)
         .where(rt.c.active_goal_id == old_goal_id, Conversation.subject_id == user_id,
-            rt.c.conversation_id != conversation_id).with_for_update())).mappings().all()
+            rt.c.conversation_id != conversation_id, False if isolate else True).with_for_update())).mappings().all()
     for state in others:
         owner = SimpleNamespace(id=state['conversation_id'], subject_id=user_id)
         router_only = await effective_routing_mode(db, conversation=owner, state=state, user_id=user_id) == ROUTER_ONLY
@@ -136,7 +143,9 @@ async def replace_core_goal(db, *, user_id, old_goal_id, new_goal_id, conversati
             'action': 'replace', 'source_quote': choice['quote']}, 'evidence_message_ids': [choice['message_id']]})
 
 
-async def reviewed_goal(db, *, user_id, memory):
+async def reviewed_goal(db, *, user_id, memory, conversation_id=None):
+    from .goal_scope import goal_filter
+    scope = await goal_filter(db, user_id, conversation_id)
     marker = (memory or {}).get('last_reviewed_cycle')
     marker = marker if isinstance(marker, dict) else {}
     goals, cycles, plans = (schema.tables[n] for n in ('pa_goals', 'pa_cycles', 'module_two_record'))
@@ -145,7 +154,7 @@ async def reviewed_goal(db, *, user_id, memory):
         plans.c.id.label('plan_id'), plans.c.activity_content, plans.c.schedule_text,
         plans.c.confirmation_message_id).select_from(goals.join(cycles, cycles.c.goal_id == goals.c.id)
             .join(plans, (plans.c.id == cycles.c.module_two_record_id) & (plans.c.goal_id == goals.c.id)))
-        .where(goals.c.user_id == user_id, goals.c.id == marker.get('goal_id'),
+        .where(scope, goals.c.id == marker.get('goal_id'),
             cycles.c.id == marker.get('cycle_id'), cycles.c.status == 'completed',
             goals.c.status == 'active', plans.c.record_status == 'confirmed'))).mappings().one_or_none()
     return {**dict(row), 'after_message_id': marker.get('after_message_id')} if row else None

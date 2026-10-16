@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   fetchAdminPrompts,
+  restorePromptVersion,
   resetAdminPrompt,
   saveAdminPrompt,
   type AdminPromptItem,
   type PromptKey,
 } from "@/lib/adminPrompts";
 import { CloseMark, PromptMark } from "@/components/icons";
+import PromptHistoryPanel from "@/components/PromptHistoryPanel";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
 type Confirmation = "discard" | "reset" | null;
@@ -21,6 +23,8 @@ export default function PromptManagerModal({ onClose }: { onClose: () => void })
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedKey, setSavedKey] = useState<PromptKey | null>(null);
+  const [view, setView] = useState<"edit" | "history">("edit");
+  const [restoreTarget, setRestoreTarget] = useState<{key: PromptKey; revision: number} | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation>(null);
 
   useEffect(() => {
@@ -49,6 +53,7 @@ export default function PromptManagerModal({ onClose }: { onClose: () => void })
   const dirty = dirtyKeys.includes(selectedKey);
 
   function requestClose() {
+    if (saving) return;
     if (dirtyKeys.length > 0) {
       setConfirmation("discard");
       return;
@@ -58,10 +63,10 @@ export default function PromptManagerModal({ onClose }: { onClose: () => void })
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !confirmation) requestClose();
+      if (event.key === "Escape" && !confirmation && !restoreTarget) requestClose();
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
-        if (dirty && !saving) void handleSave();
+        if (view === "edit" && dirty && !saving && !restoreTarget && !confirmation) void handleSave();
       }
     }
     document.addEventListener("keydown", onKeyDown);
@@ -81,7 +86,7 @@ export default function PromptManagerModal({ onClose }: { onClose: () => void })
     setError(null);
     setSavedKey(null);
     try {
-      const updated = await saveAdminPrompt(selected.key, draft);
+      const updated = await saveAdminPrompt(selected.key, draft, selected.revision);
       replacePrompt(updated);
       setSavedKey(updated.key);
     } catch (err) {
@@ -103,7 +108,7 @@ export default function PromptManagerModal({ onClose }: { onClose: () => void })
     setError(null);
     setSavedKey(null);
     try {
-      const updated = await resetAdminPrompt(selected.key);
+      const updated = await resetAdminPrompt(selected.key, selected.revision);
       replacePrompt(updated);
       setSavedKey(updated.key);
     } catch (err) {
@@ -113,20 +118,39 @@ export default function PromptManagerModal({ onClose }: { onClose: () => void })
     }
   }
 
+  async function reloadKeepingDraft() {
+    setSaving(true);
+    try { setPrompts(await fetchAdminPrompts()); setError("已载入最新版本，未保存草稿仍在编辑框中。请核对版本历史后再保存。"); }
+    catch (err) {setError(err instanceof Error ? err.message : String(err));}
+    finally {setSaving(false);}
+  }
+
+  async function performRestore() {
+    if (!restoreTarget || saving) return;
+    const current = prompts.find(p => p.key === restoreTarget.key);
+    if (!current) return;
+    setSaving(true);setError(null);
+    try {
+      const updated = await restorePromptVersion(current.key,restoreTarget.revision,current.revision);
+      replacePrompt(updated);setSavedKey(updated.key);setRestoreTarget(null);
+    } catch(err) {setRestoreTarget(null);setError(err instanceof Error ? err.message : String(err));}
+    finally {setSaving(false);}
+  }
+
   return (
     <div className="zen-overlay-enter fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5">
       <button
         type="button"
         aria-label="关闭提示词管理"
         onClick={requestClose}
-        className="absolute inset-0 bg-canvas/75 backdrop-blur-md"
+        className="default-style:absolute default-style:inset-0 default-style:bg-canvas/75 default-style:backdrop-blur-md simple:absolute simple:inset-0 simple:bg-canvas/75 simple:backdrop-blur-sm"
       />
 
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="prompt-manager-title"
-        className="relative flex h-[min(880px,calc(100dvh-1.5rem))] min-h-0 w-full max-w-6xl flex-col overflow-hidden rounded-[28px] border border-line bg-panel depth-panel backdrop-blur-2xl sm:h-[min(880px,calc(100dvh-2.5rem))]"
+        className="default-style:relative default-style:flex default-style:h-[min(880px,calc(100dvh-1.5rem))] default-style:min-h-0 default-style:w-full default-style:max-w-6xl default-style:flex-col default-style:overflow-hidden default-style:rounded-[28px] default-style:border default-style:border-line default-style:bg-panel default-style:depth-panel default-style:backdrop-blur-2xl default-style:sm:h-[min(880px,calc(100dvh-2.5rem))] simple:relative simple:flex simple:h-[min(880px,calc(100dvh-1.5rem))] simple:min-h-0 simple:w-full simple:max-w-6xl simple:flex-col simple:overflow-hidden simple:rounded-2xl simple:border simple:border-line simple:bg-panel simple:depth-panel simple:sm:h-[min(880px,calc(100dvh-2.5rem))]"
       >
         <header className="flex shrink-0 items-start gap-3 border-b border-line px-5 py-4 sm:px-6">
           <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-accent-edge bg-accent-wash text-accent-ink">
@@ -177,9 +201,11 @@ export default function PromptManagerModal({ onClose }: { onClose: () => void })
                 return (
                   <button
                     key={item.key}
+                    disabled={saving}
                     type="button"
                     onClick={() => {
                       setSelectedKey(item.key);
+                      setRestoreTarget(null);
                       setSavedKey(null);
                       setError(null);
                     }}
@@ -219,7 +245,12 @@ export default function PromptManagerModal({ onClose }: { onClose: () => void })
                   </span>
                 </div>
 
+                <div className="mb-3 flex shrink-0 gap-2" role="tablist" aria-label="提示词编辑与历史">
+                  {(["edit","history"] as const).map(tab=><button key={tab} type="button" role="tab" aria-selected={view===tab} onClick={()=>setView(tab)} className={`rounded-lg px-3 py-2 text-xs ${view===tab ? "bg-accent-wash text-accent-ink" : "text-ink-muted hover:bg-raised"}`}>{tab==="edit" ? "编辑内容" : "版本历史与对比"}</button>)}
+                </div>
+                {view === "history" && <PromptHistoryPanel key={selected.key} promptKey={selected.key} currentRevision={selected.revision} busy={saving} onRestore={revision=>setRestoreTarget({key:selected.key,revision})} />}
                 <textarea
+                  hidden={view !== "edit"}
                   aria-label={`${selected.label}内容`}
                   value={draft}
                   onChange={(event) => {
@@ -236,10 +267,11 @@ export default function PromptManagerModal({ onClose }: { onClose: () => void })
                 {error && (
                   <p className="mt-3 rounded-xl border border-alert-edge bg-alert-wash px-3 py-2 text-xs text-alert-ink">
                     {error}
+                    <button type="button" disabled={saving} onClick={()=>void reloadKeepingDraft()} className="ml-3 underline">载入最新版本（保留草稿）</button>
                   </p>
                 )}
 
-                <footer className="mt-3 flex shrink-0 flex-wrap items-center gap-2">
+                <footer className={`${view === "edit" ? "flex" : "hidden"} mt-3 shrink-0 flex-wrap items-center gap-2`}>
                   <div className="mr-auto min-h-5 text-[0.68rem] text-ink-faint">
                     {savedKey === selected.key
                       ? "已保存，所有用户的下一轮对话将使用此版本。"
@@ -270,6 +302,13 @@ export default function PromptManagerModal({ onClose }: { onClose: () => void })
         )}
       </section>
 
+      <ConfirmDialog
+        open={restoreTarget !== null}
+        title={`恢复到版本 ${restoreTarget?.revision ?? ""}？`}
+        description="此版本的完整文字将作为新版本保存，并影响后续对话。现有历史会保留；当前提示词未保存的草稿会被替换。"
+        confirmLabel="恢复并生成新版本" cancelLabel="取消" tone="alert" busy={saving}
+        onCancel={()=>{if (!saving) setRestoreTarget(null);}} onConfirm={()=>void performRestore()}
+      />
       <ConfirmDialog
         open={confirmation === "discard"}
         title="放弃尚未保存的修改？"

@@ -92,14 +92,14 @@ export default function IssueReportModal({
         type="button"
         aria-label="关闭问题反馈"
         onClick={onClose}
-        className="absolute inset-0 bg-canvas/75 backdrop-blur-md"
+        className="default-style:absolute default-style:inset-0 default-style:bg-canvas/75 default-style:backdrop-blur-md simple:absolute simple:inset-0 simple:bg-canvas/75 simple:backdrop-blur-sm"
       />
 
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="issue-report-title"
-        className="relative flex max-h-[calc(100dvh-1.5rem)] w-full max-w-xl flex-col overflow-hidden rounded-[28px] border border-line bg-panel depth-panel backdrop-blur-2xl sm:max-h-[calc(100dvh-2.5rem)]"
+        className="default-style:relative default-style:flex default-style:max-h-[calc(100dvh-1.5rem)] default-style:w-full default-style:max-w-xl default-style:flex-col default-style:overflow-hidden default-style:rounded-[28px] default-style:border default-style:border-line default-style:bg-panel default-style:depth-panel default-style:backdrop-blur-2xl default-style:sm:max-h-[calc(100dvh-2.5rem)] simple:relative simple:flex simple:max-h-[calc(100dvh-1.5rem)] simple:w-full simple:max-w-xl simple:flex-col simple:overflow-hidden simple:rounded-2xl simple:border simple:border-line simple:bg-panel simple:depth-panel simple:sm:max-h-[calc(100dvh-2.5rem)]"
       >
         <header className="flex shrink-0 items-start gap-3 border-b border-line px-5 py-4 sm:px-6">
           <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-accent-edge bg-accent-wash text-accent-ink">
@@ -166,7 +166,7 @@ export default function IssueReportModal({
 
             <div className="mt-4 rounded-2xl border border-line bg-raised p-3.5">
               <div className="flex items-center gap-2">
-                <CameraMark className="h-4 w-4 shrink-0 text-accent" />
+                <CameraMark className="h-4 w-4 shrink-0 text-accent-ink" />
                 <p className="text-xs font-medium text-ink">当前页面截图</p>
                 <div className="ml-auto flex items-center gap-2">
                   {screenshot && (

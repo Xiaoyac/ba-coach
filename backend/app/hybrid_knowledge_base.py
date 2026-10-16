@@ -3,7 +3,7 @@
 Own implementation: the database remains authoritative. Versioned, derived
 vectors are local files; user queries and conversation state are never persisted
 in this index. No legacy catalog or mediator is used; optional reranking can
-use either a dedicated relevance API or the explicit K3 listwise adapter.
+use either a dedicated relevance API or the explicit LLM listwise adapter.
 """
 from __future__ import annotations
 
@@ -27,9 +27,10 @@ from .retrieval import DatabaseKnowledgeBase, KnowledgeChunk
 from .retrieval_cache import SearchResult
 from .retrieval_enhanced import focus_query
 from .vector_retrieval import LocalEmbedder
+from .knowledge_llm_rerank import MAX_RERANK_CANDIDATES
 
 logger = logging.getLogger(__name__)
-VERSION = "astrbot-style-hybrid-v2"
+VERSION = "astrbot-style-hybrid-v3-cap20"
 VECTOR_FORMAT = "astrbot-style-hybrid-v1"  # Ranking changes do not re-embed unchanged passages.
 
 
@@ -88,7 +89,7 @@ class HybridDatabaseKnowledgeBase(DatabaseKnowledgeBase):
         self.storage = Path(storage or self.settings.knowledge_hybrid_storage)
         self._embedder = embedder
         self._snapshot = None
-        self._k3_reranker = None
+        self._llm_reranker = None
         self._build_task = None
         self._build_index = None
         # Serialize ONNX inference and index writes across request threads.
@@ -105,8 +106,8 @@ class HybridDatabaseKnowledgeBase(DatabaseKnowledgeBase):
             "knowledge_rerank_backend", "knowledge_rerank_min_score", "knowledge_hybrid_require_rerank",
             "knowledge_hybrid_sparse_reserve", "knowledge_hybrid_final_results",
             "knowledge_k3_rerank_max_tokens", "knowledge_k3_rerank_max_chars", "deepseek_base_url")}
-        from .knowledge_k3_rerank import VERSION as k3_version
-        return {**super()._cache_namespace(), "hybrid_version": VERSION, "k3_version": k3_version,
+        from .knowledge_llm_rerank import VERSION as llm_version
+        return {**super()._cache_namespace(), "hybrid_version": VERSION, "llm_version": llm_version,
                 "config": hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()}
 
     def _ensure_embedder(self):
@@ -120,10 +121,10 @@ class HybridDatabaseKnowledgeBase(DatabaseKnowledgeBase):
         return self._embedder
 
     def _validate_quality_configuration(self):
-        if self.settings.knowledge_rerank_backend == "k3":
-            if self._k3_reranker is None:
-                from .knowledge_k3_rerank import K3Reranker
-                self._k3_reranker = K3Reranker(self.settings)
+        if self.settings.knowledge_rerank_backend in {"k3", "llm"}:
+            if self._llm_reranker is None:
+                from .knowledge_llm_rerank import ListwiseReranker
+                self._llm_reranker = ListwiseReranker(self.settings)
             return
         if self.settings.knowledge_hybrid_require_rerank and not all((
                 self.settings.knowledge_rerank_model, self.settings.knowledge_rerank_url,
@@ -272,8 +273,15 @@ class HybridDatabaseKnowledgeBase(DatabaseKnowledgeBase):
                     round(score, 6), "relative_score_fusion"))
                 if not self.settings.knowledge_hybrid_sparse_reserve and len(hits) >= top_k:
                     break
+            candidate_count = len(hits)
+            if self.settings.knowledge_rerank_model:
+                # Preserve fusion/sparse ordering; the combined, deduplicated
+                # pool has one global cap, not a separate cap per category.
+                hits = hits[:MAX_RERANK_CANDIDATES]
             if trace is not None:
                 trace.update(candidates_by_category=counts,
+                    rerank_candidates_before_limit=candidate_count,
+                    rerank_candidate_limit=MAX_RERANK_CANDIDATES,
                     dense_ids=[f"kb:{snapshot.documents[i].id}" for i, _ in dense],
                     sparse_ids=[f"kb:{snapshot.documents[i].id}" for i, _ in sparse],
                     fused_ids=[f"kb:{snapshot.documents[i].id}" for i, _ in fused[:top_k]],
@@ -302,14 +310,22 @@ class HybridDatabaseKnowledgeBase(DatabaseKnowledgeBase):
                 partial(self._search_sync, self._snapshot, module=module, query=query,
                         top_k=max(top_k, self.settings.knowledge_hybrid_candidates), trace=trace)),
                 timeout=self.settings.knowledge_hybrid_timeout_seconds)
+            from .retrieval_timing import publish_timings
+            publish_timings({'ranking_mode': self.ranking_mode,
+                             'exact_cache': {'retriever_details': trace}}, local_only=True)
             rerank_status = "disabled"
             if self.settings.knowledge_rerank_model and hits:
                 trace["rerank_api_calls"] = 1
+                trace['rerank_candidate_count'] = len(hits)
+                trace['rerank_model'] = self.settings.knowledge_rerank_model
                 rerank_started = perf_counter()
                 # Dense/sparse focusing must not erase explicit refusals from
-                # the K3 relevance judge's view of the user's original request.
-                rerank_query = query if self.settings.knowledge_rerank_backend == "k3" else focus_query(query)
-                ranked = await self._rerank(rerank_query, hits, trace=trace)
+                # the LLM relevance judge's view of the user's original request.
+                rerank_query = query if self.settings.knowledge_rerank_backend in {"k3", "llm"} else focus_query(query)
+                from .execution_status import track_call
+                ranked = await track_call('knowledge_reranker',
+                    self._rerank(rerank_query, hits, trace=trace),
+                    model=self.settings.knowledge_rerank_model)
                 trace["rerank_duration_ms"] = round((perf_counter() - rerank_started) * 1000, 3)
                 rerank_status = "failed_retained_fusion" if ranked is hits else "completed"
                 if ranked is hits and self.settings.knowledge_hybrid_require_rerank:
@@ -337,12 +353,14 @@ class HybridDatabaseKnowledgeBase(DatabaseKnowledgeBase):
 
     async def _rerank(self, query, hits, *, trace=None):
         """Optional dedicated rerank API. Failure retains the fused candidates."""
+        if len(hits) > MAX_RERANK_CANDIDATES:
+            hits = hits[:MAX_RERANK_CANDIDATES]
         import httpx
         from dataclasses import replace
         try:
-            if self.settings.knowledge_rerank_backend == "k3":
+            if self.settings.knowledge_rerank_backend in {"k3", "llm"}:
                 self._validate_quality_configuration()
-                return await self._k3_reranker.rank(query, hits, trace=trace if trace is not None else {})
+                return await self._llm_reranker.rank(query, hits, trace=trace if trace is not None else {})
             async with httpx.AsyncClient(timeout=self.settings.knowledge_rerank_timeout_seconds) as client:
                 payload = {"model": self.settings.knowledge_rerank_model, "query": query,
                            "documents": [hit.text for hit in hits], "top_n": len(hits)}

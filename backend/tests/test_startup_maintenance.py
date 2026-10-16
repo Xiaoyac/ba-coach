@@ -20,10 +20,19 @@ async def test_startup_maintenance_switch(monkeypatch, enabled):
     monkeypatch.setattr(main, "get_sessionmaker", session)
     monkeypatch.setattr(main, "warm_knowledge_base", warm)
     monkeypatch.setattr(main, "dispose_db", dispose)
+    # Prompt history is installed on every startup, independent of maintenance.
+    from app import db as db_module, prompt_history
+    history = AsyncMock()
+    sync_defaults = AsyncMock()
+    monkeypatch.setattr(prompt_history, "initialize_history", history)
+    monkeypatch.setattr(prompt_history, "sync_source_defaults", sync_defaults)
+    monkeypatch.setattr(db_module, "get_engine", MagicMock())
     async with main.lifespan(None):
         assert init.await_count == int(enabled)
         assert backfill.await_count == int(enabled)
-        assert session.call_count == int(enabled)
+        assert session.call_count == 1 + int(enabled)
+        history.assert_awaited_once()
+        sync_defaults.assert_awaited_once()
         warm.assert_awaited_once()
     dispose.assert_awaited_once()
 

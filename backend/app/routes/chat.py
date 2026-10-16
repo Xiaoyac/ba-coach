@@ -72,6 +72,7 @@ CLIENT_EVENTS = {
     "done",
     "error",
     "reply_wait",
+    "retry",
 }
 
 
@@ -86,6 +87,7 @@ async def _persist_user_message(
     session_id: str,
     user_text: str,
     created_at: datetime | None = None,
+    metadata: dict | None = None,
 ) -> int | None:
     """Best-effort immediate write of the user's message.
 
@@ -97,17 +99,42 @@ async def _persist_user_message(
     """
     if not subject_id:
         return None
+    if metadata:
+        from ..goal_card_interaction import validate_card_action
+        await validate_card_action(db, session_id=session_id, user_id=subject_id,
+                                   metadata=metadata, text=user_text)
     try:
-        return await start_turn(
+        message_id = await start_turn(
             db,
             subject_id=subject_id,
             session_id=session_id,
             user_text=user_text,
             created_at=created_at,
         )
+        if get_settings().goal_card_ui_enabled:
+            try:
+                from ..goal_card_workspace import bind_submission
+                from ..goal_card_interaction import bind_card_action
+                from ..v2_workflow import runtime_for
+                conversation, _ = await runtime_for(db, session_id)
+                await bind_submission(db, conversation, message_id)
+                await bind_card_action(db, conversation, message_id, metadata or {})
+                await db.commit()
+            except Exception:
+                # start_turn already committed: retain the real message ID.
+                # Missing card linkage will block confirmation, not lose input.
+                await db.rollback()
+                logger.exception('failed to bind goal card input for %s', session_id)
+                if (metadata or {}).get('goal_card_action') == 'confirm':
+                    raise HTTPException(409, '这次确认操作未能保存，目标卡仍保留，请重新读取后重试。') from None
+        return message_id
+    except HTTPException:
+        raise
     except Exception:  # noqa: BLE001
         await db.rollback()
         logger.exception("failed to persist user message for session %s", session_id)
+        if (metadata or {}).get('goal_card_action') == 'confirm':
+            raise HTTPException(503, '确认暂时无法提交，目标卡仍保留，请稍后重试。') from None
         return None
 
 
@@ -148,7 +175,11 @@ async def _persist_assistant_message(
             error_code=metrics.get("error_code") or "empty_reply",
             prompt_version=metrics.get("prompt_version"),
             event_metadata={"user_message_id":user_message_id,"pa_tools":metrics.get("pa_tools"),
-                            "main_input":metrics.get("main_input")},
+                            "main_input":metrics.get("main_input"), "overload_retries":metrics.get("overload_retries"),
+                            "main_timeout_seconds":metrics.get("main_timeout_seconds"),
+                            "knowledge_mode":metrics.get("knowledge_mode"),
+                            "knowledge_mediator_node_enabled":metrics.get("knowledge_mediator_node_enabled"),
+                            "knowledge_mediator":metrics.get("knowledge_mediator")},
         )
         await db.commit()
         return None
@@ -181,6 +212,10 @@ async def _finalize_pa_display(db, *, store, session_id, subject_id, assistant_m
     try:
         await finalize_tool_display(db, session_id=session_id, user_id=subject_id,
                                     assistant_message_id=assistant_message_id)
+        if get_settings().goal_card_ui_enabled:
+            from ..goal_card_interaction import finalize_ui_display
+            await finalize_ui_display(db, session_id=session_id, user_id=subject_id,
+                                      assistant_message_id=assistant_message_id)
         await db.commit()
         _, fresh = await runtime_for(db, session_id)
         await store.set_module(session_id, fresh['current_module'])
@@ -195,9 +230,11 @@ async def _apply_conversation_thinking(context, *, session_id, subject_id, state
     requested_effort = None
     async with get_sessionmaker()() as preference_db:
         enabled = await effective_thinking(preference_db, session_id=session_id, subject_id=subject_id)
-        from ..conversation_knowledge import mediator_enabled_for_conversation
-        context.knowledge_mediator_bypass = not await mediator_enabled_for_conversation(
+        from ..conversation_knowledge import knowledge_policy_for_conversation
+        knowledge_policy = await knowledge_policy_for_conversation(
             preference_db, session_id=session_id, subject_id=subject_id)
+        context.knowledge_mediator_bypass = not knowledge_policy.legacy
+        context.knowledge_mediator_node_enabled = knowledge_policy.mediator_node_enabled
         if context.knowledge_mediator_bypass:
             from ..retrieval import get_hybrid_knowledge_base
             context.knowledge_base = get_hybrid_knowledge_base()
@@ -207,7 +244,7 @@ async def _apply_conversation_thinking(context, *, session_id, subject_id, state
                 session_id=session_id, subject_id=subject_id)
             from ..prompt_store import effective_reply_lead_prompt
             context.reply_lead_prompt = await effective_reply_lead_prompt(preference_db)
-    context.provider = context.provider.with_thinking(enabled)
+    context.provider = context.provider.with_thinking(enabled).with_main_reply()
     context.router_provider = context.router_provider.with_thinking(enabled)
     if hasattr(context.knowledge_base, "with_thinking"):
         context.knowledge_base = context.knowledge_base.with_thinking(enabled)
@@ -219,6 +256,7 @@ async def _apply_conversation_thinking(context, *, session_id, subject_id, state
         context.provider = context.provider.with_deep_reply(effort=applied_effort)
     state["telemetry"] = {**(state.get("telemetry") or {}), "conversation_thinking_enabled": enabled,
         "knowledge_mode": "astrbot_hybrid" if context.knowledge_mediator_bypass else "legacy_mediator",
+        "knowledge_mediator_node_enabled": context.knowledge_mediator_node_enabled,
         "reply_mode": reply_mode,
         "main_thinking_enabled": True if reply_mode == ACK_DEEP else enabled}
     if reply_mode == ACK_DEEP:
@@ -345,7 +383,7 @@ async def _initial_state(
     received_at = received_at or utc_now()
     session = await _resume_or_create(request, store, db, subject_id=subject_id)
     if request.metadata:
-        session.metadata.update(request.metadata)
+        session.metadata.update({k: v for k, v in request.metadata.items() if not k.startswith('goal_card_')})
 
     state: AgentState = {
         "session_id": session.session_id,
@@ -413,6 +451,8 @@ async def chat(
         # after the new assistant row is durable.
         cancel_on_timeout=False,
     )
+    if request.retry_of_message_id is not None:
+        raise HTTPException(400, "请使用流式聊天的恢复入口重试。")
     provider = await _resolve_provider(request, db, subject_id=subject_id)
     router_prompt = await effective_router_prompt(db)
     state, session_id = await _initial_state(request, store, db, subject_id=subject_id, received_at=received_at)
@@ -422,6 +462,7 @@ async def chat(
         session_id=session_id,
         user_text=request.message,
         created_at=state["user_created_at"],
+        metadata=request.metadata,
     )
     state["user_message_id"] = user_message_id
     state["turn_started_monotonic"] = request_started
@@ -507,7 +548,7 @@ async def chat_stream(
     if request.generation_id is None:
         request = request.model_copy(update={"generation_id": uuid4()})
     try:
-        control = generations.begin(subject_id, str(request.generation_id))
+        control = generations.begin(subject_id, str(request.generation_id), request.session_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
@@ -559,6 +600,8 @@ async def _prepare_chat_stream(
         timeout_seconds=settings.routing_wait_timeout_seconds,
         cancel_on_timeout=False,
     )
+    from ..chat_retry import validate_retry
+    await validate_retry(db, request, subject_id)
     provider = await _resolve_provider(request, db, subject_id=subject_id)
     router_prompt = await effective_router_prompt(db)
     state, session_id = await _initial_state(request, store, db, subject_id=subject_id, received_at=received_at)
@@ -568,6 +611,7 @@ async def _prepare_chat_stream(
         session_id=session_id,
         user_text=request.message,
         created_at=state["user_created_at"],
+        metadata=request.metadata,
     )
     state["user_message_id"] = user_message_id
     state["turn_started_monotonic"] = request_started
@@ -605,6 +649,8 @@ async def _prepare_chat_stream(
         saw_done = False
         saw_error = False
         first_visible_at = None
+        first_body_at = None
+        body_completed_at = None
         lead_metrics = {}
         reply_mode = "standard"
         turn_lock = await store.get_turn_lock(session_id)
@@ -659,7 +705,8 @@ async def _prepare_chat_stream(
                         session_id=session_id, subject_id=subject_id, maker=get_sessionmaker(),
                         metrics=lead_metrics, prompt=context.reply_lead_prompt,
                         user_created_at=state["user_created_at"],
-                        max_history_messages=context.settings.max_history_messages)
+                        max_history_messages=context.settings.max_history_messages,
+                        context=context)
                 # A disconnect can close this generator while it is yielding a
                 # receipt. Wait for graph/receipt cleanup before releasing the
                 # turn lock; async-for alone defers child closure to GC.
@@ -689,6 +736,8 @@ async def _prepare_chat_stream(
                         if kind == "delta":
                             if event.get("text") and first_visible_at is None:
                                 first_visible_at = perf_counter()
+                            if event.get("phase") != "lead" and str(event.get("text", "")).strip() and first_body_at is None:
+                                first_body_at = perf_counter()
                             reply_parts.append(event.get("text", ""))
                         elif kind == "reasoning_delta":
                             reasoning_parts.append(event.get("text", ""))
@@ -697,6 +746,7 @@ async def _prepare_chat_stream(
                             streamed_router_model = str(event.get("model", ""))
                         elif kind == "done":
                             saw_done = True
+                            body_completed_at = perf_counter()
                         elif kind == "error":
                             saw_error = True
                         elif kind == "reply_wait" and event.get("waiting"):
@@ -760,6 +810,7 @@ async def _prepare_chat_stream(
                         original_error = metrics.get("error_code")
                         metrics["continuation_error_code"] = original_error
                         metrics["error_code"] = (
+                            "reply_length_limit" if original_error == "reply_length_limit" else
                             "continuation_timeout" if original_error == "provider_timeout" else
                             "continuation_protocol" if original_error == "invalid_protocol_completion" else
                             "continuation_empty" if original_error in {"empty_completion", "reasoning_budget_exhausted"}
@@ -878,7 +929,11 @@ async def _prepare_chat_stream(
                 metrics["execution_timeline"] = [*(metrics.get("execution_timeline") or []), {
                     "stage": "response_display", "start_ms": metrics["time_to_first_visible_content_ms"],
                     "duration_ms": 0, "status": "released", "after_display": False}]
+                for key, stamp in [('time_to_first_body_content_ms', first_body_at), ('body_completed_ms', body_completed_at)]:
+                    if stamp is not None:
+                        metrics[key] = round((stamp-state['turn_started_monotonic'])*1000, 3)
                 final_state["telemetry"] = metrics
+            persistence_started = perf_counter()
             async with get_sessionmaker()() as final_db:
                 assistant_message_id = await _persist_assistant_message(
                     final_db,
@@ -924,6 +979,12 @@ async def _prepare_chat_stream(
 
             # Unlike graph "done", this acknowledges the durable transcript.
             # Clients may stop reading here even if a mobile proxy holds EOF.
+            transport_metrics = {
+                'transcript_saved_ms': round((perf_counter()-state['turn_started_monotonic'])*1000, 3),
+                'persistence_duration_ms': round((perf_counter()-persistence_started)*1000, 3),
+                **{key: (final_state or {}).get('telemetry', {}).get(key) for key in
+                   ['time_to_first_visible_content_ms', 'time_to_first_body_content_ms', 'body_completed_ms']}}
+            logger.info('reply_completion_timing %s', transport_metrics)
             yield _sse("persisted", {"saved": assistant_message_id is not None})
 
     return StreamingResponse(

@@ -62,9 +62,10 @@ def test_one_explanation_can_supply_all_three_semantic_topics():
 def test_indexed_approved_summary_is_not_reset_by_later_education_or_restatement():
     turns = _turns() + [('assistant', _raw()['summary_quote']), ('user', '接下来呢')]
     assert normalize(indexed_raw(), _data(), turns, 's')['missing_fields'] == []
+    # Citing the later restatement is equally valid; approval is optional.
     raw = indexed_raw()
     raw['summary_quote'] = {'turn': 10, 'quote': _raw()['summary_quote']}
-    assert 'm1_milestone_2' in normalize(raw, _data(), turns, 's')['missing_fields']
+    assert normalize(raw, _data(), turns, 's')['missing_fields'] == []
 
 
 def test_indexed_literal_repairs_unique_wrong_assistant_turn():

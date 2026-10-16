@@ -11,6 +11,7 @@ from ..v2_profile import enabled
 from ..v2_repository import start_cycle, owned_goal, initial_module, V2Conflict, V2NotFound
 from ..v2_workflow import runtime_for, module_extraction_is_current
 from ..program_confirmation import draft, current_m1_missing, record_hash, validate_confirmation, commit_confirmation
+from ..goal_card_workspace import CardSubmission
 
 router = APIRouter(prefix="/program", tags=["program"])
 
@@ -39,8 +40,22 @@ async def own_state(db, session_id, user_id):
     return conversation, state
 
 
+async def archive_conversation_scope(db, user_id, session_id):
+    from ..goal_scope import isolated
+    from ..models import Conversation
+    if not await isolated(db, user_id):
+        return None
+    if not session_id:
+        raise HTTPException(400, "管理员目标查询需要指定当前会话")
+    conversation = (await db.execute(select(Conversation).where(
+        Conversation.session_id == session_id, Conversation.subject_id == user_id))).scalar_one_or_none()
+    if not conversation:
+        raise HTTPException(404, "对话不存在")
+    return conversation.id
+
+
 @router.get("/goals/overview")
-async def get_goal_overview(user_id=Depends(require_subject_id), db=Depends(get_db)):
+async def get_goal_overview(session_id: str | None = None, user_id=Depends(require_subject_id), db=Depends(get_db)):
     """User-owned overview independent of the currently open conversation.
 
     Only expose the confirmed current plan, never an unconfirmed extraction.
@@ -48,6 +63,9 @@ async def get_goal_overview(user_id=Depends(require_subject_id), db=Depends(get_
     """
     if not enabled():
         return {"enabled": False, "m1_reusable": False, "goals": []}
+    conversation_id = await archive_conversation_scope(db, user_id, session_id)
+    from ..goal_scope import goal_filter
+    scope = await goal_filter(db, user_id, conversation_id)
     goals, plans, cycles = (schema.tables[name] for name in
                             ("pa_goals", "module_two_record", "pa_cycles"))
     latest = select(cycles.c.goal_id, func.max(cycles.c.ordinal).label("ordinal")).join(
@@ -60,15 +78,15 @@ async def get_goal_overview(user_id=Depends(require_subject_id), db=Depends(get_
         goals.c.created_at, goals.c.updated_at, plans.c.id.label("plan_id"),
         plans.c.activity_content, plans.c.schedule_text, plans.c.location, plans.c.duration_minutes,
         cycles.c.ordinal, cycles.c.status.label("cycle_status")).select_from(source)
-        .where(goals.c.user_id == user_id).order_by(goals.c.updated_at.desc(), goals.c.id))).mappings().all()
+        .where(scope).order_by(goals.c.updated_at.desc(), goals.c.id))).mappings().all()
     from ..goal_contract import public_goal_details, public_activities
     details = await public_goal_details(db, user_id)
     plan_details = schema.tables["pa_plan_details"]
     plan_ids = [row["plan_id"] for row in rows if row["plan_id"]]
     plan_context = {r["plan_id"]: {k: r[k] for k in ("schedule_kind", "review_cadence")} for r in
         (await db.execute(select(plan_details).where(plan_details.c.plan_id.in_(plan_ids)))).mappings()}
-    result = {"enabled": True, "m1_reusable": (await initial_module(db, user_id=user_id)) == "module_2",
-        "activity_records": await public_activities(db, user_id),
+    result = {"enabled": True, "m1_reusable": (await initial_module(db, user_id=user_id, conversation_id=conversation_id)) == "module_2",
+        "activity_records": await public_activities(db, user_id, conversation_id=conversation_id),
         "goals": [{**{key: row[key] for key in ("id", "title", "status", "created_at", "updated_at")},
             **details.get(row["id"], {"goal_kind": "unclassified", "long_term_direction": None}),
             "plan": {**{key: row[key] for key in ("activity_content", "schedule_text", "location", "duration_minutes")},
@@ -78,15 +96,25 @@ async def get_goal_overview(user_id=Depends(require_subject_id), db=Depends(get_
                             if row["ordinal"] is not None else None} for row in rows]}
     from ..pa_lifecycle import read_pa_cards
     result["pa_cards"] = await read_pa_cards(db, user_id=user_id, goals=result["goals"])
+    from ..config import get_settings
+    if getattr(get_settings(), "goal_card_ui_enabled", False):
+        from ..goal_card_workspace import confirmed_secondary_cards
+        result["formulation_cards"] = await confirmed_secondary_cards(db, user_id, conversation_id=conversation_id)
     return result
 
 
 @router.get("/goals/{goal_id}/history")
 async def get_goal_history(goal_id: str, page: int = Query(1, ge=1, le=100000),
                            page_size: int = Query(20, ge=1, le=50),
-                           user_id=Depends(require_subject_id), db=Depends(get_db)):
+                           session_id: str | None = None, user_id=Depends(require_subject_id), db=Depends(get_db)):
     if not enabled():
         raise HTTPException(404, "目标历史尚未启用")
+    conversation_id = await archive_conversation_scope(db, user_id, session_id)
+    from ..goal_scope import require_goal
+    try:
+        await require_goal(db, user_id, goal_id, conversation_id)
+    except V2NotFound:
+        raise HTTPException(404, "目标不属于当前会话") from None
     from ..goal_history import read_goal_history
     result = await read_goal_history(db, user_id=user_id, goal_id=goal_id, page=page, page_size=page_size)
     if result is None:
@@ -102,7 +130,8 @@ async def get_program(session_id: str, user_id=Depends(require_subject_id), db=D
     from ..routing_modes import effective_routing_mode
     routing_mode = await effective_routing_mode(db, conversation=conversation, state=state, user_id=user_id)
     goals = schema.tables["pa_goals"]
-    rows = (await db.execute(select(goals).where(goals.c.user_id == user_id)
+    from ..goal_scope import goal_filter
+    rows = (await db.execute(select(goals).where(await goal_filter(db, user_id, conversation.id))
         .order_by(goals.c.updated_at.desc()))).mappings().all()
     pending = await draft(db, state, user_id)
     review_action = None
@@ -147,7 +176,54 @@ async def get_program(session_id: str, user_id=Depends(require_subject_id), db=D
                                 and state["last_transition_reason"] == "awaiting_record_confirmation"),
             "missing_fields": missing,
             "readiness": {k: readiness[k] for k in ("ready", "module", "missing_fields", "reasons")} if readiness else None,
-            "m1_reusable": (await initial_module(db, user_id=user_id)) == "module_2"}
+            "m1_reusable": (await initial_module(db, user_id=user_id, conversation_id=conversation.id)) == "module_2"}
+
+
+@router.get("/{session_id}/goal-card")
+async def get_goal_card(session_id: str, user_id=Depends(require_subject_id), db=Depends(get_db)):
+    from ..config import get_settings
+    if not enabled() or not getattr(get_settings(), "goal_card_ui_enabled", False):
+        return {"enabled": False, "card": None}
+    conversation, state = await runtime_for(db, session_id)
+    if not conversation or conversation.subject_id != user_id or not state:
+        raise HTTPException(404, "聊天不存在")
+    # Read-only UI polling also runs in administrator sandboxes. It should
+    # quietly disable this production-only panel, while writes stay rejected.
+    if str((state.get("memory") or {}).get("sandbox_mode", "")).lower() == "true":
+        return {"enabled": False, "card": None}
+    from ..goal_card_workspace import read_card_row, public_card
+    from ..goal_card_confirmation import confirmation_status
+    row = await read_card_row(db, conversation.id, user_id)
+    card = public_card(row)
+    if card:
+        card['confirmation'] = await confirmation_status(db, conversation, state, row)
+    return {"enabled": True, "card": card}
+
+
+@router.put("/{session_id}/goal-card")
+async def put_goal_card(session_id: str, payload: CardSubmission, user_id=Depends(require_subject_id),
+                        db=Depends(get_db), store=Depends(get_session_store)):
+    from ..config import get_settings
+    if not enabled() or not getattr(get_settings(), "goal_card_ui_enabled", False):
+        raise HTTPException(409, "目标卡填写功能尚未开启")
+    # Verify ownership before checking any runtime lock. A foreign account
+    # learns neither an existing card nor whether its owner is generating.
+    await own_state(db, session_id, user_id)
+    lock = await store.get_turn_lock(session_id)
+    if lock.locked():
+        raise HTTPException(409, "教练正在回应，请等本轮结束后再提交目标卡")
+    async with lock:
+        profiles, rt = schema.tables["user_profile"], schema.tables["conversation_runtime_states"]
+        await db.execute(select(profiles.c.uuid).where(profiles.c.uuid == user_id).with_for_update())
+        conversation, state = await own_state(db, session_id, user_id)
+        from ..models import Conversation
+        await db.execute(select(Conversation.id).where(Conversation.id == conversation.id).with_for_update())
+        state = dict((await db.execute(select(rt).where(rt.c.conversation_id == conversation.id)
+            .with_for_update())).mappings().one())
+        from ..goal_card_workspace import save_card_fields
+        result = await save_card_fields(db, conversation, state, payload)
+        await db.commit()
+    return result
 
 
 @router.post("/{session_id}/goal")
@@ -161,17 +237,21 @@ async def select_goal(session_id: str, payload: Selection, user_id=Depends(requi
         profiles = schema.tables["user_profile"]
         await db.execute(select(profiles.c.uuid).where(profiles.c.uuid == user_id).with_for_update())
         state = (await db.execute(select(rt).where(rt.c.conversation_id == conversation.id).with_for_update())).mappings().one()
+        from ..goal_scope import scoped_runtime
+        state = await scoped_runtime(db, conversation, state)
         from ..routing_modes import effective_routing_mode
         if await effective_routing_mode(db, conversation=conversation, state=state, user_id=user_id) == "router_only":
             raise HTTPException(409, "本对话使用仅 Router 模式，目标选择不能覆盖 Router 的模块判断；请新建 Router + 代码对话使用此操作")
         if state["row_version"] != payload.row_version:
             raise HTTPException(409, "进度已更新，请刷新后再操作")
-        if await initial_module(db, user_id=user_id) != "module_2":
+        if await initial_module(db, user_id=user_id, conversation_id=conversation.id) != "module_2":
             raise HTTPException(409, "请先完成问题理解")
         if state["active_goal_id"]:
             raise HTTPException(409, "本聊天已经选择目标；讨论其他目标请新建聊天")
         try:
             goal_id = payload.goal_id
+            from ..goal_scope import require_goal
+            await require_goal(db, user_id, goal_id, conversation.id)
             goal = await owned_goal(db, user_id, goal_id, lock=True)
             if goal["status"] == "paused" and payload.resume:
                 from ..v2_repository import resume_paused_goal
@@ -225,6 +305,8 @@ async def confirm_record(session_id: str, payload: Confirmation, user_id=Depends
         profiles, rt = schema.tables["user_profile"], schema.tables["conversation_runtime_states"]
         await db.execute(select(profiles.c.uuid).where(profiles.c.uuid == user_id).with_for_update())
         state = (await db.execute(select(rt).where(rt.c.conversation_id == conversation.id).with_for_update())).mappings().one()
+        from ..goal_scope import scoped_runtime
+        state = await scoped_runtime(db, conversation, state)
         from ..routing_modes import effective_routing_mode
         if await effective_routing_mode(db, conversation=conversation, state=state, user_id=user_id) == "router_only":
             raise HTTPException(409, "本对话使用仅 Router 模式，网页确认不能覆盖 Router 的模块判断；请在对话中继续测试")

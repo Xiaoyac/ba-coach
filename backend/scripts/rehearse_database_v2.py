@@ -65,15 +65,14 @@ def convert(connection, legacy):
     users = {r["uuid"]: r for r in rows("user_profile")}
     for key, row in users.items():
         put("user_profile", {"uuid": key, "nickname": row["nickname"],
-            "reported_age": row.get("age"),
+            "birth_year": row.get("birth_year"), "reported_age": row.get("age"),
             "living_status": row["living_status"], "module1_done_flag": bool(row["module1_done_flag"]),
             "created_at": row["created_at"], "updated_at": row["updated_at"]})
         # Do not turn a possibly stale age into a fabricated birth year.
-        if row.get("age") is not None:
+        if row.get("age") is not None and row.get("birth_year") is None:
             issue("user_profile", key, "legacy_age_retained_birth_year_unknown")
         ext = extensions.get(key, {})
         put("user_preferences", {"user_id": key,
-            "communication_style": row["communication_preference"],
             "activity_environment": row["activity_environment"], "activity_social": row["activity_social"],
             "activity_atmosphere": row["activity_intensity"],
             "reminder_frequency": row["reminder_frequency"], "reminder_time": ext.get("reminder_time"),

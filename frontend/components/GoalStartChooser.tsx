@@ -26,19 +26,20 @@ export default function GoalStartChooser({ open, sessionId, busy = false, refres
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
-    setError(""); setLoading(true); setCurrent(null);
+    setError(""); setLoading(true); setCurrent(null); setGoals([]); setM1(false);
     void (async () => {
       try {
-        const overviewResponse = await fetch(`${API_BASE}/api/program/goals/overview`, { headers: apiHeaders(), signal: controller.signal, cache: "no-store" });
+        const overviewResponse = await fetch(`${API_BASE}/api/program/goals/overview${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""}`, { headers: apiHeaders(), signal: controller.signal, cache: "no-store" });
         checkAuthentication(overviewResponse);
         if (!overviewResponse.ok) throw new Error("目标暂时无法加载。");
         const overview = await overviewResponse.json() as Overview;
+        if (controller.signal.aborted) return;
         setEnabled(overview.enabled); setM1(overview.m1_reusable);
         setGoals((overview.goals ?? []).filter((goal) => ["draft", "active", "paused"].includes(goal.status)));
         if (sessionId) {
           const sessionResponse = await fetch(`${API_BASE}/api/program/${encodeURIComponent(sessionId)}`, { headers: apiHeaders(), signal: controller.signal, cache: "no-store" });
           checkAuthentication(sessionResponse);
-          if (sessionResponse.ok) setCurrent((await sessionResponse.json() as { runtime?: { active_goal_id?: string | null } }).runtime?.active_goal_id ?? null);
+          if (sessionResponse.ok) { const state = await sessionResponse.json() as { runtime?: { active_goal_id?: string | null } }; if (!controller.signal.aborted) setCurrent(state.runtime?.active_goal_id ?? null); }
         }
       } catch (err) { if ((err as Error).name !== "AbortError") setError(err instanceof Error ? err.message : "加载失败。"); }
       finally { if (!controller.signal.aborted) setLoading(false); }
@@ -56,7 +57,7 @@ export default function GoalStartChooser({ open, sessionId, busy = false, refres
   const disabled = Boolean(current) || busy || saving || loading || !enabled || !m1;
 
   return <dialog ref={ref} aria-labelledby="goal-start-title" onCancel={(event) => { if (busy || saving) event.preventDefault(); }} onClose={() => { if (!busy && !saving && open) onClose(); }}
-    className="m-auto w-[min(640px,calc(100vw-24px))] max-h-[min(760px,calc(100dvh-24px))] overflow-hidden rounded-[22px] border border-line-strong bg-panel p-0 text-ink depth-panel backdrop:bg-black/55">
+    className="default-style:m-auto default-style:w-[min(640px,calc(100vw-24px))] default-style:max-h-[min(760px,calc(100dvh-24px))] default-style:overflow-hidden default-style:rounded-[22px] default-style:border default-style:border-line-strong default-style:bg-panel default-style:p-0 default-style:text-ink default-style:depth-panel default-style:backdrop:bg-black/55 simple:m-auto simple:w-[min(640px,calc(100vw-24px))] simple:max-h-[min(760px,calc(100dvh-24px))] simple:overflow-hidden simple:rounded-xl simple:border simple:border-line-strong simple:bg-panel simple:p-0 simple:text-ink simple:depth-panel simple:backdrop:bg-black/55">
     <div className="max-h-[min(760px,calc(100dvh-24px))] overflow-y-auto p-5 sm:p-7"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold tracking-[.12em] text-accent-ink">新对话</p><h2 id="goal-start-title" className="mt-2 text-2xl font-semibold tracking-tight">这段对话从哪里开始？</h2><p className="mt-2 text-sm leading-6 text-ink-muted">继续一个已有目标，或先和 Agent 探索一个新的方向。</p></div><button type="button" onClick={onClose} disabled={busy || saving} className="grid size-10 place-items-center rounded-full border border-line text-xl disabled:opacity-45" aria-label="关闭">×</button></div>
       {error && <p role="alert" className="mt-5 rounded-xl border border-alert-edge bg-alert-wash p-3 text-sm text-alert-ink">{error}</p>}
       {current && <p className="mt-5 rounded-xl border border-alert-edge bg-alert-wash p-3 text-sm text-alert-ink">当前对话已有目标，不能在这里再次选择。</p>}

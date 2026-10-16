@@ -110,14 +110,14 @@ export default function AdminAccountManagerModal({
         type="button"
         aria-label="关闭账号管理"
         onClick={onClose}
-        className="absolute inset-0 bg-canvas/75 backdrop-blur-md"
+        className="default-style:absolute default-style:inset-0 default-style:bg-canvas/75 default-style:backdrop-blur-md simple:absolute simple:inset-0 simple:bg-canvas/75 simple:backdrop-blur-sm"
       />
 
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="account-manager-title"
-        className="relative flex h-[min(780px,calc(100dvh-1.5rem))] min-h-0 w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-line bg-panel depth-panel backdrop-blur-2xl sm:h-[min(780px,calc(100dvh-2.5rem))]"
+        className="default-style:relative default-style:flex default-style:h-[min(780px,calc(100dvh-1.5rem))] default-style:min-h-0 default-style:w-full default-style:max-w-4xl default-style:flex-col default-style:overflow-hidden default-style:rounded-[28px] default-style:border default-style:border-line default-style:bg-panel default-style:depth-panel default-style:backdrop-blur-2xl default-style:sm:h-[min(780px,calc(100dvh-2.5rem))] simple:relative simple:flex simple:h-[min(780px,calc(100dvh-1.5rem))] simple:min-h-0 simple:w-full simple:max-w-4xl simple:flex-col simple:overflow-hidden simple:rounded-2xl simple:border simple:border-line simple:bg-panel simple:depth-panel simple:sm:h-[min(780px,calc(100dvh-2.5rem))]"
       >
         <header className="flex shrink-0 items-start gap-3 border-b border-line px-5 py-4 sm:px-6">
           <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-accent-edge bg-accent-wash text-accent-ink">
@@ -163,7 +163,7 @@ export default function AdminAccountManagerModal({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索登录账号、昵称或完整 昵称#12345"
+            placeholder="搜索登录账号或昵称"
             aria-label="搜索账号"
             className="min-w-0 flex-1 rounded-2xl border border-line bg-canvas/45 px-4 py-2.5 text-sm text-ink outline-none transition-colors duration-300 placeholder:text-ink-faint focus:border-accent-edge focus:bg-canvas/65"
           />
@@ -206,7 +206,7 @@ export default function AdminAccountManagerModal({
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="break-all text-sm font-medium text-ink">
-                          {account.display_id ?? account.nickname ?? "未设置公开昵称"}
+                          {account.nickname ?? "未设置公开昵称"}
                         </h3>
                         <span
                           className={`rounded-full px-2 py-0.5 text-[0.62rem] tracking-[0.08em] ${
@@ -266,7 +266,7 @@ export default function AdminAccountManagerModal({
       <ConfirmDialog
         open={grantTarget !== null}
         title="授予管理员权限？"
-        description={`${grantTarget?.display_id ?? grantTarget?.username ?? "该账号"} 将可以管理所有账号与全局共享提示词。权限授予后会立即生效。`}
+        description={`${grantTarget?.username ?? "该账号"} 将可以管理所有账号与全局共享提示词。权限授予后会立即生效。`}
         confirmLabel="授予管理员权限"
         cancelLabel="暂不授予"
         busy={grantingId !== null}
@@ -278,7 +278,7 @@ export default function AdminAccountManagerModal({
       <ConfirmDialog
         open={deleteTarget !== null}
         title="永久删除账号？"
-        description={`${deleteTarget?.display_id ?? deleteTarget?.username ?? "该账号"} 及其对话、目标和记录将被永久删除，无法恢复。`}
+        description={`${deleteTarget?.username ?? "该账号"} 及其对话、目标和记录将被永久删除，无法恢复。`}
         confirmLabel="永久删除"
         cancelLabel="取消"
         busy={deletingId !== null}

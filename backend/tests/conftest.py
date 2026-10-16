@@ -51,7 +51,7 @@ class StubProvider(LLMProvider):
         # also feeding the router garbage — so these are answered separately,
         # dispatched on the system prompt each caller sends.
         self.extraction_result: str = "{}"
-        self.risk_result: str = "{}"
+        self.risk_result: str = '{"risk_status":0}'
         self.reasoning_result: str = ""
         self.route_reasoning_result: str = "模块路由测试思考"
         self.fail_with: Exception | None = None
@@ -133,7 +133,13 @@ class StubProvider(LLMProvider):
 def approved_mediator(provider, monkeypatch):
     """Explicit successful mediator for retrieval-to-prompt integration tests."""
     import json
+    original = getattr(provider, "route_detailed", None)
     async def approve(**kwargs):
+        # The risk screen shares route_detailed; only mediator calls are approved.
+        if "风险信号检测器" in kwargs.get("system", ""):
+            if original is not None:
+                return await original(**kwargs)
+            return Completion(text=provider.risk_result, model="stub-risk", finish_reason="stop")
         payload = json.loads(kwargs["user"])
         selections = [{"id": x["id"], "quote": x["text"][:40],
             "application": "Use the selected evidence only as background."} for x in payload["knowledge"][:2]]
@@ -250,6 +256,8 @@ async def db_sessionmaker():
         # stake, and registration genuinely inserts a `user_profile` row, so
         # the tables have to exist for any account test to run at all.
         await conn.run_sync(BizBase.metadata.create_all)
+    from app.prompt_history import initialize_history
+    await initialize_history(engine)
     yield async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
     await engine.dispose()
 
@@ -300,17 +308,12 @@ def register(client: TestClient):
     server-side, so a test can no longer just invent one.
     """
 
-    next_tag = 10000
-
     def _register(
         username: str = "tester", password: str = "correct-horse-battery", **profile
     ) -> dict[str, str]:
-        nonlocal next_tag
-        tag = profile.pop("tag", f"{next_tag:05d}")
-        next_tag += 1
-        from app.birth_dates import today
+        from app.birth_years import today
         requested_age = profile.pop("age", 28)
-        birthday = profile.pop("birth_date", today().replace(year=today().year - requested_age, month=1, day=1).isoformat())
+        birth_year = profile.pop("birth_year", today().year - requested_age)
         from invitation_helpers import issue_test_invitation
         if "invitation_code" not in profile:
             profile["invitation_code"] = issue_test_invitation(client)
@@ -321,8 +324,7 @@ def register(client: TestClient):
                 "password": password,
                 "email": profile.pop("email", f"{username.lower()}@example.com"),
                 "nickname": profile.pop("nickname", username),
-                "tag": tag,
-                "birth_date": birthday,
+                "birth_year": birth_year,
                 **profile,
             },
         )

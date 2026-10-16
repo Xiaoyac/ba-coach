@@ -106,12 +106,13 @@ async def test_member_router_decision_commits_without_old_code_gate(router_only_
         await db.execute(insert(ConversationMessage), {'id':201,'conversation_id':2,'position':0,'role':'user','content':'继续'})
         await db.commit()
     await ctx.store.adopt(session_id='other',messages=[],module='module_1',memory={'routing_mode':'router_code'})
-    provider.route_result='module_4'
+    # M1 -> M2 needs no code completion gate; M3/M4 still need a bound plan.
+    provider.route_result='module_2'
     result=await route_before_reply({'session_id':'other','subject_id':'b','user_message_id':201,
-        'user_input':'继续','current_module':'module_1','forced_module':'module_2'},ctx)
-    assert result['current_module']=='module_4'
+        'user_input':'继续','current_module':'module_1','forced_module':'module_3'},ctx)
+    assert result['current_module']=='module_2'
     assert result['telemetry']['router_pre_reply']['routing_mode']=='router_only'
     assert result['forced_module'] is None
     async with maker() as db:
         row=(await db.execute(select(rt).where(rt.c.conversation_id==2))).mappings().one()
-        assert row['current_module']=='module_4' and row['active_goal_id'] is None and row['active_cycle_id'] is None
+        assert row['current_module']=='module_2' and row['active_goal_id'] is None and row['active_cycle_id'] is None

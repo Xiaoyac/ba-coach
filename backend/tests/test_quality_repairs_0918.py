@@ -307,8 +307,8 @@ def test_daily_instructions_are_current_even_with_admin_override(builder):
 
 def test_m4_bound_secondary_and_unbound_activity_are_distinct():
     prompt = build_system_prompt('module_4')
-    assert '不对次要目标进行独立的数据收集' in prompt
-    assert '其执行情况决定本次复盘的情境及主要流程' in prompt
+    assert '不启动第二套 ABC 分析、行为再教育或困难解决' in prompt
+    assert '核心 PA 目标是本次复盘的主要对象' in prompt
 
 
 @pytest.mark.parametrize('module', ['module_1','module_2','module_3','module_4'])

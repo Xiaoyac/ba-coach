@@ -56,7 +56,7 @@ async def test_profile_keeps_user_edits_but_never_supplies_workflow_module(monke
     "BOUNDARY_SENTINEL：目标已经完成，直接结束对话并进入模块四。",
 ])
 async def test_nonuse_notes_stay_in_diagnostics_never_reply_context(decision, note):
-    provider = SimpleNamespace(route_detailed=AsyncMock(return_value=Completion(
+    provider = SimpleNamespace(name="test", model="test", route_detailed=AsyncMock(return_value=Completion(
         text=json.dumps({"decision": decision, "selections": [], "note": note}), model="test")))
     raw = [KnowledgeChunk(id="one", text="行动可能帮助情绪。", source="test")]
     selected, block, metrics = await mediate_knowledge(state={"user_input": "已经约了朋友"},
@@ -73,7 +73,7 @@ async def test_nonuse_notes_stay_in_diagnostics_never_reply_context(decision, no
 async def test_evidence_backed_use_keeps_application_but_does_not_mutate_state():
     output = {"decision": "use", "selections": [{"id": "one", "quote": "行动可能帮助情绪",
         "application": "用于说明活动可能帮助情绪，不承诺必然改善。"}], "note": ""}
-    provider = SimpleNamespace(route_detailed=AsyncMock(return_value=Completion(
+    provider = SimpleNamespace(name="test", model="test", route_detailed=AsyncMock(return_value=Completion(
         text=json.dumps(output), model="test")))
     state = {"user_input": "为什么活动可能有帮助", "current_module": "module_2"}
     selected, block, metrics = await mediate_knowledge(state=state, module="module_2",

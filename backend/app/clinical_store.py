@@ -328,8 +328,11 @@ async def load_profile_context(
             # Module progress belongs to this turn's routed workflow state,
             # not the registration profile loaded before routing. Keep the
             # API/UI projection intact, but never send its stale copy to LLMs.
+            data = profile.model_dump(exclude={"available_providers", "preferred_provider", "birth_year", "current_module"})
+            if profile.birth_year is not None:
+                data['age_basis'] = '按出生年份估算，可能与周岁相差一岁'
             return ["用户档案（用户填写的限制和话题边界必须尊重，未知值不要推断）：" +
-                    json.dumps(profile.model_dump(exclude={"available_providers", "preferred_provider", "tag", "display_id", "birth_date", "current_module"}), ensure_ascii=False)]
+                    json.dumps(data, ensure_ascii=False)]
     lines: list[str] = []
     async with sessionmaker() as db:
         profile = (
@@ -340,8 +343,6 @@ async def load_profile_context(
 
         if profile.nickname:
             lines.append(f"称呼：{profile.nickname}（用这个称呼 ta，不要再问一次怎么称呼）")
-        if profile.communication_preference:
-            lines.append(f"沟通偏好：{profile.communication_preference}（按这个风格说话）")
 
         conditions = set_values(profile.physical_condition)
         if conditions:
@@ -361,10 +362,10 @@ async def load_profile_context(
         if content_taboos:
             lines.append(f"不愿谈的话题：{'、'.join(content_taboos)}（不要主动提起）")
 
-        from .birth_dates import age_on
-        current_age = age_on(profile.birth_date) if profile.birth_date else profile.age
+        from .birth_years import age_from_year
+        current_age = age_from_year(profile.birth_year) if profile.birth_year else profile.age
         if current_age:
-            lines.append(f"年龄：{current_age}")
+            lines.append(f"年龄：约 {current_age} 岁（按出生年份估算）" if profile.birth_year else f"自报年龄：{current_age}")
         if profile.living_status:
             lines.append(f"居住状况：{profile.living_status}")
 

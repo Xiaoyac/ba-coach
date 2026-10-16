@@ -64,7 +64,7 @@ async def main(apply):
                          'pa_push_checks', 'pa_push_deliveries', 'pa_push_devices', 'risk_monitoring',
                          'user_activity_constraints', 'user_module_one_state', 'user_preferences', 'user_supporters'):
                 scopes[name] = 'user_id IN :users'
-            for name in ('account_email_tokens', 'account_emails', 'account_handles', 'account_settings', 'auth_sessions', 'issue_reports'):
+            for name in ('account_email_tokens', 'account_emails', 'account_settings', 'auth_sessions', 'issue_reports'):
                 scopes[name] = 'account_id IN :accounts'
             for name in ('conversation_messages', 'conversation_runtime_states', 'conversation_module_progress', 'ai_decision_logs', legacy + 'conversation_runtime_states'):
                 scopes[name] = 'conversation_id IN :conversations'
@@ -124,7 +124,7 @@ async def main(apply):
                 'clinical_record_cycle_links', legacy + 'pa_cycles', legacy + 'conversation_runtime_states',
                 'conversation_module_progress', 'conversation_messages', 'conversations',
                 'activity_logs', 'assessment_entries', 'risk_monitoring', 'interaction_status', 'profile_extensions',
-                'issue_reports', 'account_email_tokens', 'account_emails', 'account_handles', 'auth_sessions',
+                'issue_reports', 'account_email_tokens', 'account_emails', 'auth_sessions',
                 'account_settings', 'user_accounts', *[legacy + n for n in ('module_four_record', 'module_three_record',
                 'module_two_record', 'module_one_record', 'user_profile')], 'user_profile']
             assert set(order) >= set(scopes)

@@ -442,7 +442,6 @@ class Client:
             "tag": str(random.randint(10000, 99999)),
             "birth_date": "1990-01-01",
             "living_status": "和家人",
-            "communication_preference": "温柔引导",
             "physical_condition": [],
             "behavior_taboo": [],
         }

@@ -30,13 +30,19 @@ secondary_activities(数组，每项{activity_content:用户主动额外提出�
 PLAN_SPEC = Spec("plan_context", "json", """对象：schedule_kind(recurring周期性/one_off一次性/unspecified未知)，
 schedule_quote(频率的用户逐字原话)，review_cadence(复盘节奏的用户原话或null)，difficulty(活动难度的用户原话或null)，
 resources(用户明确提到的可用资源原话数组或null)。执行频率、复盘节奏、目标持续时长独立，不能把每周五天解释成每五天复盘。""")
-ACTIVITY_SPEC = Spec("activity_observations", "json", """只提取最后一条用户消息中自述的活动，最多8项，没提到则[]。
+ACTIVITY_SPEC = Spec("activity_observations", "json", """提取当前用户自述的活动，最多8项，没提到则[]。为补齐既往执行归属，可带source_message_id明确引用输入中真实旧用户消息；历史补充不得假装本轮新发生。未提供ID时仅允许最后一条用户消息。
 每项：event_kind(performed已做/not_performed明确没做/idea未来想法)，activity_content(原话中的活动名称)，
 source_quote(最后用户消息中包含事件完整含义的逐字原话)，occurred_at_text(时间原话或null)，effect(感受效果原话或null)。
 不能把未来想法记为已做；不能把没做记为已做；同一活动同一事件不重复拆分。
 “没站桩，但散步了感觉轻松”拆成站桩not_performed和散步performed两个事件。
 “又站桩了”只是一次执行记录，不是新目标；“游泳可能不错”只是idea。
-不要给出goal_id/cycle_id，归属由程序验证；没有明确活动名称时不猜测。""")
+没有明确活动名称时可引用上文确切活动，但原话事实仍须来自本条；不确定就不猜测。
+每项可含attribution：status=linked/unplanned/uncertain，relation=new/existing，goal_id/plan_id/cycle_id/execution_id（只能选activity_candidates真实ID，未知null），evidence={message_id,quote}（支持归属的用户真实原话）。
+关联目标和复盘周期分开；明确旧目标的新一次执行可关联旧goal/plan、cycle_id=null。不要按名称相同默认关联当前周期；未给发生日期不凭发送时间补日期。
+又做一次用new；补充同一次用existing和execution_id；未知归属用uncertain保存，后续自然澄清。已结束旧周期只追加事实，不重开复盘。""")
+
+from .activity_attribution import ATTRIBUTION_SCHEMA
+ACTIVITY_SPEC = Spec("activity_observations", "json", ACTIVITY_SPEC.prompt + "\n" + ATTRIBUTION_SCHEMA)
 
 REVIEW_SPEC = Spec("review_followup", "json", """本周期当前仍有效的用户明确复盘下一步决定快照；尚未决定或已经撤回则null。
 action: continue(继续原计划，review_decision=1)，adjust(调整原计划，review_decision=3)，pause(暂停，review_decision=4)，end(结束，review_decision=4)，replace_keep(更换焦点但保留旧目标，review_decision=2)，
@@ -366,7 +372,7 @@ async def save_plan_context(db, plan_id, raw, messages):
         await db.execute(insert(table), {"plan_id": plan_id, **values})
 
 
-async def capture_activities(db, *, user_id, conversation, state, raw, messages, corrections=None):
+async def capture_activities(db, *, user_id, conversation, state, raw, messages, corrections=None, replace_snapshot=True):
     if (not isinstance(raw, list) or state["flow_status"] in {"completed", "paused"}
             or conversation.subject_id != user_id or state["conversation_id"] != conversation.id):
         return
@@ -376,6 +382,23 @@ async def capture_activities(db, *, user_id, conversation, state, raw, messages,
     latest = users[-1]
     if latest.conversation_id != conversation.id:
         return
+    # Explicit old-message references backfill sourced identity, never infer
+    # old events from a current acknowledgement. Preserve other old facts.
+    historical, current_raw = {}, []
+    for item in raw[:8]:
+        source_id = item.get("source_message_id") if isinstance(item, dict) else None
+        if source_id is not None and source_id != latest.id:
+            source = next((m for m in users if m.id == source_id and m.position < latest.position), None)
+            if source is not None:
+                historical.setdefault(source.id, (source, []))[1].append(item)
+        else:
+            current_raw.append(item)
+    historical_results = []
+    for source, items in historical.values():
+        historical_results.extend(await capture_activities(db, user_id=user_id, conversation=conversation,
+            state=state, raw=items, messages=[m for m in messages if m.position <= source.position],
+            replace_snapshot=False) or [])
+    raw = current_raw
     table = schema.tables["pa_activity_events"]
     await db.execute(update(table).where(table.c.user_id == user_id,
         table.c.source_conversation_id == conversation.id, table.c.superseded_by_message_id == latest.id).values(
@@ -394,34 +417,51 @@ async def capture_activities(db, *, user_id, conversation, state, raw, messages,
             if len(matched) == 1:
                 await db.execute(update(table).where(table.c.id == matched[0]).values(
                     status="superseded", superseded_by_message_id=latest.id))
-    # A repeated extraction is one full snapshot of this source message only.
-    await db.execute(delete(table).where(table.c.user_id == user_id, table.c.source_message_id == latest.id))
-    goals, plans = schema.tables["pa_goals"], schema.tables["module_two_record"]
-    goal = (await db.execute(select(goals.c.id, goals.c.title, plans.c.activity_content).outerjoin(plans,
-        (plans.c.id == goals.c.current_plan_record_id) & (plans.c.goal_id == goals.c.id)).where(
-        goals.c.id == state["active_goal_id"], goals.c.user_id == user_id))).mappings().one_or_none()
-    seen = set()
+    from .activity_attribution import attribute_observation
+    links = schema.tables["pa_activity_attributions"]
+    prior = (await db.execute(select(table).where(table.c.user_id == user_id,
+        table.c.source_message_id == latest.id))).mappings().all()
+    prior_by_signature = {(r["activity_content"], r["event_kind"], r["source_quote"]): r for r in prior}
+    seen, retained, results = set(), set(), []
+    next_index = max((r["event_index"] for r in prior), default=0)
     for item in raw[:8]:
         if not isinstance(item, dict):
             continue
         quote, activity = text(item.get("source_quote"), 2000), text(item.get("activity_content"), 255)
         kind = item.get("event_kind")
-        if not quote or quote not in latest.content or not activity or activity not in quote or kind not in {"performed", "not_performed", "idea"}:
+        if not quote or quote not in latest.content or not activity or kind not in {"performed", "not_performed", "idea"}:
             continue
-        fingerprint = (activity, kind, quote)
-        if fingerprint in seen:
+        # An omitted activity name is never reconstructed by this program.
+        # The model may resolve an explicit earlier reference, supported by
+        # attribution.evidence; otherwise retain the prior strict source rule.
+        if activity not in quote and not isinstance(item.get("attribution"), dict):
             continue
-        seen.add(fingerprint)
-        # Literal match only. Ambiguous activities remain unlinked, not guessed.
-        linked = goal and len(activity) >= 2 and (activity in goal["title"] or activity in (goal["activity_content"] or "")) and kind != "idea"
+        signature = (activity, kind, quote)
+        if signature in seen:
+            continue
+        seen.add(signature)
         def in_quote(key, limit):
             value = text(item.get(key), limit)
             return value if value and value in quote else None
-        await db.execute(insert(table), {"id": new_id(), "user_id": user_id,
-            "goal_id": goal["id"] if linked else None, "cycle_id": state["active_cycle_id"] if linked else None,
-            "source_conversation_id": conversation.id, "source_message_id": latest.id,
-            "event_index": len(seen), "event_kind": kind, "activity_content": activity,
-            "source_quote": quote, "occurred_at_text": in_quote("occurred_at_text", 255), "effect": in_quote("effect", 1000)})
+        values = {"activity_content": activity, "event_kind": kind, "source_quote": quote,
+            "occurred_at_text": in_quote("occurred_at_text", 255), "effect": in_quote("effect", 1000)}
+        previous = prior_by_signature.get(signature)
+        if previous:
+            event = dict(previous)
+            await db.execute(update(table).where(table.c.id == event["id"]).values(**values, updated_at=now()))
+        else:
+            next_index += 1
+            event = {"id": new_id(), "user_id": user_id, "source_conversation_id": conversation.id,
+                "source_message_id": latest.id, "event_index": next_index, **values}
+            await db.execute(insert(table), event)
+        retained.add(event["id"])
+        results.append(await attribute_observation(db, user_id=user_id, event=event,
+            item={**item, **values}, source=latest, messages=messages))
+    removed = [r["id"] for r in prior if r["id"] not in retained] if replace_snapshot else []
+    if removed:
+        await db.execute(delete(links).where(links.c.event_id.in_(removed)))
+        await db.execute(delete(table).where(table.c.id.in_(removed)))
+    return historical_results + results
 
 
 async def public_goal_details(db, user_id):
@@ -649,6 +689,9 @@ async def save_review_followup(db, review_id, raw, messages, decision, *, decisi
 
 async def public_activities(db, user_id, *, conversation_id=None):
     table = schema.tables["pa_activity_events"]
+    from .goal_scope import isolated
+    if conversation_id is None and await isolated(db, user_id):
+        return []
     query = select(table).where(table.c.user_id == user_id, table.c.status == "active")
     query = query.where(table.c.source_conversation_id == conversation_id) if conversation_id else query.where(table.c.goal_id.is_(None))
     rows = (await db.execute(query.order_by(table.c.created_at.desc(), table.c.id).limit(30))).mappings().all()

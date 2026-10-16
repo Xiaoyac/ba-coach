@@ -229,33 +229,37 @@ async def test_required_decisions_hide_planning_then_stream_final():
     assert ''.join(d.text for d in out if d.kind=='content')=='这次想聊什么？'
     assert [r['tool_choice'] for r in p.seen]==[{'type':'function','function':{'name':'get_pa_card'}},'required','none']
 
-async def test_module_node_commits_via_tool_and_uses_m3_prompt(goal_api,context,monkeypatch):
+async def test_module_node_defers_tools_and_keeps_current_m2_prompt(goal_api,context,monkeypatch):
     from dataclasses import replace
     from types import SimpleNamespace as NS
     from app.graph.nodes import make_module_node,ModuleConfig,route_next_module_node,_run_background_routing
     from app.providers.base import as_text
-    _,db,_=goal_api;await setup_turn(db,'确认');tool=executor(db);v=await version(tool)
+    _,db,_=goal_api;await setup_turn(db,'确认');tool=executor(db)
     class Provider:
         name='test';model='test';count=0;systems=[]
-        async def stream_tools(self,**kw):
+        async def stream(self,**kw):
             self.count+=1;self.systems.append(as_text(kw['system']))
-            if self.count==1:yield StreamDelta(kind='tool_calls',tool_calls=[call('get_pa_card')])
-            elif self.count==2:yield StreamDelta(kind='tool_calls',tool_calls=[call('confirm_pa_card',{'state_version':v})])
-            else:
-                assert 'M3 effective prompt' in as_text(kw['system'])
-                assert 'M2 effective prompt' not in as_text(kw['system'])
-                yield StreamDelta(kind='content',text='安排已经确认。')
+            assert set(kw)=={'system','messages'}
+            assert 'M2 effective prompt' in as_text(kw['system'])
+            assert 'M3 effective prompt' not in as_text(kw['system'])
+            yield StreamDelta(kind='content',text='好，就按你选的安排继续。')
+        async def stream_tools(self,**kw):
+            pytest.fail('foreground model must not call PA tools')
+            yield
     p=Provider();ctx=replace(context,provider=p,router_provider=None,sessionmaker=tool.maker,
         settings=context.settings.model_copy(update={'database_schema_version':'v2','pa_card_tools_enabled':True,'knowledge_mediator_enabled':False}),
         prompt_snapshot={'global':'policy','module_2':'M2 effective prompt','module_3':'M3 effective prompt'},stream=True)
     state={'session_id':'chat-a','subject_id':'a','user_message_id':21,'user_input':'确认','memory':{},'extracted_intent':'module_2'}
     result=await make_module_node('module_2',ModuleConfig(retrieve=False))(state,NS(context=ctx),writer=lambda e:None)
     assert result.get('error') is None,result
-    assert result['pa_tools_used'] and result['next_module']=='module_3'
+    assert result['pa_background_pending'] and not result.get('pa_tools_used')
+    assert p.count==1
     routing=await route_next_module_node({**state,**result},NS(context=ctx),writer=lambda e:None)
-    assert not routing['routing_pending'] and routing['next_module']=='module_3'
+    assert not routing['routing_pending'] and routing['next_module']=='module_2'
     # The old background extractor is not allowed to rewrite a tool turn.
     await _run_background_routing({**state,**result},ctx,assistant_message_id=999)
+    await db.rollback();_,actual=await runtime_for(db,'chat-a')
+    assert actual['current_module']=='module_2'
 
 async def test_pre_router_cannot_precommit_pa_tool_turn(goal_api,context,provider,monkeypatch):
     from dataclasses import replace

@@ -47,7 +47,7 @@ def table(name, *columns):
 
 
 user_profile = table("user_profile", ident("uuid", primary=True),
-    col("nickname", String(64)), col("birth_year", SmallInteger), col("birth_date", Date),
+    col("nickname", String(64)), col("birth_year", SmallInteger),
     col("reported_age", SmallInteger), col("age_reported_at", timestamp),
     col("gender", String(32)), col("occupation_status", String(32)),
     col("living_status", String(32)),
@@ -55,7 +55,7 @@ user_profile = table("user_profile", ident("uuid", primary=True),
     col("module1_done_flag", Boolean, required=True, default="0"), *times())
 
 user_preferences = table("user_preferences", user_key(primary=True),
-    col("communication_style", String(32)), col("response_verbosity", String(16)),
+    col("response_verbosity", String(16)),
     col("activity_environment", String(16)), col("activity_social", String(16)),
     col("activity_atmosphere", String(16)), col("preferred_activity_intensity", String(16)),
     col("reminder_frequency", String(64)), col("reminder_time", String(5)),
@@ -212,6 +212,26 @@ ai_decision_logs = table("ai_decision_logs", col("id", Integer, primary=True),
     col("evidence_message_ids", JSON), col("schema_version", SmallInteger, required=True, default="1"),
     col("created_at", timestamp, required=True, default=func.now()))
 
+# User-editable formulation workspaces are separate from confirmed PA plans.
+# A card may be incomplete/non-PA while it is being discussed. Every revision
+# is retained in ai_decision_logs; this table is only the current projection.
+goal_card_workspaces = table("goal_card_workspaces", ident(primary=True), user_key(),
+    col("conversation_id", Integer),
+    *status(["primary", "secondary"], name="kind"),
+    *status(["formulating", "discussing", "ready", "confirmed", "paused"], name="phase"),
+    col("revision", Integer, required=True, default="1"),
+    col("content_revision", Integer, default="1"),
+    col("fields", JSON, required=True), col("concerns", JSON, required=True),
+    ident("goal_id", ref="pa_goals.id"), ident("plan_id", ref="module_two_record.id"),
+    ident("cycle_id", ref="pa_cycles.id"),
+    col("opened_message_id", Integer, required=True), col("submission_text"),
+    col("submission_message_id", Integer), col("review_message_id", Integer),
+    col("review_display_text"), col("review", JSON), col("display_text"),
+    col("display_user_message_id", Integer), col("display_assistant_message_id", Integer),
+    col("confirmation_message_id", Integer), *times(),
+    CheckConstraint("revision > 0"),
+    Index("ix_goal_card_owner_conversation", "user_id", "conversation_id", "updated_at"))
+
 # Additive goal-model tables: historic goals stay unclassified until evidence
 # exists. No parent-goal foreign key: secondary goals are independent.
 pa_goal_details = table("pa_goal_details", ident("goal_id", primary=True, ref="pa_goals.id"),
@@ -234,6 +254,26 @@ pa_activity_events = table("pa_activity_events", ident(primary=True), user_key()
     col("effect", String(1000)), col("source_quote", String(2000), required=True), *times(),
     UniqueConstraint("source_message_id", "event_index"),
     Index("ix_activity_user_goal", "user_id", "goal_id", "created_at"))
+
+# An observation is something said in a message; an execution is the actual
+# occasion it describes. Several observations may describe the same occasion.
+# Additive tables deliberately leave historical name-based links untouched;
+# they are not trusted execution evidence until explicitly reconciled.
+pa_executions = table("pa_executions", ident(primary=True), user_key(),
+    ident("goal_id", ref="pa_goals.id"), ident("plan_id", ref="module_two_record.id"),
+    ident("cycle_id", ref="pa_cycles.id"), col("activity_content", String(255), required=True),
+    col("occurred_on", Date), col("occurred_at_text", String(255)),
+    col("source_conversation_id", Integer, required=True),
+    col("origin_message_id", Integer, required=True), col("origin_event_index", SmallInteger, required=True),
+    *times(), UniqueConstraint("origin_message_id", "origin_event_index"),
+    Index("ix_pa_execution_owner_goal", "user_id", "goal_id", "occurred_on"))
+
+pa_activity_attributions = table("pa_activity_attributions",
+    ident("event_id", primary=True, ref="pa_activity_events.id"),
+    ident("execution_id", ref="pa_executions.id"),
+    *status(["uncertain", "linked", "unplanned", "idea"], name="attribution_status"),
+    col("reason_code", String(64), required=True), col("evidence", JSON, required=True), *times(),
+    Index("ix_pa_attribution_execution", "execution_id"))
 
 pa_review_details = table("pa_review_details", ident("review_id", primary=True, ref="module_four_record.id"),
     *status(["end", "pause", "replace_keep", "replace_pause", "continue", "adjust"], name="action"),

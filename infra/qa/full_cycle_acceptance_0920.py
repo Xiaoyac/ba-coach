@@ -35,7 +35,7 @@ class Client:
             payload = dict(username='qa0920'+suffix, password='Qa0920!'+uuid.uuid4().hex,
                 email='qa0920'+suffix+'@example.com', nickname='周期验收0920'+actor,
                 tag=str(int(suffix,16)%100000).zfill(5), birth_date='1995-06-15',
-                living_status='和家人', communication_preference='温柔引导',
+                living_status='和家人',
                 physical_condition=[], behavior_taboo=[])
             a = self.api('POST','/api/auth/register',json=payload)
             save(creds, {**a,'username':payload['username'],'password':payload['password']})

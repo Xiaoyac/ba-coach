@@ -22,7 +22,8 @@ async def test_router_only_accepts_all_valid_modules_without_card_or_steps(provi
     decision = await decide_target_module_with_reasoning(provider, current_module=current,
         user_input="重新安排", has_pa_card=False, routing_mode=ROUTER_ONLY)
     assert decision.target_module == target and not decision.error_code
-    assert "数据库已确认才允许跳转等执行前置在此模式停用" in provider.route_systems[-1]
+    # The proposal is free; only the commit enforces the execution-plan binding.
+    assert "execution_plan_binding.ready" in provider.route_systems[-1]
 
 
 @pytest.mark.parametrize("raw", ["", "not json", "5", '{"target_module":"module_9"}', '{"target_module":true}'])
@@ -95,7 +96,7 @@ async def test_mode_comes_from_owned_memory_and_current_admin_role(router_only_d
     assert snapshot["routing_mode"] == ROUTER_CODE
 
 
-@pytest.mark.parametrize("target", ["module_2", "module_3", "module_4"])
+@pytest.mark.parametrize("target", ["module_2"])
 async def test_router_only_commits_without_clinical_completion_and_survives_reload(router_only_db, provider, monkeypatch, target):
     ctx, maker = router_only_db
     provider.route_result = target
@@ -126,12 +127,36 @@ async def test_router_only_commits_without_clinical_completion_and_survives_relo
         assert logs[0]["decision_value"]["business_confirmation_performed"] is False
 
 
+@pytest.mark.parametrize("target", ["module_3", "module_4"])
+async def test_router_only_execution_stage_requires_bound_confirmed_plan(router_only_db, provider, monkeypatch, target):
+    ctx, maker = router_only_db
+    provider.route_result = target
+    from app import turn_confirmation
+    async def forbidden(*args, **kwargs):
+        pytest.fail("router-only must not invoke the completion/confirmation service")
+    monkeypatch.setattr(turn_confirmation, "apply_pre_reply_decision", forbidden)
+    result = await route_before_reply(current_turn(), ctx)
+    # Unfinished M1 is held in place rather than pushed into M2.
+    assert result["current_module"] == result["next_module"] == "module_1"
+    assert (await ctx.store.get("s")).module == "module_1"
+    async with maker() as db:
+        runtime = (await db.execute(select(schema.tables["conversation_runtime_states"]).where(
+            schema.tables["conversation_runtime_states"].c.conversation_id == 1))).mappings().one()
+        assert runtime["last_transition_reason"] == "router_only_execution_binding_blocked"
+        logs = (await db.execute(select(schema.tables["ai_decision_logs"]))).mappings().all()
+        assert len(logs) == 1
+        value = logs[0]["decision_value"]
+        assert value["proposed_module"] == target and value["applied_module"] == "module_1"
+        assert value["execution_plan_binding"]["reason_code"] == "execution_binding_missing"
+        assert value["business_confirmation_performed"] is False
+
+
 async def test_router_only_ignores_forced_request_module(router_only_db, provider):
     ctx, _ = router_only_db
-    provider.route_result = "module_4"
-    result = await route_before_reply(current_turn(forced_module="module_2"), ctx)
-    assert result["extracted_intent"] == "module_4" and result["forced_module"] is None
-    assert result["telemetry"]["ignored_forced_module"] == "module_2"
+    provider.route_result = "module_2"
+    result = await route_before_reply(current_turn(forced_module="module_3"), ctx)
+    assert result["extracted_intent"] == "module_2" and result["forced_module"] is None
+    assert result["telemetry"]["ignored_forced_module"] == "module_3"
     assert len(provider.route_calls) == 1
 
 
@@ -153,7 +178,8 @@ async def test_router_only_stale_or_unauthorized_proposal_cannot_commit(router_o
         elif mutation == "mode_changed":
             await db.execute(update(rt).where(rt.c.conversation_id == 1).values(memory={"routing_mode": ROUTER_CODE}))
         else:
-            await db.execute(insert(schema.tables["pa_goals"]), {"id": "g", "user_id": "a", "title": "新的目标"})
+            await db.execute(insert(schema.tables["pa_goals"]), {"id": "g", "user_id": "a", "title": "新的目标",
+                                                                 "created_from_conversation_id": 1})
             await db.execute(update(rt).where(rt.c.conversation_id == 1).values(active_goal_id="g"))
         await db.commit()
     decision = RouterDecision(target_module="module_4", reasoning_content="", model="stub", completed_steps=[], usage={})
@@ -176,7 +202,7 @@ async def test_router_only_failure_keeps_persisted_module(router_only_db, provid
     result = await route_before_reply(current_turn(), ctx)
     assert result["current_module"] == result["next_module"] == "module_1"
     assert result["telemetry"]["router_pre_reply"]["status"] == "failed"
-    assert "保留当前模块" in result["routing_reasoning_content"]
+    assert "保留有效阶段" in result["routing_reasoning_content"]
 
 
 async def test_risk_takes_precedence_without_router_or_module_change(router_only_db, provider):
@@ -186,13 +212,16 @@ async def test_risk_takes_precedence_without_router_or_module_change(router_only
     assert not provider.route_calls
 
 
-@pytest.mark.parametrize("current,target", [("module_2", "module_3"), ("module_3", "module_4"), ("module_4", "module_1")])
-async def test_router_only_keeps_existing_unconfirmed_business_records_intact(router_only_db, provider, current, target):
+# An unconfirmed plan cannot open M3/M4; an invalid execution stage repairs to M2.
+@pytest.mark.parametrize("current,target,applied", [("module_2", "module_3", "module_2"),
+    ("module_3", "module_4", "module_2"), ("module_4", "module_1", "module_1")])
+async def test_router_only_keeps_existing_unconfirmed_business_records_intact(router_only_db, provider, current, target, applied):
     ctx, maker = router_only_db
     rt, goals, plans, cycles, progress = [schema.tables[name] for name in (
         "conversation_runtime_states", "pa_goals", "module_two_record", "pa_cycles", "pa_cycle_progress")]
     async with maker() as db:
-        await db.execute(insert(goals), {"id": "g", "user_id": "a", "title": "散步", "status": "draft"})
+        await db.execute(insert(goals), {"id": "g", "user_id": "a", "title": "散步", "status": "draft",
+                                         "created_from_conversation_id": 1})
         await db.execute(insert(plans), {"id": "p", "goal_id": "g", "version_no": 1, "timezone": "Asia/Shanghai",
             "activity_content": "散步", "potential_barriers": ["会累"], "barrier_coping_plan": []})
         await db.execute(insert(cycles), {"id": "c", "goal_id": "g", "ordinal": 1, "status": "planning"})
@@ -204,7 +233,7 @@ async def test_router_only_keeps_existing_unconfirmed_business_records_intact(ro
                   for table in (goals, plans, cycles, progress)}
     provider.route_result = target
     result = await route_before_reply(current_turn(current_module=current), ctx)
-    assert result["next_module"] == target
+    assert result["next_module"] == applied
     assert result["active_cycle_id"] == "c"
     async with maker() as db:
         after = {table.name: [dict(row) for row in (await db.execute(select(table))).mappings()]
@@ -218,11 +247,11 @@ async def test_router_only_committed_stage_survives_context_refresh_failure(rout
     async def broken_context(*args, **kwargs):
         raise RuntimeError("simulated enrichment failure")
     monkeypatch.setattr(v2_workflow, "clinical_context", broken_context)
-    provider.route_result = "4"
+    provider.route_result = "2"
     result = await route_before_reply(current_turn(clinical_context=["previous module facts"]), ctx)
-    assert result["current_module"] == result["next_module"] == "module_4"
+    assert result["current_module"] == result["next_module"] == "module_2"
     assert result["clinical_context"] == []
-    assert result["telemetry"]["router_pre_reply"]["database_module"] == "module_4"
+    assert result["telemetry"]["router_pre_reply"]["database_module"] == "module_2"
 
 
 async def test_router_code_retains_business_gate_for_same_router_output(router_only_db, provider, monkeypatch):
@@ -242,3 +271,22 @@ async def test_router_code_retains_business_gate_for_same_router_output(router_o
     assert calls == ["module_1"]  # The normal structural clamp remains active.
     assert result["next_module"] == "module_1"
     assert result["telemetry"]["router_pre_reply"]["routing_mode"] == ROUTER_CODE
+
+
+async def test_admin_accidental_binding_is_scoped_consistently(router_only_db, provider):
+    """A goal from another chat stays stored but neither supersedes nor binds this one."""
+    ctx, maker = router_only_db
+    rt = schema.tables["conversation_runtime_states"]
+    async with maker() as db:
+        await db.execute(insert(schema.tables["pa_goals"]), {"id": "elsewhere", "user_id": "a",
+            "title": "其他会话目标", "status": "active", "created_from_conversation_id": 2})
+        await db.execute(update(rt).where(rt.c.conversation_id == 1).values(
+            current_module="module_2", active_goal_id="elsewhere"))
+        await db.commit()
+    provider.route_result = "module_3"
+    result = await route_before_reply(current_turn(current_module="module_2"), ctx)
+    assert result["current_module"] == result["next_module"] == "module_2"
+    async with maker() as db:
+        runtime = (await db.execute(select(rt).where(rt.c.conversation_id == 1))).mappings().one()
+        assert runtime["last_transition_reason"] == "router_only_execution_binding_blocked"
+        assert runtime["active_goal_id"] == "elsewhere"  # retained for audit

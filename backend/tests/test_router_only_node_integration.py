@@ -18,7 +18,7 @@ CARD = {"text": "程序生成的目标确认卡", "record_id": "draft", "record_
 
 @pytest.mark.parametrize("mode", ["router_only", "router_code", None])
 @pytest.mark.parametrize("stream", [False, True])
-async def test_only_router_uses_main_model_instead_of_confirmation_card(context, provider, monkeypatch, mode, stream):
+async def test_router_mode_does_not_disable_real_confirmation_card(context, provider, monkeypatch, mode, stream):
     async def authority(*args):
         return {"available": True, "current_module": "module_2", "flow_status": "active",
                 "plan_confirmed": False, "confirmation_summary": CARD}
@@ -33,21 +33,10 @@ async def test_only_router_uses_main_model_instead_of_confirmation_card(context,
         "routing_mode": mode, "memory": {"routing_mode": mode or "router_only"},
         "clinical_context": ['本周期绑定计划：{"record_status":"draft"}'],
     }, Runtime(context=ctx))
-    if mode != "router_only":
-        assert result["final_response"] == CARD["text"]
-        assert result["provider"] == "workflow_state"
-        assert provider.seen == []
-    else:
-        assert result["final_response"] == ("hello" if stream else "saw 1 messages")
-        assert result["provider"] == "stub"
-        assert len(provider.seen) == 1
-        compiled = as_text(provider.systems[0])
-        assert "当前模块已由 Router 选择并提交" in compiled
-        assert "不是继续对话的前提" in compiled
-        assert '"plan_confirmed": false' in compiled
-        assert '"record_status":"draft"' in compiled
-        assert CARD["text"] not in compiled
-        assert "rendered_confirmation" not in result["telemetry"]
+    assert result["final_response"] == CARD["text"]
+    assert result["provider"] == "workflow_state"
+    assert provider.seen == []
+    assert result["telemetry"]["rendered_confirmation"]["record_id"] == 'draft'
     if stream:
         assert "".join(event.get("text", "") for event in events if event["type"] == "delta") == result["final_response"]
 
@@ -57,7 +46,7 @@ async def test_only_router_uses_main_model_instead_of_confirmation_card(context,
     ("你就是懒。", "shaming_prescription"),
 ])
 @pytest.mark.parametrize("stream", [False, True])
-async def test_only_router_records_save_and_safety_findings_without_replacement(context, provider, monkeypatch, reply, code, stream):
+async def test_router_only_enforces_save_truth_but_keeps_coaching_diagnostics(context, provider, monkeypatch, reply, code, stream):
     async def authority(*args):
         return {"available": True, "current_module": "module_3", "plan_confirmed": False}
 
@@ -78,11 +67,15 @@ async def test_only_router_records_save_and_safety_findings_without_replacement(
         "session_id": "owned-admin", "subject_id": "admin-profile", "user_input": "继续吧",
         "routing_mode": "router_only",
     }, Runtime(context=ctx))
-    assert result["final_response"] == reply
-    assert not result["reply_held"]
-    assert any(finding["code"] == code for finding in result["telemetry"]["answer_validator"]["findings"])
+    if code == 'uncommitted_workflow_claim':
+        assert result['final_response'] == '' and result['reply_held']
+        assert result['telemetry']['workflow_truth']['status'] == 'blocked'
+        assert result['error']
+    else:
+        assert result['final_response'] == reply and not result['reply_held']
+        assert any(finding['code'] == code for finding in result['telemetry']['answer_validator']['findings'])
     if stream:
-        assert reply == "".join(event.get("text", "") for event in events if event["type"] == "delta")
+        assert result['final_response'] == ''.join(event.get('text', '') for event in events if event['type'] == 'delta')
 
 
 def test_only_router_business_facts_do_not_reinstate_progress_gates():
@@ -190,16 +183,25 @@ async def main():
             persisted = (await db.execute(select(rt))).mappings().one()
             assert persisted['current_module'] == module
             assert persisted['memory'] == memory
-            if module == 'module_1':
-                record = (await db.execute(select(metadata.tables['module_one_record']))).mappings().one()
-                assert record['chief_complaint'] == '写报告拖延'
-                assert record['record_status'] == 'draft'
+            # Administrator evidence without a source conversation is never
+            # written; members keep their account-level M1 draft.
+            written = module == 'module_1' and role == 'user'
+            records = (await db.execute(select(metadata.tables['module_one_record']))).mappings().all()
+            if written:
+                assert len(records) == 1
+                assert records[0]['chief_complaint'] == '写报告拖延'
+                assert records[0]['record_status'] == 'draft'
+            else:
+                assert records == []
             events = (await db.execute(select(AIExecutionEvent).where(AIExecutionEvent.stage == 'post_reply_persistence'))).scalars().all()
             assert len(events) == 1 and events[0].error_code is None
-            assert events[0].event_metadata['database_write']['status'] == ('completed' if module == 'module_1' else 'skipped')
+            write = events[0].event_metadata['database_write']
             if module != 'module_1':
-                assert events[0].event_metadata['database_write']['reason_code'] == 'no_extracted_data'
-            assert (await db.get(Conversation, 1)).revision == 3
+                # An empty extraction refreshes nothing and publishes no revision.
+                assert write['status'] == 'skipped' and write['reason_code'] == 'empty_extraction'
+            else:
+                assert write['status'] == ('completed' if written else 'not_written')
+            assert (await db.get(Conversation, 1)).revision == (3 if module == 'module_1' else 2)
         cached = await store.get('single')
         assert cached.module == module and cached.memory == memory
         print('PASS', module, stored_mode, role)

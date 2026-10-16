@@ -78,7 +78,12 @@ async def test_enhanced_results_still_require_successful_mediator(context, provi
     kb = DatabaseKnowledgeBase(lambda: db_sessionmaker, ranking_mode="enhanced")
     assert await kb.search(module="module_1", query="什么是活动监测？")
 
+    original = provider.route_detailed
+
     async def timeout(**kwargs):
+        # Only the mediator times out; the fail-closed risk screen still answers.
+        if "风险信号检测器" in kwargs.get("system", ""):
+            return await original(**kwargs)
         raise TimeoutError
 
     provider.route_detailed = timeout

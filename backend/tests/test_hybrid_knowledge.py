@@ -135,21 +135,28 @@ async def test_index_build_does_not_block_event_loop_or_first_reply(tmp_path):
     assert await kb.search(module="module_1", query="semantic-only")
 
 
-async def test_graph_hybrid_never_calls_legacy_mediator(context, provider, monkeypatch, tmp_path):
+async def test_graph_hybrid_calls_bounded_mediator(context, provider, monkeypatch, tmp_path):
     from app.graph import get_graph, nodes
     from app.providers.base import as_text
     kb = synthetic(tmp_path)
     await kb.warmup()
     context = replace(context, knowledge_base=kb, knowledge_mediator_bypass=True)
     context.settings.knowledge_intent_gate_enabled = False
-    forbidden = AsyncMock(side_effect=AssertionError("legacy mediator must not execute"))
-    monkeypatch.setattr(nodes, "mediate_knowledge", forbidden)
+    import json
+    from types import SimpleNamespace
+    from app import hybrid_mediator
+    from app.providers.base import Completion
+    complete = AsyncMock(return_value=Completion(text=json.dumps({"decision":"use",
+        "selections":[{"id":"kb:1","quote":"从简单的小行动开始","application":"解释小行动"}],"note":""}, ensure_ascii=False), model="hybrid-mediator"))
+    monkeypatch.setattr(hybrid_mediator, "build_provider", lambda settings:
+        SimpleNamespace(name='deepseek', model='hybrid-mediator',
+                        route_detailed=complete, _client=SimpleNamespace(close=AsyncMock())))
     result = await get_graph().ainvoke({"user_input": "semantic-only", "forced_module": "module_2"}, context=context)
-    forbidden.assert_not_called()
+    complete.assert_awaited_once()
     telemetry = result["telemetry"]
     assert telemetry["retrieval"]["ranking_mode"] == "astrbot_hybrid"
     assert telemetry["retrieval"]["exact_cache"]["model_calls"] == 0
-    assert telemetry["knowledge_mediator"]["reason"] == "hybrid_direct"
+    assert telemetry["knowledge_mediator"]["reason"] == "guided"
     assert telemetry["knowledge_references"]["provided"]
     assert "从简单的小行动开始" in as_text(provider.systems[-1])
 
@@ -316,17 +323,40 @@ async def test_sparse_reserve_rescues_evidence_outside_fusion_pool(tmp_path):
     assert trace['rerank_pool_ids'] == ['kb:1','kb:2']
 
 
-async def test_k3_sees_original_refusal_even_when_embedding_query_is_focused(tmp_path):
+@pytest.mark.parametrize("backend,model", [("k3", "kimi-k3"), ("llm", "deepseek-v4.1-flash")])
+async def test_listwise_sees_original_refusal_even_when_embedding_query_is_focused(tmp_path, backend, model):
     kb = synthetic(tmp_path)
-    kb.settings.knowledge_rerank_backend = 'k3'
-    kb.settings.knowledge_rerank_model = 'kimi-k3'
+    kb.settings.knowledge_rerank_backend = backend
+    kb.settings.knowledge_rerank_model = model
     kb.settings.knowledge_hybrid_require_rerank = True
     rank = AsyncMock(return_value=[])
     from types import SimpleNamespace
-    kb._k3_reranker = SimpleNamespace(rank=rank)
+    kb._llm_reranker = SimpleNamespace(rank=rank)
     await kb.warmup()
     query = '我不想跳绳，只想散步'
     hits, metrics = await kb.search_with_diagnostics(module='module_2', query=query)
     assert not hits and metrics['retriever_details']['rerank'] == 'completed'
     assert rank.call_args.args[0] == query
     assert metrics['model_calls'] == 1
+
+
+async def test_combined_sparse_pool_has_global_rerank_cap(tmp_path):
+    from types import SimpleNamespace
+    docs = tuple(index_chunk(id=i, source_id=i, source_name='test', category='BA' if i < 40 else 'PA',
+        heading='', content=f'walking activity evidence {i}') for i in range(80))
+    kb = synthetic(tmp_path, docs)
+    kb.settings.knowledge_hybrid_sparse_reserve = 20
+    kb.settings.knowledge_hybrid_candidates = 50  # Even an oversized config cannot bypass the cap.
+    kb.settings.knowledge_rerank_model = 'deepseek-v4.1-flash'
+    kb.settings.knowledge_rerank_backend = 'llm'
+    rank = AsyncMock(side_effect=lambda q, hits, **kw: hits[:3])
+    kb._llm_reranker = SimpleNamespace(rank=rank)
+    await kb.warmup()
+    _, metrics = await kb.search_with_diagnostics(module='module_2', query='walking activity', top_k=5)
+    details = metrics['retriever_details']
+    assert details['rerank_candidates_before_limit'] > 20
+    assert len(rank.call_args.args[1]) == details['rerank_candidate_count'] == 20
+    assert [h.id for h in rank.call_args.args[1]] == details['rerank_pool_ids']
+    assert details['embedding_duration_ms'] >= 0
+    assert details['recall_fusion_duration_ms'] >= 0
+    assert details['rerank_duration_ms'] >= 0

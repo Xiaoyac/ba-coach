@@ -391,8 +391,10 @@ async def finish_turn(
             "reply_recovery": metrics.get("reply_recovery"),
             **{key: metrics.get(key) for key in ("main_input", "reply_trace", "prompt_sources", "history_source", "history_messages",
                 "execution_timeline", "time_to_first_visible_content_ms", "first_visible_measurement",
+                "time_to_first_body_content_ms", "body_completed_ms", "retrieval_overlap", "retrieval",
                 "router_pre_reply", "context_pipeline", "conversation_thinking_enabled",
-                "pa_tools", "context_epoch", "reply_mode", "main_thinking_enabled", "deep_reply_policy", "reply_lead", "reply_held")},
+                "knowledge_mode", "knowledge_mediator_node_enabled", "knowledge_mediator",
+                "overload_retries", "main_timeout_seconds", "pa_tools", "context_epoch", "reply_mode", "main_thinking_enabled", "deep_reply_policy", "reply_lead", "reply_held")},
             # Permission-controlled execution trace; never include this in
             # ordinary user-visible chat content.
             "answer_validator": metrics.get("answer_validator"),

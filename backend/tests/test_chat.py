@@ -58,9 +58,11 @@ def test_describe_graph(client: TestClient) -> None:
     assert "analyze_intent" in body["nodes"]
     assert "update_memory_and_format" in body["nodes"]
     conditional = [e for e in body["edges"] if e["conditional"]]
-    # The crisis branch shares the gate's fan-out with the four modules.
+    # The crisis branch and the fail-closed risk terminal share the gate's
+    # fan-out with the four modules.
     assert {e["target"] for e in conditional} == {
         "crisis",
+        "risk_check_failed",
         "pre_reply_router",
         "module_1",
         "module_2",

@@ -60,6 +60,7 @@ async def current_m1_missing(db, pending, conversation_id, session_id):
 async def confirmation_readiness(
     db, *, conversation, state, user_id, session_id, pending=None,
     extraction_assistant_message_id=None, confirmation_user_message_id=None,
+    following_assistant_message_id=None,
 ):
     """Evaluate the one authoritative readiness contract for confirmation.
 
@@ -79,6 +80,7 @@ async def confirmation_readiness(
             db, conversation_id=conversation.id, state=state, module=module,
             assistant_message_id=extraction_assistant_message_id,
             following_user_message_id=confirmation_user_message_id,
+            following_assistant_message_id=following_assistant_message_id,
         )
     memory = state.get("memory") or {}
     marker = memory.get("dialogue_draft") if isinstance(memory, dict) else None
@@ -143,6 +145,7 @@ async def confirmation_readiness(
 async def validate_confirmation(
     db, *, conversation, state, user_id, session_id, payload,
     extraction_assistant_message_id=None, confirmation_user_message_id=None,
+    following_assistant_message_id=None,
 ):
     pending = await draft(db, state, user_id)
     if state["row_version"] != payload.row_version or not pending or pending["id"] != payload.record_id or record_hash(pending) != payload.record_hash:
@@ -164,6 +167,7 @@ async def validate_confirmation(
             session_id=session_id, pending=pending,
             extraction_assistant_message_id=extraction_assistant_message_id,
             confirmation_user_message_id=confirmation_user_message_id,
+            following_assistant_message_id=following_assistant_message_id,
         )
         if not readiness["ready"]:
             codes = [item["code"] for item in readiness["reasons"]]
@@ -182,6 +186,9 @@ async def validate_confirmation(
 async def commit_confirmation(db, *, conversation, state, user_id, pending, message, review_action, snapshot_hash, source="dialogue", boundary_message_id=None):
     """No synthetic message, commit, or store lock here; preserve caller atomicity."""
     module, cycle_id, goal_id = state["current_module"], state["active_cycle_id"], state["active_goal_id"]
+    if goal_id:
+        from .goal_scope import require_goal
+        await require_goal(db, user_id, goal_id, conversation.id)
     table = schema.tables[TABLES[module]]
     profiles, rt = schema.tables["user_profile"], schema.tables["conversation_runtime_states"]
     if message.role != "user" or message.conversation_id != conversation.id or conversation.subject_id != user_id:
@@ -252,7 +259,8 @@ async def commit_confirmation(db, *, conversation, state, user_id, pending, mess
             "after_message_id": ((contract_for(pending).get("evidence") or {}).get("review_summary_quote") or {}).get("message_id")
                 or contract_for(pending).get("assistant_message_id"),
         }
-    if cycle_id:
+    from .goal_scope import isolated
+    if cycle_id and not await isolated(db, user_id):
         # Other chats may be continuing this SAME cycle. They must not
         # keep stale module pointers or advance a completed cycle.
         from .models import Conversation

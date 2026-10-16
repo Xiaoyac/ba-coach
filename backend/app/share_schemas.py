@@ -44,7 +44,7 @@ class SharedMessage(BaseModel):
     content: str
     created_at: datetime | None = None
     # Visible completion status only, never internal error text or request IDs.
-    reply_status: Literal["interrupted"] | None = None
+    reply_status: Literal["interrupted", "incomplete"] | None = None
     @model_validator(mode="after")
     def visible_reply_only(self):
         if self.role == "assistant":

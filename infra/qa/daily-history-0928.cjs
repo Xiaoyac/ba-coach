@@ -34,7 +34,10 @@ exports.run = async function(browser, baseUrl='http://127.0.0.1:3000') {
         if(p==='/api/assessment'||/^\/api\/assessment\/\d+$/.test(p)){
           fixture.saved={path:p,method:options.method,body:JSON.parse(options.body)};
           if(fixture.fail)return json({detail:'这份记录已在别处修改，请重新打开最新记录后再编辑。'},409);
-          return json({},p==='/api/assessment'?201:200);
+          const body=fixture.saved.body, previous=fixture.records.find(r=>p.endsWith('/'+r.id));
+          return json({...previous,id:previous?.id??3,scale_version:previous?.scale_version??2,revision_no:(previous?.revision_no??0)+1,
+            local_date:body.local_date,timezone:'Asia/Shanghai',status:'completed',...body.summary,
+            activities:body.activities.map((a,position)=>({...a,position}))},p==='/api/assessment'?201:200);
         }
         if(p.startsWith('/api/'))return json({});
         return original(input,options);
@@ -43,7 +46,7 @@ exports.run = async function(browser, baseUrl='http://127.0.0.1:3000') {
     const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.stack || e.message));
     await page.goto(baseUrl);
     const open=async()=>{
-      await page.getByRole('button',{name:'打开每日记录',exact:true}).click();
+      await page.getByRole('button',{name:'记录今天',exact:true}).click();
       await page.getByRole('dialog',{name:'每日行为记录',exact:true}).waitFor();
     };
     await open();
@@ -64,13 +67,14 @@ exports.run = async function(browser, baseUrl='http://127.0.0.1:3000') {
     assert.equal(await page.getByLabel('活动 1 的内容',{exact:true}).inputValue(),'慢走');
     await page.evaluate(()=>window.fixture.fail=false);
     await page.getByRole('button',{name:'保存修改',exact:true}).click();
+    await page.getByRole('button',{name:'完成，返回对话',exact:true}).click();
     await page.getByRole('dialog').waitFor({state:'hidden'});
     let saved=await page.evaluate(()=>window.fixture.saved);
     assert.equal(saved.method,'PUT'); assert.equal(saved.body.expected_revision,2);
     assert.equal(saved.body.local_date,'2020-01-04'); assert.equal(saved.body.activities[0].activity,'慢走');
     assert.equal(saved.body.activities[0].emotion,0); assert.equal(saved.body.activities[0].enjoyment,null);
     await open();
-    await page.getByRole('button',{name:'查看历史',exact:true}).click();
+    await page.getByRole('button',{name:'趋势与历史',exact:true}).click();
     await page.getByRole('button',{name:/1月1日/}).click();
     await page.getByRole('button',{name:'修改这份记录',exact:true}).click();
     await page.getByRole('dialog',{name:'修改行为记录',exact:true}).waitFor();
@@ -78,6 +82,7 @@ exports.run = async function(browser, baseUrl='http://127.0.0.1:3000') {
     await page.waitForFunction(()=>!document.querySelector('dialog[open] button[type="submit"]')?.disabled);
     await page.screenshot({path:path.join(out,`legacy-${width}.png`),fullPage:true});
     await page.getByRole('button',{name:'保存修改',exact:true}).click();
+    await page.getByRole('button',{name:'完成，返回对话',exact:true}).click();
     await page.getByRole('dialog').waitFor({state:'hidden'});
     saved=await page.evaluate(()=>window.fixture.saved);
     assert.equal(saved.body.summary.completion_rate,9);assert.equal(saved.body.summary.social_connection,7);
@@ -88,6 +93,7 @@ exports.run = async function(browser, baseUrl='http://127.0.0.1:3000') {
     await page.getByRole('radio',{name:'这一天总体身体活动程度 3',exact:true}).click();
     await page.getByRole('radio',{name:'这一天整体心情如何？ 4',exact:true}).click();
     await page.getByRole('button',{name:'保存记录',exact:true}).click();
+    await page.getByRole('button',{name:'完成，返回对话',exact:true}).click();
     await page.getByRole('dialog').waitFor({state:'hidden'});
     saved=await page.evaluate(()=>window.fixture.saved);
     assert.equal(saved.method,'POST');assert.equal(saved.body.local_date,'2020-01-06');

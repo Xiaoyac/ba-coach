@@ -9,8 +9,10 @@ const MIN_LENGTH = 8;
 
 export default function ChangePasswordModal({
   onClose,
+  embedded = false,
 }: {
   onClose: () => void;
+  embedded?: boolean;
 }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -20,12 +22,13 @@ export default function ChangePasswordModal({
   const [done, setDone] = useState(false);
 
   useEffect(() => {
+    if (embedded) return;
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+  }, [onClose, embedded]);
 
   // Checked here as well as on the server so the mismatch is caught before a
   // round trip — the server never sees `confirm` at all.
@@ -50,29 +53,29 @@ export default function ChangePasswordModal({
   }
 
   return (
-    <div className="zen-overlay-enter fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div
+    <div className={embedded ? "w-full max-w-xl" : "zen-overlay-enter fixed inset-0 z-50 flex items-center justify-center p-4"}>
+      {!embedded && <div
         aria-hidden
         onClick={onClose}
         className="absolute inset-0 bg-canvas/70 backdrop-blur-sm"
-      />
+      />}
 
       <div
-        role="dialog"
-        aria-modal="true"
+        role={embedded ? "region" : "dialog"}
+        aria-modal={embedded ? undefined : true}
         aria-label="修改密码"
-        className="relative w-full max-w-sm rounded-[28px] border border-line bg-panel p-6 depth-panel backdrop-blur-2xl"
+        className={embedded ? "default-style:w-full simple:w-full" : "default-style:relative default-style:w-full default-style:max-w-sm default-style:rounded-[28px] default-style:border default-style:border-line default-style:bg-panel default-style:p-6 default-style:depth-panel default-style:backdrop-blur-2xl simple:relative simple:w-full simple:max-w-sm simple:rounded-2xl simple:border simple:border-line simple:bg-panel simple:p-6 simple:depth-panel "}
       >
-        <button
+        {!embedded && <button
           type="button"
           onClick={onClose}
           aria-label="关闭"
           className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full text-ink-faint transition-colors duration-300 hover:bg-raised hover:text-ink-muted"
         >
           <CloseMark className="h-4 w-4" />
-        </button>
+        </button>}
 
-        <h2 className="mb-5 text-[0.95rem] text-ink">修改密码</h2>
+        <h2 className={embedded ? "mb-5 text-xl font-semibold text-ink" : "mb-5 text-[0.95rem] text-ink"}>修改密码</h2>
 
         {done ? (
           <>
@@ -96,7 +99,7 @@ export default function ChangePasswordModal({
             <Field label="当前密码">
               <input
                 required
-                autoFocus
+                autoFocus={!embedded}
                 type="password"
                 value={current}
                 onChange={(e) => setCurrent(e.target.value)}

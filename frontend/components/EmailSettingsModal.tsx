@@ -9,12 +9,14 @@ export default function EmailSettingsModal({
   deliveryAvailable,
   onSaved,
   onClose,
+  embedded = false,
 }: {
   currentEmail: string | null;
   verified: boolean;
   deliveryAvailable: boolean;
   onSaved: () => void | Promise<void>;
   onClose: () => void;
+  embedded?: boolean;
 }) {
   const [email, setEmail] = useState(currentEmail ?? "");
   const [busy, setBusy] = useState(false);
@@ -53,11 +55,11 @@ export default function EmailSettingsModal({
   }
 
   return (
-    <div className="zen-overlay-enter fixed inset-0 z-[90] flex items-center justify-center bg-canvas/75 p-4 backdrop-blur-xl" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section role="dialog" aria-modal="true" aria-labelledby="email-settings-title" className="w-full max-w-md rounded-[28px] border border-line bg-panel p-6 depth-panel">
+    <div className={embedded ? "default-style:w-full default-style:max-w-xl simple:w-full simple:max-w-xl" : "zen-overlay-enter default-style:fixed default-style:inset-0 default-style:z-[90] default-style:flex default-style:items-center default-style:justify-center default-style:bg-canvas/75 default-style:p-4 default-style:backdrop-blur-xl simple:fixed simple:inset-0 simple:z-[90] simple:flex simple:items-center simple:justify-center simple:bg-canvas/75 simple:p-4 "} onMouseDown={(event) => !embedded && event.target === event.currentTarget && onClose()}>
+      <section role={embedded ? "region" : "dialog"} aria-modal={embedded ? undefined : true} aria-labelledby="email-settings-title" className={embedded ? "default-style:w-full simple:w-full" : "default-style:w-full default-style:max-w-md default-style:rounded-[28px] default-style:border default-style:border-line default-style:bg-panel default-style:p-6 default-style:depth-panel simple:w-full simple:max-w-md simple:rounded-2xl simple:border simple:border-line simple:bg-panel simple:p-6 simple:depth-panel"}>
         <div className="flex items-start justify-between gap-4">
-          <div><p className="text-[0.68rem] tracking-[0.16em] text-accent">账号安全</p><h2 id="email-settings-title" className="mt-1.5 text-[1rem] text-ink">邮箱与找回密码</h2></div>
-          <button type="button" onClick={onClose} aria-label="关闭" className="rounded-full border border-line px-2.5 py-1 text-ink-faint hover:text-ink">×</button>
+          <div><p className="text-[0.68rem] tracking-[0.16em] text-accent-ink">账号安全</p><h2 id="email-settings-title" className={embedded ? "mt-1.5 text-xl font-semibold text-ink" : "mt-1.5 text-[1rem] text-ink"}>邮箱与找回密码</h2></div>
+          {!embedded && <button type="button" onClick={onClose} aria-label="关闭" className="rounded-full border border-line px-2.5 py-1 text-ink-faint hover:text-ink">×</button>}
         </div>
         <div className="mt-4 rounded-2xl border border-line bg-raised px-4 py-3">
           <p className="text-[0.74rem] text-ink-muted">当前状态</p>

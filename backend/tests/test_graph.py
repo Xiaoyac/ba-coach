@@ -109,7 +109,9 @@ def test_graph_has_expected_nodes() -> None:
         "analyze_intent",
         "recall_memory",
         "risk_gate",
+        "risk_check_failed",
         "pre_reply_router",
+        "prepare_pa_reply",
         "crisis",
         "module_1",
         "module_2",
@@ -125,13 +127,17 @@ def test_graph_has_expected_nodes() -> None:
 def test_every_module_branches_from_intent_and_converges() -> None:
     edges = [(e.source, e.target, e.conditional) for e in get_graph().get_graph().edges]
     for module in MODULE_PROMPTS:
-        assert ("pre_reply_router", module, True) in edges, f"{module} not routed to"
+        assert ("prepare_pa_reply", module, True) in edges, f"{module} not routed to"
         assert (module, "route_next_module", False) in edges, (
             f"{module} does not converge on route_next_module"
         )
     # The crisis branch is reachable from the same gate and converges too.
     assert ("risk_gate", "crisis", True) in edges
     assert ("crisis", "route_next_module", False) in edges
+    assert ("pre_reply_router", "prepare_pa_reply", False) in edges
+    # A failed or invalid risk screen ends the turn without any module reply.
+    assert ("risk_gate", "risk_check_failed", True) in edges
+    assert ("risk_check_failed", "__end__", False) in edges
     assert ("analyze_intent", "recall_memory", False) in edges
     assert ("recall_memory", "risk_gate", False) in edges
     assert ("route_next_module", "summarizer", False) in edges
@@ -827,7 +833,8 @@ async def test_provider_failure_converges_instead_of_raising(context, provider, 
 
     # The graph still reached the post node.
     assert final["error"] == "upstream exploded"
-    assert final["memory"]["turn_count"] == "1"
+    # A failed generation is not promoted into derived memory or turn counts.
+    assert "turn_count" not in final["memory"]
 
     # The user turn is recorded; no empty assistant turn was written.
     session = await store.get(final["session_id"])
@@ -1057,11 +1064,13 @@ async def test_a_crisis_turn_never_advances_the_module(context, provider) -> Non
     assert final["next_module"] == "module_1"
 
 
-async def test_the_gate_fails_open(context, provider) -> None:
-    """A broken screen must not block the turn — see risk_gate_node."""
+async def test_the_gate_fails_closed(context, provider) -> None:
+    """An unusable verdict must never authorize ordinary conversation."""
     provider.risk_result = "the model returned prose instead of json"
     final = await run({"user_input": "你好", "metadata": {}}, context)
-    assert final["final_response"] == "saw 1 messages"
+    from app.graph.nodes import RISK_CHECK_RETRY_REPLY
+    assert final["final_response"] == RISK_CHECK_RETRY_REPLY
+    assert not provider.seen and final['reply_held']
     assert not final.get("risk")
 
 
@@ -1074,9 +1083,10 @@ async def test_the_gate_can_be_turned_off(context, provider) -> None:
     provider.risk_result = '{"risk_status": 1}'
     final = await run({"user_input": "我不想活了", "metadata": {}}, context)
 
-    # No screening call at all, and the module answered.
+    # Disabling screening does not authorize unverified ordinary replies.
     assert not any("风险信号检测器" in s for s in provider.route_systems)
-    assert final["final_response"] == "saw 1 messages"
+    from app.graph.nodes import RISK_CHECK_RETRY_REPLY
+    assert final["final_response"] == RISK_CHECK_RETRY_REPLY
 
 
 async def test_the_flagged_turn_is_recorded_once(
@@ -1137,7 +1147,6 @@ async def test_registration_profile_reaches_the_system_prompt(
             UserProfile(
                 uuid="subj-1",
                 nickname="南瓜",
-                communication_preference="温柔引导",
                 physical_condition="膝关节损伤",
                 behavior_taboo="不能剧烈运动",
             )
@@ -1148,7 +1157,6 @@ async def test_registration_profile_reaches_the_system_prompt(
 
     system = "\n".join(seg.text for seg in provider.systems[0])
     assert "南瓜" in system
-    assert "温柔引导" in system
     assert "膝关节损伤" in system
     assert "不能剧烈运动" in system
     assert "用户档案" in system

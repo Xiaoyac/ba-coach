@@ -199,9 +199,13 @@ async def load_epoch_history(db, *, subject_id, session_id, user_message_id,
         created_at=r.created_at) for r in active], summary, metrics)
 
 
+# Bump when retired profile fields must disappear from frozen prompt state.
+STATE_ENTRY_PREFIX = "v2:"
+
+
 def state_entries(system):
     """Exact reversible line records, not a model-generated state summary."""
-    return {f"{i:03d}:{j:05d}":line for i,s in enumerate(system) if not s.cacheable and not s.always_current
+    return {f"{STATE_ENTRY_PREFIX}{i:03d}:{j:05d}":line for i,s in enumerate(system) if not s.cacheable and not s.always_current
             for j,line in enumerate(s.text.splitlines())}
 
 
@@ -235,6 +239,8 @@ async def stable_state_context(db, *, subject_id, session_id, system):
         db.add(checkpoint)
     current = state_entries(system)
     baseline = checkpoint.state_baseline
+    if baseline is not None and any(not key.startswith(STATE_ENTRY_PREFIX) for key in baseline):
+        baseline = None
     # Compaction clears the baseline. Large cumulative changes may also start
     # a new baseline, deliberately paying one rebuild rather than carrying an
     # ever-growing patch. Clock metadata is added later and is never frozen.
