@@ -87,7 +87,8 @@ async def confirmation_status(db, conversation, state, row, *, user=None):
     result = {'allowed': False, 'code': None, 'message': None,
               'card_id': row['id'] if row else None,
               'revision': row['revision'] if row else None,
-              'display_message_id': row.get('display_assistant_message_id') if row else None}
+              'display_message_id': row.get('display_assistant_message_id') if row else None,
+              'recoverable': False}
 
     def blocked(code):
         return {**result, 'code': code, 'message': confirmation_message(code)}
@@ -107,12 +108,14 @@ async def confirmation_status(db, conversation, state, row, *, user=None):
         return {**blocked('goal_card_review_changed'), 'message': readiness_message(ready), 'readiness': ready}
     anchor = await db.get(ConversationMessage, row.get('display_assistant_message_id')) if row.get('display_assistant_message_id') else None
     source = await db.get(ConversationMessage, row.get('display_user_message_id')) if row.get('display_user_message_id') else None
-    if (not anchor or anchor.conversation_id != conversation.id or anchor.role != 'assistant'
-            or not source or source.conversation_id != conversation.id or source.role != 'user'
-            or source.position >= anchor.position
-            or not row.get('display_text') or row['display_text'] not in anchor.content
-            or (user is not None and (user.conversation_id != conversation.id or user.role != 'user'
-                                     or user.position <= anchor.position))):
+    source_valid = bool(source and source.conversation_id == conversation.id and source.role == 'user')
+    display_valid = bool(anchor and anchor.conversation_id == conversation.id and anchor.role == 'assistant'
+        and source_valid and source.position < anchor.position
+        and row.get('display_text') and row['display_text'] in anchor.content)
+    if user is not None and (not display_valid or user.conversation_id != conversation.id
+            or user.role != 'user' or user.position <= anchor.position):
+        return blocked('goal_card_confirmation_display_changed')
+    if not source_valid or not row.get('display_text'):
         return blocked('goal_card_confirmation_display_changed')
     if row['kind'] == 'primary':
         from .program_confirmation import draft
@@ -134,9 +137,12 @@ async def confirmation_status(db, conversation, state, row, *, user=None):
             return blocked('goal_card_plan_changed')
     query = select(ConversationMessage.content).where(
         ConversationMessage.conversation_id == conversation.id,
-        ConversationMessage.role == 'user', ConversationMessage.position > anchor.position)
+        ConversationMessage.role == 'user',
+        ConversationMessage.position > (anchor.position if display_valid else source.position))
     if user is not None:
         query = query.where(ConversationMessage.position < user.position)
     if any(unresolved_change(text) for text in (await db.execute(query)).scalars()):
         return blocked('goal_card_unresolved_change')
+    if not display_valid:
+        return {**blocked('goal_card_confirmation_display_changed'), 'recoverable': True}
     return {**result, 'allowed': True}

@@ -366,6 +366,12 @@ async def finish_turn(
     )
     db.add(message)
     await db.flush()
+    from .config import get_settings
+    if get_settings().goal_card_ui_enabled:
+        from .goal_card_interaction import finalize_ui_display
+        await finalize_ui_display(db, session_id=session_id, user_id=conversation.subject_id,
+                                  assistant_message_id=message.id)
+
     runtime = await db.get(ConversationRuntimeState, conversation.id)
     await record_interaction_turn(
         db, conversation=conversation, module=runtime.module if runtime else None

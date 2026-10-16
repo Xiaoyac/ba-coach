@@ -293,6 +293,7 @@ def client(monkeypatch, provider: StubProvider, store: InMemorySessionStore, db_
     from app import db as db_module
 
     monkeypatch.setattr(db_module, "_sessionmaker", db_sessionmaker)
+    monkeypatch.setattr(db_module, "_engine", db_sessionmaker.kw["bind"])
 
     with TestClient(app) as test_client:
         yield test_client

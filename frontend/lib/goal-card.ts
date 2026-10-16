@@ -26,7 +26,7 @@ export type FormulationCard = {
   confirmed_at?: string | null;
   updated_at?: string | null;
   confirmation?: {
-    allowed: boolean; code: string | null; message: string | null;
+    allowed: boolean; recoverable?: boolean; code: string | null; message: string | null;
     card_id: string; revision: number; display_message_id: number | null;
   };
 };
@@ -49,9 +49,7 @@ async function read<T>(response: Response): Promise<T> {
   checkAuthentication(response);
   const result = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(response.status === 409
-      ? "目标卡已有更新。你的填写仍保留，请查看最新卡片后再提交。"
-      : typeof result?.detail === "string" ? result.detail : "目标卡暂时无法读取，请稍后重试。");
+    throw new Error(typeof result?.detail === "string" ? result.detail : "目标卡暂时无法读取，请稍后重试。");
   }
   return result as T;
 }
@@ -84,4 +82,11 @@ export function goalCardFieldValue(key: keyof GoalCardFields, value: GoalCardFie
   if (key === "duration_minutes") return `${value} 分钟`;
   if (key === "difficulty_rating") return `${value} / 10`;
   return String(value);
+}
+
+export function redisplayGoalCard(sessionId: string, card: FormulationCard, signal?: AbortSignal): Promise<CardResponse & {display_text: string}> {
+  return fetch(`${API_BASE}/api/program/${encodeURIComponent(sessionId)}/goal-card/redisplay`, {
+    method: "POST", headers: apiHeaders({json:true}), signal,
+    body: JSON.stringify({card_id:card.id, revision:card.revision}),
+  }).then(read<CardResponse & {display_text: string}>);
 }

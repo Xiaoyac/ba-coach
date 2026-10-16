@@ -383,7 +383,6 @@ class RegisterRequest(BirthYearOnlyModel):
     # symbol") measurably push people toward predictable patterns without
     # adding entropy; NIST SP 800-63B advises a length floor instead.
     password: str = Field(..., min_length=8, max_length=128)
-    email: EmailStr
 
     nickname: str = Field(..., min_length=1, max_length=58)
     # TINYINT UNSIGNED on the column. The upper bound is a typo guard, not a
@@ -583,24 +582,6 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=128)
 
 
-class EmailAddressRequest(BaseModel):
-    """Attach or replace the signed-in account's recovery email."""
-
-    email: EmailStr
-
-
-class EmailTokenRequest(BaseModel):
-    token: str = Field(..., min_length=20, max_length=512)
-
-
-class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
-
-
-class ResetPasswordRequest(EmailTokenRequest):
-    new_password: str = Field(..., min_length=8, max_length=128)
-
-
 class MessageResponse(BaseModel):
     message: str
 
@@ -632,7 +613,7 @@ class AccountInfo(BaseModel):
     role: Literal["user", "admin"] = "user"
     email: EmailStr | None = None
     email_verified: bool = False
-    email_required: bool = True
+    email_required: bool = False
     birth_year_required: bool = False
     email_delivery_available: bool = False
 

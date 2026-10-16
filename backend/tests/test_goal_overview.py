@@ -7,7 +7,7 @@ from sqlalchemy import event, insert, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.database_v2_schema import metadata as schema
-from app.db import get_db
+from app.db import get_db, Base
 from app.identity import require_subject_id
 from app.models import Conversation, ConversationMessage
 from app.routes import program
@@ -24,9 +24,6 @@ async def goal_api(monkeypatch):
         connection.execute("PRAGMA foreign_keys=ON")
     async with engine.begin() as connection:
         await connection.run_sync(schema.create_all)
-        for model in (Conversation, ConversationMessage):
-            await connection.run_sync(model.__table__.create)
-        from app.db import Base
         await connection.run_sync(Base.metadata.create_all)
     async with async_sessionmaker(engine, expire_on_commit=False)() as db:
         await db.execute(insert(schema.tables["user_profile"]), [{"uuid": "a"}, {"uuid": "b"}])
