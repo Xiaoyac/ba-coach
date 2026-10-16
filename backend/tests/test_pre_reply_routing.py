@@ -111,12 +111,12 @@ async def test_thinking_router_still_cancels_at_background_deadline(context,prov
 @pytest_asyncio.fixture
 async def routing_database(context):
     from app.database_v2_schema import metadata as schema
-    from app.models import Conversation,ConversationMessage,AIExecutionEvent
+    from app.models import AccountSettings,UserAccount,Conversation,ConversationMessage,AIExecutionEvent
     engine=create_async_engine('sqlite+aiosqlite:///:memory:')
     maker=async_sessionmaker(engine,expire_on_commit=False)
     async with engine.begin() as conn:
         await conn.run_sync(schema.create_all)
-        for model in (Conversation,ConversationMessage,AIExecutionEvent):
+        for model in (UserAccount,AccountSettings,Conversation,ConversationMessage,AIExecutionEvent):
             await conn.run_sync(model.__table__.create)
         from app.db import Base
         await conn.run_sync(Base.metadata.create_all)

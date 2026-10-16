@@ -126,6 +126,7 @@ def test_graph_has_expected_nodes() -> None:
 
 def test_every_module_branches_from_intent_and_converges() -> None:
     edges = [(e.source, e.target, e.conditional) for e in get_graph().get_graph().edges]
+    assert ("pre_reply_router", "prepare_pa_reply", False) in edges
     for module in MODULE_PROMPTS:
         assert ("prepare_pa_reply", module, True) in edges, f"{module} not routed to"
         assert (module, "route_next_module", False) in edges, (
