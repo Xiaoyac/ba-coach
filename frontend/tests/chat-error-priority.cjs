@@ -4,14 +4,19 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
-const source = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../lib/api.ts'), 'utf8'), {
+const compile = name => ts.transpileModule(fs.readFileSync(path.join(__dirname, `../lib/${name}.ts`), 'utf8'), {
   compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020},
 }).outputText;
+const source = compile('api');
+// Upstream details are shown only through the real sanitizer.
+const recovery = {exports: {}};
+vm.runInNewContext(compile('chatRecovery'), {exports: recovery.exports, require: () => ({})});
 async function run(frames) {
   const exports = {};
   const errors = []; let completed = 0; let reply = '';
   const sandbox = {exports, process: {env: {}}, TextDecoder,
-    require: () => ({apiHeaders: () => ({}), checkAuthentication: () => {}}),
+    require: name => name === '@/lib/chatRecovery' ? recovery.exports
+      : ({apiHeaders: () => ({}), checkAuthentication: () => {}}),
     fetch: async () => new Response(frames.map(([event, data]) =>
       `event: ${event}\r\ndata: ${JSON.stringify(data)}\r\n\r\n`).join(''))};
   vm.runInNewContext(source, sandbox);
@@ -22,8 +27,10 @@ async function run(frames) {
   return {errors, completed, reply, thrown};
 }
 (async () => {
-  const upstream = '豆包模型已达到安全体验模式的推理额度上限，服务已暂停。';
-  const error = ['error', {detail: upstream}];
+  const raw = '豆包模型已达到安全体验模式的推理额度上限，服务已暂停。';
+  const upstream = recovery.exports.safeGenerationError(raw);
+  assert.equal(upstream, '模型服务额度不足，暂时无法回复，请联系管理员。');
+  const error = ['error', {detail: raw}];
   const failed = ['persisted', {saved: false}];
   const delta = ['delta', {text: '部分回复'}];
   let r = await run([error, failed]);

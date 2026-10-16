@@ -178,6 +178,6 @@ use：selections 为1至2项，默认1项，note为空字符串。
 
 not_needed 或 no_match：selections必须为空，note用1至60字说明本轮不需知识的原因或缺少的依据。
 
-每项 selection 恰好包含 id、quote、application。id为本次knowledge中真实存在且不重复的字符串ID；quote为同一text中连续的1至80字原文，不额外加引号、不拼接、不改写；application用1至70字的一句注释写清本轮对象、知识支持的具体解释/核对/协商动作和关键边界。不能只报知识名称、重复原文或写“结合用户情况使用”。
+每项 selection 恰好包含 id、quote、application。id为本次knowledge中真实存在且不重复的字符串ID；quote为同一text中连续的1至150字原文，不额外加引号、不拼接、不改写；application用1至120字的一句注释写清本轮对象、知识支持的具体解释/核对/协商动作和关键边界。不能只报知识名称、重复原文或写“结合用户情况使用”。
 
 所有限长按Unicode字符计；不要为缩短引文删除必要否定或限定语。空结果note不得夹带知识解释或建议。不得输出旧版selected_ids、guidance、cautions，这三个字段由程序在校验后生成。

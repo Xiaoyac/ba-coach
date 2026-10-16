@@ -34,14 +34,14 @@ export default function RequiredEmailModal({
   }
 
   return (
-    <div className="zen-overlay-enter fixed inset-0 z-[100] flex items-center justify-center bg-canvas/80 p-4 backdrop-blur-xl">
+    <div className="zen-overlay-enter default-style:fixed default-style:inset-0 default-style:z-[100] default-style:flex default-style:items-center default-style:justify-center default-style:bg-canvas/80 default-style:p-4 default-style:backdrop-blur-xl simple:fixed simple:inset-0 simple:z-[100] simple:flex simple:items-center simple:justify-center simple:bg-canvas/80 simple:p-4 ">
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="required-email-title"
-        className="w-full max-w-md rounded-[28px] border border-line bg-panel p-6 depth-panel"
+        className="default-style:w-full default-style:max-w-md default-style:rounded-[28px] default-style:border default-style:border-line default-style:bg-panel default-style:p-6 default-style:depth-panel simple:w-full simple:max-w-md simple:rounded-2xl simple:border simple:border-line simple:bg-panel simple:p-6 simple:depth-panel"
       >
-        <p className="text-[0.68rem] tracking-[0.18em] text-accent">账号安全</p>
+        <p className="text-[0.68rem] tracking-[0.18em] text-accent-ink">账号安全</p>
         <h2 id="required-email-title" className="mt-2 text-[1.05rem] text-ink">
           添加找回邮箱
         </h2>

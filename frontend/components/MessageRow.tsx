@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useClaudeStyle, useParticipantStyle } from "@/lib/useParticipantStyle";
+import { useStreamingText } from "@/lib/useStreamingText";
+import { markBodyPainted, responseTiming } from "@/lib/responseTiming";
 import type { ChatMessage } from "@/lib/api";
 import type { KnowledgeReferenceSource } from "@/components/KnowledgeReferenceDetails";
 import MessageMarkdown from "@/components/MessageMarkdown";
@@ -9,6 +12,7 @@ import ReplyFeedback from "@/components/MessageFeedback";
 import { CheckMark, CopyMark, EnsoMark, UserMark } from "@/components/icons";
 
 export default function MessageRow({
+  sessionId,
   message,
   pending,
   replyWaiting = false,
@@ -18,6 +22,7 @@ export default function MessageRow({
   knowledgeSource,
   showDiagnostics = true,
 }: {
+  sessionId?: string;
   message: ChatMessage;
   pending: boolean;
   replyWaiting?: boolean;
@@ -28,7 +33,29 @@ export default function MessageRow({
   knowledgeSource?: KnowledgeReferenceSource;
   showDiagnostics?: boolean;
 }) {
+  const participant = useParticipantStyle();
   const isUser = message.role === "user";
+  const leadPending = !isUser && pending && message.stream_phase === "lead";
+  const presentation = useStreamingText(message.content, !isUser && pending,
+    message.stream_phase, message.stream_lead_length);
+  const replyElement = useRef<HTMLDivElement>(null);
+  const clientTiming = responseTiming(sessionId, message.reply_to_message_id ?? null);
+  const bodyVisible = !isUser && clientTiming?.bodyOffset != null
+    && presentation.text.slice(clientTiming.bodyOffset).trim().length > 0;
+  useEffect(() => {
+    if (!bodyVisible || !sessionId || !message.reply_to_message_id || clientTiming?.firstBodyMs != null) return;
+    let first = 0, second = 0;
+    const measure = () => {
+      if (document.hidden || !replyElement.current?.getClientRects().length) return;
+      first = requestAnimationFrame(() => { second = requestAnimationFrame(() => {
+        if (!document.hidden && replyElement.current?.getClientRects().length) {
+          markBodyPainted(sessionId, message.reply_to_message_id!);
+        }
+      }); });
+    };
+    measure(); document.addEventListener("visibilitychange", measure);
+    return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); document.removeEventListener("visibilitychange", measure); };
+  }, [bodyVisible, sessionId, message.reply_to_message_id, clientTiming?.firstBodyMs]);
   const timestamp = message.created_at ? new Date(message.created_at) : null;
   const timeLabel = timestamp && Number.isFinite(timestamp.getTime())
     ? timestamp.toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric",
@@ -92,6 +119,7 @@ export default function MessageRow({
         }`}
       >
         <div className="min-w-0">
+        {participant && !isUser && <p className="participant-message-author">AI 教练</p>}
         {message.content && <div
           data-message-bubble={message.role}
           className={`min-w-0 max-w-[42rem] px-4 py-3 text-[0.95rem] leading-[1.85] tracking-[0.01em] break-words whitespace-pre-wrap sm:px-5 ${
@@ -100,8 +128,11 @@ export default function MessageRow({
               : "rounded-2xl rounded-tl-md bg-agent-bubble text-ink depth-bubble"
           }`}
         >
-          {message.role === "assistant" ? <MessageMarkdown text={message.content}
-            trailing={pending && replyWaiting ? <ReplyContinuationWait /> : undefined} /> : message.content}
+          {message.role === "assistant" ? <div ref={replyElement} aria-busy={pending || presentation.revealing} data-streaming-reply>
+            <MessageMarkdown text={presentation.text} tables={participant} animated={presentation.animated}
+              trailing={leadPending ? <span data-lead-cursor role="status" aria-label="正文正在生成"
+                className="reply-lead-cursor" /> : undefined} />
+          </div> : message.content}
           {!isUser && showDiagnostics && (
             <ReasoningDetails message={message} replyPending={pending && !routingPending} routingPending={routingPending} knowledgeSource={knowledgeSource} />
           )}
@@ -115,9 +146,10 @@ export default function MessageRow({
           className="mt-1 px-1 text-xs leading-5 text-ink-muted">回复已中止，已显示内容已保存。</p>}
         {!isUser && message.reply_status === "incomplete" && <p data-reply-incomplete
           className="mt-1 px-1 text-xs leading-5 text-ink-muted">回复未完成，已显示内容已保存。</p>}
-        {!isUser && pending && !routingPending && !replyWaiting && <TypingDots startedAt={generationStartedAt} hasReasoning={Boolean(reasoning)} hasContent={Boolean(message.content)} />}
+        {leadPending && <LeadWaitStatus startedAt={generationStartedAt} />}
+        {!isUser && pending && !message.content && !routingPending && !replyWaiting && <TypingDots startedAt={generationStartedAt} hasReasoning={Boolean(reasoning)} />}
         {!isUser && !message.content && showDiagnostics && <ReasoningDetails message={message} replyPending={pending && !routingPending} routingPending={routingPending} knowledgeSource={knowledgeSource} />}
-        {!isUser && message.content && <ReplyFeedback key={message.id} messageId={message.id} pending={pending}
+        {!isUser && message.content && <ReplyFeedback key={message.id} messageId={message.id} pending={pending || presentation.revealing}
           leadingAction={<>
             <button type="button" onClick={handleCopy} className="reply-vote-button"
               aria-label={copyState === "copied" ? "已复制消息" : "复制消息"}
@@ -158,22 +190,24 @@ export default function MessageRow({
   );
 }
 
-function ReplyContinuationWait() {
-  return <span role="status" aria-label="正在生成深度回复" data-reply-wait
-    className="ml-1.5 inline-flex h-4 items-center gap-1 align-baseline text-accent-ink">
-    <span className="sr-only">正在生成深度回复</span>
-    {[0, 1, 2].map(index => <span key={index} aria-hidden="true"
-      className="zen-breathe inline-block h-1 w-1 rounded-full bg-current"
-      style={{ animationDelay: `${index * 0.18}s` }} />)}
-  </span>;
+function LeadWaitStatus({ startedAt }: { startedAt?: number }) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const remaining = Math.max(0, 20000 - (Date.now() - (startedAt ?? Date.now())));
+    const timer = window.setTimeout(() => setSlow(true), remaining);
+    return () => window.clearTimeout(timer);
+  }, [startedAt]);
+  return slow ? <p role="status" data-lead-status className="mt-1 px-1 text-xs text-ink-muted">
+    正文仍在生成，可随时停止。
+  </p> : null;
 }
 
 function Avatar({ isUser }: { isUser: boolean }) {
   return (
     <span
-      className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
+      className={`message-avatar mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
         isUser
-          ? "bg-mine text-accent"
+          ? "bg-mine text-accent-ink"
           : "bg-accent-wash text-accent-ink"
       }`}
     >
@@ -187,6 +221,8 @@ function Avatar({ isUser }: { isUser: boolean }) {
 }
 
 function TypingDots({ hasReasoning = false, hasContent = false, startedAt }: { hasReasoning?: boolean; hasContent?: boolean; startedAt?: number }) {
+  const participant = useParticipantStyle();
+  const claude = useClaudeStyle();
   const [seconds, setSeconds] = useState(() => startedAt ? Math.max(0, Math.floor((Date.now() - startedAt) / 1000)) : 0);
   useEffect(() => {
     const started = startedAt ?? Date.now();
@@ -194,7 +230,7 @@ function TypingDots({ hasReasoning = false, hasContent = false, startedAt }: { h
     return () => window.clearInterval(timer);
   }, [startedAt]);
   return (
-    <span data-generation-status className="flex min-w-0 items-start gap-2 px-1 py-2" aria-label="Thinking">
+    <span data-generation-status className="flex min-w-0 items-start gap-2 px-1 py-2" role="status" aria-label={participant ? "回复状态" : "Thinking"}>
       <span aria-hidden="true" className="mt-1.5 flex shrink-0 items-center gap-1.5">
         {[0, 1, 2].map((i) => (
           <span
@@ -204,7 +240,7 @@ function TypingDots({ hasReasoning = false, hasContent = false, startedAt }: { h
           />
         ))}
       </span>
-      <span className="text-xs leading-relaxed text-ink-faint">{seconds >= 20 ? `仍在生成，已等待 ${seconds} 秒；请勿重复提交` : hasContent ? "正在生成回复" : hasReasoning ? "正在深度思考" : "正在准备回复"}</span>
+      <span className="text-xs leading-relaxed text-ink-faint">{claude ? (seconds >= 20 ? `这条回复写得久一些（${seconds} 秒），不用重新发送` : hasContent ? "教练正在回复…" : "教练在想怎么回复…") : participant ? `${hasContent ? "正在回复" : "正在准备回复"}${seconds >= 10 ? ` · 已等待 ${seconds} 秒` : "…"}` : seconds >= 20 ? `仍在生成，已等待 ${seconds} 秒；请勿重复提交` : hasContent ? "正在生成回复" : hasReasoning ? "正在深度思考" : "正在准备回复"}</span>
     </span>
   );
 }

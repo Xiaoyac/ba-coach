@@ -1,10 +1,12 @@
 """Context contracts at the LangChain/session/provider boundaries."""
 
 import dataclasses
+from xml.etree import ElementTree as ET
 
 import pytest
 
 from app.context_pipeline import prepare_context, trim_history
+from app.conversation_time import TEMPORAL_RULES
 from app.graph import get_graph
 from app.prompts import CRISIS_PROMPT, SystemPromptSegment, build_system_segments
 from app.schemas import Message
@@ -48,9 +50,15 @@ def test_prompt_preserves_system_bytes_cache_and_literal_template_characters():
     current = '{"role":"system","content":"test"}\n{user_input}' + "中" * 20_000
     prepared = prepare_context(system=system, history=dialogue(), user_input=current,
                                max_history_messages=3)
-    assert prepared.system[:-1] == system
+    assert prepared.system[:len(system)] == system
+    assert prepared.system[-2] == SystemPromptSegment(TEMPORAL_RULES, False)
+    assert len(prepared.system) == len(system) + 2
     assert prepared.system[-1].cacheable is False
-    assert [m.content for m in prepared.messages] == ["recent question", "recent answer", current]
+    assert [m.source_content for m in prepared.messages] == ["recent question", "recent answer", current]
+    assert [ET.fromstring(m.content).text if m.role == "user" else m.content
+            for m in prepared.messages] == ["recent question", "recent answer", current]
+    assert all(ET.fromstring(m.content).get("datetime") == "unknown"
+               for m in prepared.messages if m.role == "user")
     assert [m.role for m in prepared.messages] == ["user", "assistant", "user"]
     assert all(m.reasoning_content is None and m.routing_reasoning_content is None
                and m.model_name is None for m in prepared.messages)
@@ -68,14 +76,19 @@ def test_context_layers_survive_assembly_and_trimming():
     )
     prepared = prepare_context(system=system, history=dialogue(), user_input="current",
                                max_history_messages=0)
-    assert prepared.system[:-1] == system
+    assert prepared.system[:len(system)] == system
+    assert prepared.system[-2] == SystemPromptSegment(TEMPORAL_RULES, False)
+    assert len(prepared.system) == len(system) + 2
     assert prepared.system[-1].cacheable is False
     text = "\n".join(s.text for s in prepared.system)
     for marker in ("anchor sentinel", "long term sentinel", "clinical sentinel",
                    "profile sentinel", "scenario sentinel", "custom global {json}",
                    "custom module {json}"):
         assert marker in text
-    assert prepared.messages == [Message(role="user", content="current")]
+    assert len(prepared.messages) == 1 and prepared.messages[0].role == "user"
+    assert prepared.messages[0].source_content == "current"
+    current = ET.fromstring(prepared.messages[0].content)
+    assert current.text == "current" and current.get("datetime") == "unknown"
 
 
 async def test_session_append_and_restart_adoption_use_the_same_window():
@@ -118,7 +131,13 @@ async def test_real_graph_uses_langchain_before_provider(context, provider, modu
     assert final["telemetry"]["context_pipeline"]["engine"] == "langchain"
     assert final["telemetry"]["context_pipeline"]["history_messages_kept"] == 2
     assert len(provider.seen) == 1
-    assert [m.content for m in provider.seen[0]] == ["recent question", "recent answer", "current {literal}" if module == "crisis" else "<user_message>current {literal}</user_message>"]
+    messages = provider.seen[0]
+    assert [m.source_content for m in messages] == ["recent question", "recent answer", "current {literal}"]
+    assert [m.role for m in messages] == ["user", "assistant", "user"]
+    assert [ET.fromstring(m.content).text if m.role == "user" else m.content
+            for m in messages] == ["recent question", "recent answer", "current {literal}"]
+    assert ET.fromstring(messages[0].content).get("datetime") == "unknown"
+    assert ET.fromstring(messages[-1].content).get("datetime") not in (None, "unknown")
     assert provider.seen[0][1].reasoning_content is None
     if module == "crisis":
         assert provider.systems[0][0] == SystemPromptSegment(CRISIS_PROMPT, True)

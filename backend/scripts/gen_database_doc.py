@@ -29,7 +29,7 @@ for i in d["indexes"]:
     ).append(i["COLUMN_NAME"])
 
 APP_TABLES = [
-    "user_accounts", "account_handles", "account_settings", "account_emails",
+    "user_accounts", "account_settings", "account_emails",
     "account_email_tokens", "auth_sessions", "profile_extensions",
     "prompt_overrides", "knowledge_sources", "knowledge_chunks", "issue_reports",
     "conversations", "conversation_messages", "conversation_runtime_states",
@@ -45,7 +45,6 @@ BIZ_TABLES = [
 TABLE_TITLE = {
     "user_accounts": "登录账号",
     "auth_sessions": "登录会话（令牌）",
-    "account_handles": "用户展示昵称与标签",
     "account_settings": "账号角色与模型偏好",
     "account_emails": "账号邮箱",
     "account_email_tokens": "邮箱验证/重置令牌",
@@ -144,7 +143,6 @@ TABLE_WRITER = {
     "pa_cycles": "模块跳转时自动写",
     "clinical_record_cycle_links": "模块临床抽取时自动写",
     "ai_execution_events": "每次 LLM 调用自动写",
-    "account_handles": "注册 / 我的档案页",
     "account_settings": "注册 / 我的档案页 / 管理员",
     "account_emails": "注册 / 邮箱验证",
     "account_email_tokens": "验证邮箱 / 重置密码",
@@ -182,7 +180,6 @@ WRITER = {
     "user_profile": {
         "id": AUTO, "uuid": "注册时生成", "created_at": AUTO, "updated_at": AUTO,
         "nickname": BOTH, "age": BOTH, "living_status": BOTH,
-        "communication_preference": BOTH,
         "physical_condition": BOTH, "behavior_taboo": BOTH,
         "has_supporter": PROF + "（由支持者列表推出）",
         "supporter1_relation": PROF + "（投影）", "supporter1_nickname": PROF + "（投影）",
@@ -208,13 +205,6 @@ DESC = {
         "profile_uuid": "指向 `user_profile.uuid`。**这是账号与全部临床数据之间唯一的连接**",
         "created_at": "注册时间",
         "last_login_at": "最近一次登录时间",
-    },
-    "account_handles": {
-        "account_id": "→ `user_accounts.id`，一对一主键；账号删除时级联删除",
-        "base_username": "公开展示昵称；字段名是早期迁移遗留，并不是登录账号名",
-        "normalized_base": "展示昵称的规范化值，用于不区分大小写地判重与检索",
-        "tag": "5 位数字标签；与 `normalized_base` 组合唯一，形成“昵称#12345”",
-        "created_at": "展示身份创建时间",
     },
     "account_settings": {
         "account_id": "→ `user_accounts.id`，一对一主键；账号删除时级联删除",
@@ -578,7 +568,7 @@ header = f"""# 数据库字段总览
 
 应用自有表内的主要数据库外键如下；跨到 7 张业务表时则只靠 UUID 逻辑关联，不伪造外键：
 
-- `user_accounts → account_handles / account_settings / account_emails / account_email_tokens / auth_sessions / issue_reports`
+- `user_accounts → account_settings / account_emails / account_email_tokens / auth_sessions / issue_reports`
 - `knowledge_sources → knowledge_chunks`
 - `conversations → conversation_messages / conversation_runtime_states / conversation_module_progress / pa_cycles`
 - `pa_cycles → clinical_record_cycle_links`

@@ -21,15 +21,13 @@ let memoryOnly = false;
 export interface Account {
   username: string;
   nickname: string | null;
-  tag: string | null;
-  display_id: string | null;
   profile_uuid: string;
   current_module: string | null;
   role: "user" | "admin";
   email: string | null;
   email_verified: boolean;
   email_required: boolean;
-  birth_date_required?: boolean;
+  birth_year_required?: boolean;
   email_delivery_available: boolean;
 }
 
@@ -45,11 +43,9 @@ export interface RegisterInput {
   password: string;
   email: string;
   nickname: string;
-  tag: string;
   /** Stable enough to ask once — everything else is edited in the profile. */
-  birth_date: string;
+  birth_year: number;
   living_status?: string | null;
-  communication_preference?: string | null;
   physical_condition?: string[];
   behavior_taboo?: string[];
 }
@@ -117,9 +113,9 @@ async function parseAuth(res: Response): Promise<AuthPayload> {
       throw new AuthError("请填写管理员提供的完整邀请码。若没有邀请码栏，请刷新网页。", res.status);
     }
     const birthdayInvalid = res.status === 422 && Array.isArray(body?.detail) &&
-      body.detail.some((issue: { loc?: unknown[] }) => issue.loc?.includes("birth_date"));
+      body.detail.some((issue: { loc?: unknown[] }) => issue.loc?.includes("birth_year"));
     if (birthdayInvalid) {
-      throw new AuthError("请填写有效的出生日期，当前支持 10–120 岁。若没有日期栏，请刷新网页。", res.status);
+      throw new AuthError("请填写有效的出生年份，按年份估算需为 10–120 岁。若没有年份栏，请刷新网页。", res.status);
     }
     throw new AuthError(detail ?? "请求失败，请稍后再试", res.status);
   }
@@ -145,11 +141,11 @@ export async function register(input: RegisterInput): Promise<Account> {
   return (await parseAuth(res)).account;
 }
 
-export async function saveBirthDate(birthDate: string): Promise<Account> {
-  const response = await fetch(`${API_BASE}/api/auth/birth-date`, {
-    method: "PUT", headers: headers(true), body: JSON.stringify({ birth_date: birthDate }),
+export async function saveBirthYear(birthYear: number): Promise<Account> {
+  const response = await fetch(`${API_BASE}/api/auth/birth-year`, {
+    method: "PUT", headers: headers(true), body: JSON.stringify({ birth_year: birthYear }),
   });
-  return parseResponse<Account>(response, "出生日期保存失败，请核对日期后重试（当前支持 10–120 岁）");
+  return parseResponse<Account>(response, "出生年份保存失败，请核对年份后重试（按年份估算需为 10–120 岁）");
 }
 
 export async function login(

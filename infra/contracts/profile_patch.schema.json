@@ -245,24 +245,6 @@
       "default": null,
       "title": "Supporter2 Influence"
     },
-    "communication_preference": {
-      "anyOf": [
-        {
-          "enum": [
-            "直接明了",
-            "温柔引导",
-            "理性分析",
-            "轻松幽默"
-          ],
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Communication Preference"
-    },
     "reminder_frequency": {
       "anyOf": [
         {

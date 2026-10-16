@@ -35,6 +35,8 @@ async def main():
             await conn.run_sync(metadata.create_all)
             for model in (Conversation, ConversationMessage, AIExecutionEvent, InteractionStatus):
                 await conn.run_sync(model.__table__.create)
+            from app.db import Base
+            await conn.run_sync(Base.metadata.create_all)
         runtime = metadata.tables['conversation_runtime_states']
         async with maker() as db:
             await db.execute(insert(metadata.tables['user_profile']), {'uuid':'synthetic'})
@@ -62,7 +64,8 @@ async def main():
             assert row.router_model_name == 'pre-router'
             assert row.content == '你好，我们慢慢聊。'
             conv = await db.get(Conversation,1)
-            assert conv.revision == 3, 'Live clients need a new revision'
+            # An empty extraction refreshes nothing, so there is no new revision.
+            assert conv.revision == 2, 'Empty extraction must not publish a refresh'
             saved = (await db.execute(select(runtime).where(runtime.c.conversation_id==1))).mappings().one()
             assert saved['current_module'] == module
             assert saved['memory']['freshness_marker'] == 'preserve'
@@ -72,10 +75,11 @@ async def main():
             writes = (await db.execute(select(AIExecutionEvent).where(AIExecutionEvent.stage=='post_reply_persistence'))).scalars().all()
             assert len(writes) == 1
             assert writes[0].provider is None
+            assert writes[0].event_metadata['database_write']['reason_code'] == 'empty_extraction'
             assert writes[0].event_metadata['execution_timeline'][0]['after_display'] is True
         assert (await store.get('synthetic-chat')).module == module
         assert not any('target_module' in system for system in provider.route_systems)
-        print('PASS', module, 'pre-reply trace preserved, facts refreshed')
+        print('PASS', module, 'pre-reply trace preserved, empty extraction skipped')
     finally:
         await engine.dispose()
 asyncio.run(main())

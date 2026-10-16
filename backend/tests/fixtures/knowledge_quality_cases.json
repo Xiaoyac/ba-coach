@@ -1,0 +1,261 @@
+{
+  "label_status": "Assistant-authored seed judgments, not exhaustive relevance labels or expert blind evaluation. Holdout queries are reserved until provider selection is frozen.",
+  "cases": [
+    {
+      "id": "activation_zh",
+      "split": "dev",
+      "module": "module_1",
+      "query": "为什么不能等心情好了再开始行动？",
+      "expect_empty": false,
+      "relevant": [
+        {
+          "source": "1~6章(2).md",
+          "heading": "行为激活的结构: 由外而内"
+        }
+      ]
+    },
+    {
+      "id": "motivation",
+      "split": "dev",
+      "module": "module_3",
+      "query": "我知道应该行动，可就是没动力，如何开始？",
+      "expect_empty": false,
+      "relevant": [
+        {
+          "source": "1~6章(2).md",
+          "heading": "原则五：从小处着手，改变更容易"
+        }
+      ]
+    },
+    {
+      "id": "walking",
+      "split": "dev",
+      "module": "module_2",
+      "query": "散步十分钟算身体活动吗？",
+      "expect_empty": false,
+      "relevant": [
+        {
+          "source": "2024-adult-compendium身体活动分类(1)(1).xlsx",
+          "heading": "身体活动分类：Walking"
+        }
+      ]
+    },
+    {
+      "id": "rejected_activity",
+      "split": "dev",
+      "module": "module_2",
+      "query": "我不想跳绳，只想散步",
+      "expect_empty": false,
+      "relevant": [
+        {
+          "source": "2024-adult-compendium身体活动分类(1)(1).xlsx",
+          "heading": "身体活动分类：Walking"
+        }
+      ]
+    },
+    {
+      "id": "activation_en",
+      "split": "dev",
+      "module": "module_1",
+      "query": "Why should I act before I feel motivated?",
+      "expect_empty": false,
+      "relevant": [
+        {
+          "source": "1~6章(2).md",
+          "heading": "行为激活的结构: 由外而内"
+        }
+      ]
+    },
+    {
+      "id": "avoidance",
+      "split": "dev",
+      "module": "module_4",
+      "query": "每次压力一大就逃开任务，当时轻松了，之后更不敢面对，这是为什么？",
+      "expect_empty": false,
+      "relevant": [
+        {
+          "source": "1~6章(2).md",
+          "heading": "行为和后果-回避"
+        }
+      ]
+    },
+    {
+      "id": "mastery",
+      "split": "dev",
+      "module": "module_1",
+      "query": "记录活动时，掌控感和愉悦感分别是什么意思？",
+      "expect_empty": false,
+      "relevant": [
+        {
+          "source": "1~6章(2).md",
+          "heading": "监测掌控感与愉悦感"
+        }
+      ]
+    },
+    {
+      "id": "plan_time",
+      "split": "dev",
+      "module": "module_2",
+      "query": "我说有空就去散步，为什么还需要确定具体哪天几点？",
+      "expect_empty": false,
+      "relevant": [
+        {
+          "source": "1~6章(2).md",
+          "heading": "规定来访者做活动的日期和时间"
+        }
+      ]
+    },
+    {
+      "id": "value",
+      "split": "dev",
+      "module": "module_2",
+      "query": "想做的事情有好多，怎样根据自己的价值观选一个目标？",
+      "expect_empty": false,
+      "relevant": [
+        {
+          "source": "1~6章(2).md",
+          "heading": "借助价值观找到目标"
+        }
+      ]
+    },
+    {
+      "id": "reinforcement",
+      "split": "dev",
+      "module": "module_4",
+      "query": "正强化是什么意思，行为的后果怎么影响下次还做不做？",
+      "expect_empty": false,
+      "relevant": [
+        {
+          "source": "1~6章(2).md",
+          "heading": "行为和后果-正强化"
+        }
+      ]
+    },
+    {
+      "id": "quantum",
+      "split": "dev",
+      "module": "module_1",
+      "query": "告诉我量子计算机价格",
+      "expect_empty": true,
+      "relevant": []
+    },
+    {
+      "id": "weather",
+      "split": "dev",
+      "module": "module_2",
+      "query": "请问明天北京的天气预报是多少度？",
+      "expect_empty": true,
+      "relevant": []
+    },
+    {
+      "id": "greeting",
+      "split": "dev",
+      "module": "module_1",
+      "query": "你好",
+      "expect_empty": true,
+      "relevant": []
+    },
+    {
+      "id": "account",
+      "split": "dev",
+      "module": "module_1",
+      "query": "怎么修改密码",
+      "expect_empty": true,
+      "relevant": []
+    },
+    {
+      "id": "tiny_step",
+      "split": "holdout",
+      "module": "module_3",
+      "query": "原计划太难，一想到就放弃，能不能把任务拆到容易开始的程度？",
+      "expect_empty": false,
+      "relevant": [
+        {
+          "source": "1~6章(2).md",
+          "heading": "原则五：从小处着手，改变更容易"
+        }
+      ]
+    },
+    {
+      "id": "mood_plan",
+      "split": "holdout",
+      "module": "module_2",
+      "query": "心情每天不一样，活动应该跟着心情决定，还是按安排去做？",
+      "expect_empty": false,
+      "relevant": [
+        {
+          "source": "1~6章(2).md",
+          "heading": "原则四：按照计划而不是情绪来组织和安排活动"
+        }
+      ]
+    },
+    {
+      "id": "walking_en",
+      "split": "holdout",
+      "module": "module_2",
+      "query": "Does a short walk count as physical activity?",
+      "expect_empty": false,
+      "relevant": [
+        {
+          "source": "2024-adult-compendium身体活动分类(1)(1).xlsx",
+          "heading": "身体活动分类：Walking"
+        }
+      ]
+    },
+    {
+      "id": "barrier",
+      "split": "holdout",
+      "module": "module_3",
+      "query": "一直下雨没法去外面运动，怎么调整比较好？",
+      "expect_empty": false,
+      "relevant": [
+        {
+          "source": "知识条目1(1).md",
+          "heading": "【外在障碍 - 04】天气限制 > 【干预方向】"
+        }
+      ]
+    },
+    {
+      "id": "support",
+      "split": "holdout",
+      "module": "module_3",
+      "query": "没人愿意陪我一起运动，怎样找到能支持我坚持的人？",
+      "expect_empty": false,
+      "relevant": [
+        {
+          "source": "知识条目1(1).md",
+          "heading": "【BCT-05】探索社会支持 > 【核心方法】"
+        }
+      ]
+    },
+    {
+      "id": "monitoring",
+      "split": "holdout",
+      "module": "module_3",
+      "query": "已经开始运动，但不知道每天到底做了多少，怎么追踪进步？",
+      "expect_empty": false,
+      "relevant": [
+        {
+          "source": "知识条目1(1).md",
+          "heading": "【BCT-04】行为自我监测与反馈 > 【核心方法】"
+        }
+      ]
+    },
+    {
+      "id": "out_of_domain",
+      "split": "holdout",
+      "module": "module_1",
+      "query": "如何给我的笔记本电脑安装 Linux？",
+      "expect_empty": true,
+      "relevant": []
+    },
+    {
+      "id": "thanks",
+      "split": "holdout",
+      "module": "module_1",
+      "query": "谢谢",
+      "expect_empty": true,
+      "relevant": []
+    }
+  ]
+}

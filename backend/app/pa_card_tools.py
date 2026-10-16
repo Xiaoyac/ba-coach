@@ -62,6 +62,9 @@ def definitions(module):
                           'required':list(required),'additionalProperties':False}}}
     version = {'state_version': {'type':'integer','description':'get_pa_card 最近返回的 state_version；禁止猜测。'}}
     defs=[tool('continue_pa_conversation','本轮无需改卡片/确认/收尾，继续当前模块自然对话。用户已有需要保存的明确安排、已确认展示版本或复盘已达收尾时不能用它代替写操作。'),tool('get_pa_card','查询本用户当前 PA 卡、版本、历史核心和真实消息来源。无副作用。')]
+    defs.append(tool('get_pa_activity_candidates', '按目标ID、活动线索或下一页查询本用户可访问的历史目标/计划/执行及来源。只读；候选匹配不等于归属。候选提示omitted时可继续查找，不把遗漏的旧活动强绑当前目标。',
+        {'goal_id': {'type': ['string','null']}, 'activity_query': {'type': ['string','null']},
+         'offset': {'type':'integer','minimum':0}, 'history_offset': {'type':'integer','minimum':0}}))
     if module not in {'module_2','module_4'}:
         return defs
     properties={}
@@ -128,10 +131,11 @@ def _json(value):
 
 
 class PACardTools:
-    def __init__(self, *, maker, session_id, user_id, user_message_id, module, provider=None, ui_enabled=False, assistant_message_id=None):
+    def __init__(self, *, maker, session_id, user_id, user_message_id, module, provider=None, ui_enabled=False, assistant_message_id=None, parallel_reply=False):
         self.maker,self.session_id,self.user_id=maker,session_id,user_id
         self.boundary,self.module,self.provider=user_message_id,module,provider
         self.assistant_message_id = assistant_message_id
+        self.parallel_reply = parallel_reply
         self.definitions=definitions(module)
         self.ui_enabled = ui_enabled and module == 'module_2'
         if self.ui_enabled:
@@ -147,7 +151,7 @@ class PACardTools:
             return self.definitions
         # Do not ask the model to save clinical fields before a formulation
         # card exists. An introductory PA question must remain conversation.
-        names = {'get_pa_card', 'continue_pa_conversation', 'open_goal_card'}
+        names = {'get_pa_card', 'get_pa_activity_candidates', 'continue_pa_conversation', 'open_goal_card'}
         card = self.ui_card
         if (card and card['phase'] == 'ready' and self.ui_action
                 and self.ui_action.get('action') == 'confirm'):
@@ -180,6 +184,14 @@ class PACardTools:
         state = await scoped_runtime(db, conversation, state)
         latest=(await db.execute(select(ConversationMessage).where(ConversationMessage.conversation_id==conversation.id)
             .order_by(ConversationMessage.position.desc(),ConversationMessage.id.desc()).limit(1).with_for_update())).scalar_one_or_none()
+        # Only this server-started worker may cross from its current user to
+        # that user's immediately following durable reply. A newer user or an
+        # extra assistant still invalidates the write window below.
+        if self.parallel_reply and self.assistant_message_id is None and latest and latest.role == 'assistant':
+            user = await db.get(ConversationMessage, self.boundary)
+            if (user and user.conversation_id == conversation.id and user.role == 'user'
+                    and latest.position == user.position + 1):
+                self.assistant_message_id = latest.id
         if self.assistant_message_id is not None:
             if not latest or latest.id != self.assistant_message_id or latest.role != 'assistant':
                 raise ToolRejected('current_user_boundary_changed')
@@ -208,6 +220,7 @@ class PACardTools:
         from .program_confirmation import draft
         from .pa_lifecycle import unfinished_core_goals,reviewed_goal
         from .goal_contract import evidence_messages
+        from .activity_attribution import activity_candidates
         pending=await draft(db,state,self.user_id) if state['current_module'] in {'module_2','module_4'} else None
         messages=await self.evidence(db,conversation.id)
         plans,cycles,goals=(schema.tables[k] for k in ('module_two_record','pa_cycles','pa_goals'))
@@ -221,6 +234,8 @@ class PACardTools:
             'confirmed_plan':dict(confirmed) if confirmed else None,
             'unfinished_core_goals':await unfinished_core_goals(db,user_id=self.user_id,conversation_id=conversation.id),
             'last_reviewed_goal':await reviewed_goal(db,user_id=self.user_id,memory=state['memory'],conversation_id=conversation.id),
+            'activity_candidates':await activity_candidates(db, self.user_id, conversation_id=conversation.id,
+                source_text=messages[-1].content if messages else None),
             'recent_sources':[{'message_id':m.id,'role':m.role,'text':m.content} for m in messages[-12:]]})
         if self.ui_enabled:
             from .goal_card_workspace import latest_card
@@ -231,7 +246,7 @@ class PACardTools:
         return result
 
     async def _confirmation_preflight(self, name):
-        if self.assistant_message_id is None or name not in {'confirm_pa_card', 'confirm_secondary_goal_card'}:
+        if (self.assistant_message_id is None and not self.parallel_reply) or name not in {'confirm_pa_card', 'confirm_secondary_goal_card'}:
             return None
         from .confirmation_intent import ConfirmationEvidence, semantic_confirmation
         from .dialogue_confirmation import affirmative
@@ -278,7 +293,7 @@ class PACardTools:
             if not definition or not isinstance(args,dict):raise ToolRejected('unknown_tool_or_arguments')
             params=definition['parameters']
             if set(args)-set(params['properties']) or set(params['required'])-set(args):raise ToolRejected('invalid_arguments')
-            if name not in {'get_pa_card','continue_pa_conversation'} and type(args.get('state_version')) is not int:raise ToolRejected('invalid_state_version')
+            if name not in {'get_pa_card','get_pa_activity_candidates','continue_pa_conversation'} and type(args.get('state_version')) is not int:raise ToolRejected('invalid_state_version')
             if 'data' in args:
                 if not isinstance(args['data'],dict) or set(args['data'])-{s.name for s in specs_for(self.module)}:
                     raise ToolRejected('invalid_data_fields')
@@ -307,6 +322,14 @@ class PACardTools:
                                     'card_id': row['id'], 'card_revision': row['revision'],
                                     'state_version': state['row_version'], 'readiness': readiness,
                                     'guidance': '用户已提交当前草稿，请先用已有资料调用review_goal_card；如未达标，返回真实缺项，不虚构通过。'}
+                elif name=='get_pa_activity_candidates':
+                    from .activity_attribution import activity_candidates
+                    if any(type(args.get(k, 0)) is not int or args.get(k, 0) < 0 for k in ('offset','history_offset')):
+                        raise ToolRejected('invalid_candidate_page')
+                    if any(args.get(k) is not None and not isinstance(args[k], str) for k in ('goal_id','activity_query')):
+                        raise ToolRejected('invalid_candidate_query')
+                    result = {'status': 'ok', 'activity_candidates': await activity_candidates(db, self.user_id,
+                        conversation_id=conversation.id, **args)}
                 elif name=='get_pa_card':
                     result=await self.snapshot(db,conversation,state)
                 else:
@@ -381,7 +404,7 @@ class PACardTools:
                 if structured is not None:
                     confirmation_evidence = structured
             result = await execute_ui_tool(db, conversation, state, user, name, args,
-                provider=None if self.assistant_message_id is not None else self.provider,
+                provider=None if self.assistant_message_id is not None or self.parallel_reply else self.provider,
                 following_assistant_message_id=self.assistant_message_id, confirmation_evidence=confirmation_evidence)
             if result is not None:
                 if (name == 'review_goal_card' and result.get('ready')
@@ -450,7 +473,15 @@ class PACardTools:
             if not state['active_cycle_id']:raise ToolRejected('no_active_cycle')
             record_id=await persist_record(self.maker,module=self.module,user_id=self.user_id,data=data,
                 cycle_id=state['active_cycle_id'],db_session=db,tool_closing_summary=summary)
-            if not record_id:raise ToolRejected('record_write_not_applied')
+            if not record_id:
+                if self.module == 'module_4':
+                    from .activity_attribution import attribution_context
+                    return {'status': 'activity_facts_saved', 'review_saved': False,
+                        'reason': 'review_execution_scope_unverified',
+                        'activity_attribution': await attribution_context(db, user_id=self.user_id,
+                            conversation_id=conversation.id),
+                        'guidance': '活动事实单独保留，当前核心复盘未修改。先核对已有执行候选及来源；归属不明才自然澄清，不重复索要已经表达的内容。'}
+                raise ToolRejected('record_write_not_applied')
             await record_steps(db,session_id=self.session_id,user_id=self.user_id,module=self.module,
                 requested_target=self.module,steps=[],assistant_message_id=self.assistant_message_id or self.boundary,allow_transition=False)
             if name!='close_pa_card':
@@ -521,7 +552,7 @@ class PACardTools:
             else:
                 receipt=await precommit_user_confirmation(db,session_id=self.session_id,user_id=self.user_id,
                     user_message_id=self.boundary,
-                    confirmation_provider=None if self.assistant_message_id is not None else self.provider,
+                    confirmation_provider=None if self.assistant_message_id is not None or self.parallel_reply else self.provider,
                     following_assistant_message_id=self.assistant_message_id, confirmation_evidence=confirmation_evidence)
             if not receipt:raise ToolRejected('confirmation_not_verified')
             if self.ui_enabled:

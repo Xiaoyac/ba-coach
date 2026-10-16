@@ -20,8 +20,8 @@ def build_provider(settings):
 
 
 async def mediate_hybrid_knowledge(*, settings, **kwargs):
-    # The durable legacy boolean selects retrieval architecture, not whether
-    # this new architecture runs its mediator. Its mediation is always enabled.
+    # The caller has already checked the independent per-turn node switch.
+    # The historical architecture boolean and server legacy flag are unrelated.
     scoped = settings.model_copy(update={
         "knowledge_mediator_enabled": True,
         "knowledge_mediator_include_reasoning": False,

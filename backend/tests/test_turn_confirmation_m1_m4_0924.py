@@ -97,27 +97,26 @@ async def test_m1_invalid_consent_source_cannot_be_promoted(goal_api, bad_source
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("decision,target", [(1, "module_3"), (3, "module_2")])
-async def test_m4_sourced_current_turn_commits_next_cycle_before_reply(goal_api, decision, target):
+async def test_m4_sourced_current_turn_closes_attempt_before_reply(goal_api, decision, target):
     _, db, _ = goal_api
     state, context = await review_turn(db, decision=decision)
     result = await apply_pre_reply_decision(state, context, SimpleNamespace(target_module=target))
-    assert result["current_module"] == target
-    assert result["active_cycle_id"] != "reviewed-cycle"
+    assert result["current_module"] == "module_2"
+    assert result["active_cycle_id"] is None
     cycles, reviews = schema.tables["pa_cycles"], schema.tables["module_four_record"]
     previous = (await db.execute(select(cycles).where(cycles.c.id == "reviewed-cycle"))).mappings().one()
-    successor = (await db.execute(select(cycles).where(cycles.c.id == result["active_cycle_id"]))).mappings().one()
+    assert list((await db.execute(select(cycles.c.id))).scalars()) == ["reviewed-cycle"]
     review = (await db.execute(select(reviews))).mappings().one()
-    assert previous["status"] == "completed" and successor["ordinal"] == 2
-    assert successor["status"] == ("waiting_execution" if decision == 1 else "planning")
+    assert previous["status"] == "completed"
     assert review["record_status"] == "confirmed" and review["confirmation_message_id"] == 14
     event = (await db.execute(select(schema.tables["ai_decision_logs"]).where(
         schema.tables["ai_decision_logs"].c.decision_type == "user_confirmation"))).mappings().one()
     assert event["turn_id"] == "21" and event["evidence_message_ids"] == [21]
-    context.store.set_module.assert_awaited_once_with("chat-a", target)
+    context.store.set_module.assert_awaited_once_with("chat-a", "module_2")
 
 
 @pytest.mark.asyncio
-async def test_m4_continue_failure_rolls_back_confirmation_and_cycle_closure(goal_api, monkeypatch):
+async def test_m4_closure_does_not_depend_on_successor_creation(goal_api, monkeypatch):
     from app.v2_repository import V2Conflict
     _, db, _ = goal_api
     state, context = await review_turn(db, decision=1, with_contract=False)
@@ -125,14 +124,14 @@ async def test_m4_continue_failure_rolls_back_confirmation_and_cycle_closure(goa
         raise V2Conflict("simulated cycle creation failure")
     monkeypatch.setattr("app.v2_repository.start_cycle", unavailable)
     result = await apply_pre_reply_decision(state, context, SimpleNamespace(target_module="module_3"))
-    assert result["current_module"] == "module_4"
-    assert "confirmation_receipt" not in result
+    assert result["current_module"] == "module_2"
+    assert result["confirmation_receipt"]["cycle_id"] is None
     cycles, reviews = schema.tables["pa_cycles"], schema.tables["module_four_record"]
     previous = (await db.execute(select(cycles).where(cycles.c.id == "reviewed-cycle"))).mappings().one()
     review = (await db.execute(select(reviews))).mappings().one()
-    assert previous["status"] == "reviewing"  # validated extraction may advance review status
-    assert previous["completed_at"] is None
-    assert review["record_status"] == "draft"
+    assert previous["status"] == "completed"
+    assert previous["completed_at"] is not None
+    assert review["record_status"] == "confirmed"
     assert list((await db.execute(select(cycles.c.id))).scalars()) == ["reviewed-cycle"]
 
 

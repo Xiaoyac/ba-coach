@@ -17,8 +17,9 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
+from ..client_timing import ClientTiming, record_client_timing
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,7 +27,7 @@ from ..conversation_store import create_conversation_with_opening
 from ..db import get_db, get_sessionmaker
 from ..identity import CallerIdentity, require_caller, require_subject_id, require_admin
 from ..conversation_thinking import effective_thinking
-from ..conversation_knowledge import mediator_enabled_for_conversation
+from ..conversation_knowledge import knowledge_policy_for_conversation
 from ..conversation_reply_mode import (effective_reply_mode, effective_reply_effort,
                                       configured_reply_effort_options)
 from ..knowledge_references import KnowledgeReferences
@@ -41,6 +42,7 @@ from ..models import (
     MessageFeedback,
     ConversationReplySettings,
     ConversationKnowledgeSettings,
+    ConversationMediatorNodeSettings,
     ConversationResponseMode,
     ConversationReplyEffort,
     ConversationModuleProgress,
@@ -103,7 +105,8 @@ def _detail(c: Conversation, *, next_module: str | None = None,
             routing_mode: str = "router_code", thinking_enabled: bool | None = None,
             reply_mode: str = "standard", reply_effort: str | None = None,
             reply_effort_options: tuple[str, ...] = (),
-            knowledge_mediator_enabled: bool = True) -> ConversationDetail:
+            knowledge_mediator_enabled: bool = True,
+            knowledge_mediator_node_enabled: bool = False) -> ConversationDetail:
     # Replies occupy the odd slot reserved by start_turn for that user row.
     # Do not infer ownership from adjacent list indices or repeated text.
     users_by_position: dict[int, list[int]] = {}
@@ -143,6 +146,7 @@ def _detail(c: Conversation, *, next_module: str | None = None,
             timing=timing,
             reply_status=("incomplete" if message.error_code == "reply_length_limit" else "interrupted" if message.error_code in {
                 "generation_cancelled", "client_disconnected", "continuation_error",
+                "provider_error", "provider_timeout", "invalid_protocol_completion", "uncommitted_workflow_claim",
                 "continuation_timeout", "continuation_empty", "continuation_protocol",
             } else None),
         )
@@ -158,6 +162,7 @@ def _detail(c: Conversation, *, next_module: str | None = None,
         routing_mode=routing_mode,
         thinking_enabled=thinking_enabled,
         knowledge_mediator_enabled=knowledge_mediator_enabled,
+        knowledge_mediator_node_enabled=knowledge_mediator_node_enabled,
         knowledge_mode="legacy_mediator" if knowledge_mediator_enabled else "astrbot_hybrid",
         reply_mode=reply_mode,
         reply_effort=reply_effort,
@@ -177,6 +182,8 @@ async def _detail_with_runtime(
     member_policy = await db.scalar(select(AccountSettings.role).join(
         UserAccount, UserAccount.id == AccountSettings.account_id).where(
         UserAccount.profile_uuid == conversation.subject_id)) == "user"
+    knowledge_policy = await knowledge_policy_for_conversation(db,
+        session_id=conversation.session_id, subject_id=conversation.subject_id)
     return _detail(
         conversation, next_module=runtime.module if runtime else None, routing_mode=mode,
         thinking_enabled=await effective_thinking(db, session_id=conversation.session_id, subject_id=conversation.subject_id),
@@ -184,8 +191,8 @@ async def _detail_with_runtime(
         reply_effort=(await effective_reply_effort(db, session_id=conversation.session_id,
             subject_id=conversation.subject_id)) if efforts or member_policy else None,
         reply_effort_options=efforts,
-        knowledge_mediator_enabled=await mediator_enabled_for_conversation(
-            db, session_id=conversation.session_id, subject_id=conversation.subject_id),
+        knowledge_mediator_enabled=knowledge_policy.legacy,
+        knowledge_mediator_node_enabled=knowledge_policy.mediator_node_enabled,
     )
 
 
@@ -391,6 +398,42 @@ async def message_knowledge_references(
     return KnowledgeReferences.model_validate(snapshot) if snapshot else KnowledgeReferences()
 
 
+@router.post("/{session_id}/execution/client-timing")
+async def post_client_timing(
+    session_id: str, payload: ClientTiming, response: Response,
+    caller: CallerIdentity = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    conversation = await _owned_or_404(db, session_id=session_id, subject_id=caller.subject_id)
+    response.headers["Cache-Control"] = "private, no-store"
+    return await record_client_timing(db, conversation, payload)
+
+
+@router.get("/{session_id}/execution")
+async def get_execution_status(
+    session_id: str, response: Response, user_message_id: int | None = None,
+    caller: CallerIdentity = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    conversation = await _owned_or_404(db, session_id=session_id, subject_id=caller.subject_id)
+    response.headers["Cache-Control"] = "private, no-store"
+    from ..execution_status_view import execution_view
+    return await execution_view(db, conversation, user_message_id)
+
+
+@router.get("/{session_id}/execution/history")
+async def get_execution_history(
+    session_id: str, response: Response,
+    before_id: int | None = Query(None, gt=0), limit: int = Query(20, ge=1, le=100),
+    caller: CallerIdentity = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    conversation = await _owned_or_404(db, session_id=session_id, subject_id=caller.subject_id)
+    response.headers["Cache-Control"] = "private, no-store"
+    from ..execution_status_view import execution_history
+    return await execution_history(db, conversation, before_id, limit)
+
+
 @router.get("/{session_id}/context")
 async def get_context_usage(
     session_id: str, response: Response,
@@ -565,6 +608,33 @@ async def update_conversation_mediator(
         return await _detail_with_runtime(db, conversation)
 
 
+@router.patch("/{session_id}/mediator-node", response_model=ConversationDetail)
+async def update_conversation_mediator_node(
+    session_id: str, payload: ConversationMediatorUpdate,
+    caller: CallerIdentity = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+    store: SessionStore = Depends(get_session_store),
+) -> ConversationDetail:
+    await _owned_or_404(db, session_id=session_id, subject_id=caller.subject_id)
+    turn_lock = await store.get_turn_lock(session_id)
+    if turn_lock.locked():
+        raise HTTPException(status_code=409, detail="回复正在生成，请结束后再切换中介节点。")
+    async with turn_lock:
+        conversation = (await db.execute(select(Conversation).where(
+            Conversation.session_id == session_id, Conversation.subject_id == caller.subject_id)
+            .with_for_update())).scalar_one_or_none()
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="对话不存在")
+        preference = await db.get(ConversationMediatorNodeSettings, conversation.id)
+        if preference is None:
+            preference = ConversationMediatorNodeSettings(conversation_id=conversation.id)
+            db.add(preference)
+        preference.enabled = payload.enabled
+        conversation.revision += 1
+        await db.commit()
+        return await _detail_with_runtime(db, conversation)
+
+
 @router.patch("/{session_id}/thinking", response_model=ConversationDetail)
 async def update_conversation_thinking(
     session_id: str, payload: ConversationThinkingUpdate,
@@ -680,6 +750,8 @@ async def delete_conversation(
             ConversationReplySettings.conversation_id == conversation.id))
         await db.execute(delete(ConversationKnowledgeSettings).where(
             ConversationKnowledgeSettings.conversation_id == conversation.id))
+        await db.execute(delete(ConversationMediatorNodeSettings).where(
+            ConversationMediatorNodeSettings.conversation_id == conversation.id))
         await db.execute(delete(ConversationResponseMode).where(
             ConversationResponseMode.conversation_id == conversation.id))
         await db.execute(delete(ConversationReplyEffort).where(

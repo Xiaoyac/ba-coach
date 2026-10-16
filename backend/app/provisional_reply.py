@@ -1,4 +1,5 @@
 """Generate a short opening, then stream a continuation that has read it."""
+from .execution_status import track_call, track_stream
 import asyncio
 import anyio
 import json
@@ -63,6 +64,23 @@ def classify_lead(raw):
     if text[-1] not in "。！.!…":
         text += "。"
     return (text, None) if len(text) <= 150 else ("", "too_long")
+
+
+def usable_lead(raw):
+    """Keep only a complete validated opening before an overlong/question tail."""
+    text, reason = classify_lead(raw)
+    if text or reason not in {"question", "too_long", "too_many_sentences"}:
+        return text, reason, False
+    normalized = " ".join(normalize_reasoning_channels(raw, "").reply.split())
+    prefix = ""
+    for sentence in re.findall(r"[^。！？.!?]*[。！.!?？]", normalized):
+        if "?" in sentence or "？" in sentence:
+            break
+        candidate, rejection = classify_lead(prefix + sentence)
+        if rejection:
+            break
+        prefix = candidate
+    return (prefix, None, True) if prefix else ("", reason, False)
 
 
 def normalize_lead(raw):
@@ -159,35 +177,43 @@ class ContinuationPrefix:
 
 
 def select_lead_provider(provider, settings=None):
-    """Use the configured K3 channel; never silently fall back to Qwen."""
+    """Isolate a non-thinking Flash client from the conversational model."""
     settings = settings or getattr(provider, "_settings", None)
-    # Dependency-injected test/offline providers have no transport settings.
     if settings is None or not hasattr(provider, "_settings"):
         return provider
     from .providers import get_provider
-    from .generation_policy import is_ark_kimi
-    selected = getattr(settings, "reply_lead_provider", None)
-    model = getattr(settings, "reply_lead_model", None) or "kimi-k3"
-    if model != "kimi-k3":
-        raise ValueError("REPLY_LEAD_MODEL must be kimi-k3; migrate the legacy lead configuration")
+    from .providers.deepseek import DeepSeekProvider
+    selected = getattr(settings, "reply_lead_provider", None) or "deepseek"
+    model = getattr(settings, "reply_lead_model", None) or "deepseek-v4.1-flash"
+    if model not in {"deepseek-v4.1-flash", "deepseek-v4-1-flash"}:
+        raise ValueError("The lead model must be DeepSeek 4.1 Flash with thinking disabled")
     base = getattr(settings, "reply_lead_base_url", None)
     key = getattr(settings, "reply_lead_api_key", None)
-    if base or key:
-        if not (base and key):
-            raise ValueError("Configure both REPLY_LEAD_BASE_URL and REPLY_LEAD_API_KEY")
-        from .providers.deepseek import DeepSeekProvider
-        channel = settings.model_copy(update={
-            "deepseek_base_url": base, "deepseek_api_key": key, "deepseek_model": model})
-        if not is_ark_kimi(channel, "deepseek", model=model):
-            raise ValueError("The lead channel must use the verified Volcengine Ark K3 endpoint")
-        candidate = DeepSeekProvider(channel)
-        candidate._lead_owned = True
-    else:
-        candidate = provider if provider.model == model and (not selected or selected == provider.name) else get_provider(selected or "deepseek")
-        if (candidate.model != model or not is_ark_kimi(
-                candidate._settings, candidate.name, model=candidate.model)):
-            raise ValueError("The lead provider must expose kimi-k3 on the verified Volcengine Ark endpoint")
+    if bool(base) != bool(key):
+        raise ValueError("Configure both REPLY_LEAD_BASE_URL and REPLY_LEAD_API_KEY")
+    if not base:
+        source = provider if provider.name == selected else get_provider(selected)
+        base = getattr(source._settings, f"{selected}_base_url", None)
+        key = getattr(source._settings, f"{selected}_api_key", None)
+    if not base or not key:
+        raise ValueError("No compatible lead endpoint is configured")
+    channel = settings.model_copy(update={
+        "deepseek_base_url": base, "deepseek_api_key": key, "deepseek_model": model,
+        "deepseek_reasoning_effort": "disabled", "provider_max_retries": 0})
+    candidate = DeepSeekProvider(channel)
+    candidate._lead_owned = True
     return candidate
+
+
+def take_ready_lead(context):
+    """At main-model readiness, atomically take a completed lead or skip it."""
+    resolve = getattr(context, "reply_lead_resolve", None)
+    if resolve is not None:
+        return resolve().get("text", "")
+    task = getattr(context, "reply_lead_task", None)
+    if task is not None and task.done() and not task.cancelled():
+        return task.result().get("text", "")
+    return ""
 
 
 async def generate_reply_lead(provider, *, user_input, history, user_created_at=None,
@@ -206,16 +232,9 @@ async def generate_reply_lead(provider, *, user_input, history, user_created_at=
         result.update(provider=provider.name, model=provider.model)
         scoped = provider.with_thinking(False)
         config = settings or getattr(scoped, "_settings", None)
-        deadline = getattr(config, "reply_lead_timeout_seconds", 8.0)
+        deadline = getattr(config, "reply_lead_timeout_seconds", 12.0)
         budget = getattr(config, "reply_lead_max_tokens", 2048)
-        from .generation_policy import is_ark_kimi, auxiliary_output_budget
-        wire_settings = getattr(scoped, "_settings", None)
-        ark_k3 = wire_settings is not None and is_ark_kimi(wire_settings, provider.name, model=provider.model)
-        if getattr(scoped, "_settings", None) is not None:
-            budget = auxiliary_output_budget(scoped._settings, provider.name, provider.model, budget)
-        result.update(timeout_seconds=deadline, max_tokens=budget, thinking_enabled=ark_k3)
-        if ark_k3:
-            result["reasoning_effort"] = "low"
+        result.update(timeout_seconds=deadline, max_tokens=budget, thinking_enabled=False)
         provider_settings = getattr(scoped, "_settings", None)
         if provider_settings is not None:
             scoped._settings = provider_settings.model_copy(update={f"{provider.name}_max_tokens": budget,
@@ -247,12 +266,13 @@ async def generate_reply_lead(provider, *, user_input, history, user_created_at=
             # Keep the current clock as trusted system data after history.
             prefix_cache=bool(getattr(scoped, "supports_tail_system", False)))
         result["context_pipeline"] = prepared.metrics
-        response = await asyncio.wait_for(scoped.complete(system=prepared.system,
-            messages=prepared.messages), timeout=deadline)
+        response = await track_call('reply_lead', asyncio.wait_for(scoped.complete(system=prepared.system,
+            messages=prepared.messages), timeout=deadline), model=scoped.model)
         result.update(model=response.model or provider.model, request_id=response.request_id,
                       usage=response.usage, finish_reason=response.finish_reason)
         if response.finish_reason in (None, "stop", "end_turn"):
-            text, rejection = classify_lead(response.text)
+            text, rejection, shortened = usable_lead(response.text)
+            result["trimmed_to_valid_prefix"] = shortened
         else:
             text, rejection = "", "incomplete_generation"
         if text:
@@ -262,7 +282,7 @@ async def generate_reply_lead(provider, *, user_input, history, user_created_at=
     except asyncio.TimeoutError:
         result["reason_code"] = "lead_timeout"
     except Exception as exc:
-        result.update(reason_code="lead_provider_error", error_type=type(exc).__name__)
+        result.update(reason_code="lead_timeout" if "timed out" in str(exc).casefold() else "lead_provider_error", error_type=type(exc).__name__)
     finally:
         if owned_client is not None:
             with anyio.CancelScope(shield=True):
@@ -290,8 +310,8 @@ async def with_natural_lead(events, *, provider, user_input, generation_id,
                             user_created_at=None, max_history_messages=80, context=None):
     """Start the opening after safety screening, concurrently with the router.
 
-    The graph consumes the exact opening before starting main generation. Its
-    next event is always read concurrently with the character timer, so real
+    The graph takes a ready opening or cancels an unfinished one without waiting.
+    Its next event is read concurrently with the character timer, so real
     body output immediately ends slow pacing. Only released bytes are recorded.
     """
     iterator = events.__aiter__()
@@ -303,13 +323,40 @@ async def with_natural_lead(events, *, provider, user_input, generation_id,
     # for its routed system prompt. Risk screening still precedes lead output.
     if context is not None and hasattr(context, "reply_lead_context"):
         context.reply_lead_context = None
-    risk_required = bool(getattr(getattr(context, "settings", None), "risk_gate_enabled", False))
+    # Real graph contexts must supply an explicit safe verdict. Turning off
+    # the screening configuration must not enable an unscreened opening.
+    risk_required = hasattr(getattr(context, "settings", None), "risk_gate_enabled")
     lead_wait_started = perf_counter()
     next_event = asyncio.create_task(iterator.__anext__())
     pending_fast = formal_started = waiting = separated = False
     opening = ""
     position = 0
     settings = getattr(context, "settings", None)
+    lead_closed = False
+
+    def resolve_for_main():
+        nonlocal pending_fast, lead_closed
+        if handoff.done():
+            return handoff.result()
+        # Read the actual task too: its completion and this main-ready callback
+        # can occur in the same scheduler turn, before the wrapper is resumed.
+        if fast is not None and fast.done() and not fast.cancelled() and fast.exception() is None:
+            result = fast.result()
+            handoff.set_result(result)
+            return result
+        lead_closed = True
+        pending_fast = False
+        if fast is not None and not fast.done():
+            fast.cancel()
+        result = {"text": "", "status": "skipped", "reason_code": "main_ready_before_lead",
+                  "displayed": False, "thinking_enabled": False, "usage": {}, "request_id": None,
+                  "model": getattr(settings, "reply_lead_model", None) or "deepseek-v4.1-flash"}
+        metrics.update(result)
+        handoff.set_result(result)
+        return result
+
+    if context is not None:
+        context.reply_lead_resolve = resolve_for_main
     interval = getattr(settings, "reply_lead_character_seconds", 0.12)
     try:
         while True:
@@ -349,13 +396,17 @@ async def with_natural_lead(events, *, provider, user_input, generation_id,
                         yield ("custom", {"type": "delta", "text": remainder, "phase": "lead"})
                     break
                 mode, event = item if isinstance(item, tuple) and len(item) == 2 else ("custom", item)
-                risk_ready = (not risk_required or (isinstance(event, dict)
-                    and "risk_gate_duration_ms" in (event.get("telemetry") or {})))
+                risk_status = ((event.get("telemetry") or {}).get("risk_gate_status")
+                               if isinstance(event, dict) else None)
+                risk_ready = not risk_required or risk_status == "passed"
                 risk_blocked = isinstance(event, dict) and bool(event.get("risk"))
-                if risk_ready and risk_blocked and handoff is not None and not handoff.done():
-                    metrics.update(status="skipped", reason_code="risk_gate_diverted", text="", displayed=False)
-                    handoff.set_result(dict(metrics))
-                if (fast is None and risk_ready and not risk_blocked and not formal_started and mode == "values"
+                if risk_blocked or (risk_required and risk_status in {"failed", "blocked", "disabled"}):
+                    lead_closed = True
+                    metrics.update(status="skipped", reason_code="risk_gate_diverted" if risk_blocked else "risk_gate_not_passed",
+                                   text="", displayed=False)
+                    if handoff is not None and not handoff.done():
+                        handoff.set_result(dict(metrics))
+                if (not lead_closed and fast is None and risk_ready and not risk_blocked and not formal_started and mode == "values"
                         and isinstance(event, dict) and "chat_history" in event
                         and (event.get("telemetry") or {}).get("history_source")
                         and not _formal_output(item)):

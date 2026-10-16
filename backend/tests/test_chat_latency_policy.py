@@ -139,12 +139,12 @@ async def test_qwen_reasoning_alias_is_copied_into_the_thinking_channel():
 
 
 @pytest.mark.parametrize('content,enabled', [
-    ('<user_message>好的</user_message>', False),
-    ('<user_message>好的，但最近还是很困难</user_message>', True),
-    ('<user_message>好的，但我不想活了</user_message>', True),
-    ('<user_message>好的</user_message>另外还有一个问题', True),
+    ('好的', False),
+    ('好的，但最近还是很困难', True),
+    ('好的，但我不想活了', True),
+    ('<message><content>好的</content></message>另外还有一个问题', True),
 ])
-def test_graph_envelope_preserves_ack_thinking_policy(content, enabled):
+def test_raw_input_preserves_ack_thinking_policy(content, enabled):
     options = main_thinking_options(Settings(_env_file=None), 'deepseek',
         [Message(role='user', content=content)])
     assert options['enable_thinking'] is enabled

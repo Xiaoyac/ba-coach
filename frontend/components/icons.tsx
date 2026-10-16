@@ -305,3 +305,10 @@ export function CameraMark({ className }: IconProps) {
     </svg>
   );
 }
+
+export function GearMark({ className }: IconProps) {
+  return <svg viewBox="0 0 24 24" className={className} aria-hidden="true" {...strokeProps}>
+    <path d="m9.5 3-.6 2.2-1.6.9-2.2-.6-2.5 4.3 1.6 1.6v1.8l-1.6 1.6 2.5 4.3 2.2-.6 1.6.9.6 2.2h5l.6-2.2 1.6-.9 2.2.6 2.5-4.3-1.6-1.6v-1.8l1.6-1.6-2.5-4.3-2.2.6-1.6-.9-.6-2.2z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>;
+}

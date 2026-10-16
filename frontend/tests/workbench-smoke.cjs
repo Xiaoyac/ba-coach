@@ -28,7 +28,7 @@ const { chromium } = require("playwright");
     const body = method === "POST" || method === "PUT" ? req.postDataJSON() : null;
     const json = (data, status = 200) => route.fulfill({status, contentType:"application/json", body:JSON.stringify(data)});
     if (url.pathname === "/api/auth/me") return json({username:"fixture",nickname:"测试同事",role:"admin",profile_uuid:"synthetic",
-      email:"fixture@example.invalid",email_required:false,email_verified:true,display_id:"测试同事#10001"});
+      email:"fixture@example.invalid",email_required:false,email_verified:true,});
     if (url.pathname === "/api/conversations") return json(method === "GET" ? [] : {session_id:"ui-only",title:"测试",updated_at:new Date().toISOString(),messages:[],next_module:"module_1"});
     if (url.pathname.endsWith("/revision")) return json({revision:1});
     if (url.pathname.endsWith("/events")) return route.fulfill({contentType:"text/event-stream",body:""});

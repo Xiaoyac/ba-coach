@@ -67,6 +67,36 @@ const snapshot = {
       assert.equal(await page.getByRole('button', { name: '调试详情', exact: true }).count(), 0);
       assert.doesNotMatch(await page.locator('body').innerText(), /SNAPSHOT_.*REASONING/);
       assert.ok(requests.every(r => r.path === `/api/shares/${token}`));
+      // Admin snapshots expose all five panels using frozen data only.
+      unavailable = false;
+      snapshot.snapshot_version = 2;
+      snapshot.messages[1].request_records = { user_sent_at: '2026-09-28T08:00:00Z', assistant_created_at: '2026-09-28T08:00:01Z',
+        requests: [{ stage: 'main_generation', model: 'fixture-reply', request_id: 'SNAPSHOT_REQUEST_ID', duration_ms: 250 }] };
+      await page.reload();
+      await page.getByRole('button', { name: '调试详情', exact: true }).click();
+      await page.getByRole('button', { name: '查看回复深度思考', exact: true }).click();
+      await page.getByText('SNAPSHOT_REPLY_REASONING', { exact: true }).waitFor();
+      await page.getByRole('button', { name: '查看路由深度思考', exact: true }).click();
+      await page.getByText('SNAPSHOT_ROUTER_REASONING', { exact: true }).waitFor();
+      await page.getByRole('button', { name: '对话参考 chunk', exact: true }).click();
+      await page.getByText('SNAPSHOT_KNOWLEDGE', { exact: true }).first().waitFor();
+      await page.getByRole('button', { name: '中介节点使用建议内容', exact: true }).click();
+      await page.getByText('SNAPSHOT_MEDIATOR_GUIDANCE', { exact: true }).waitFor();
+      await page.getByRole('button', { name: '请求记录', exact: true }).click();
+      await page.getByText('SNAPSHOT_REQUEST_ID', { exact: true }).waitFor();
+      assert.ok(requests.every(r => r.path === `/api/shares/${token}` && !r.headers.authorization && !r.headers.cookie));
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'admin no horizontal overflow');
+      await page.screenshot({ path: `/tmp/ba-admin-share-${viewport.width}.png`, fullPage: true });
+      unavailable = true;
+      snapshot.messages[1].request_records = null;
+      await page.reload();
+      await page.getByRole('button', { name: '调试详情', exact: true }).click();
+      await page.getByRole('button', { name: '请求记录', exact: true }).click();
+      await page.getByText('本条回复未保存请求记录，分享中无法补填。', { exact: true }).waitFor();
+      await page.getByRole('button', { name: '对话参考 chunk', exact: true }).click();
+      await page.getByText('本条回复未保存这项详情，分享中无法补填。', { exact: true }).waitFor();
+      assert.ok(requests.every(r => r.path === `/api/shares/${token}`));
+      snapshot.snapshot_version = 1;
       invalidated = true;
       await page.reload();
       await page.getByText('分享链接不存在或已失效。', { exact: true }).waitFor();
@@ -91,7 +121,7 @@ const snapshot = {
         const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
         const conversation = { session_id: 'share-fixture', title: '待分享对话', updated_at: '2026-09-28T08:00:00Z', pinned: false, revision: 1,
           messages: [{ id: 1, role: 'assistant', content: '欢迎，已有对话。' }], next_module: 'module_2' };
-        if (path === '/api/auth/me') return json({ username: 'fixture-owner', nickname: '测试用户', role: 'user', profile_uuid: 'fixture-owner', email_required: false, birth_date_required: false });
+        if (path === '/api/auth/me') return json({ username: 'fixture-owner', nickname: '测试用户', role: 'user', profile_uuid: 'fixture-owner', email_required: false, birth_year_required: false });
         if (path === '/api/conversations') return json([conversation]);
         if (path === '/api/conversations/share-fixture' || path === '/api/conversations/current') return json(conversation);
         if (path.endsWith('/revision')) return json({ revision: 1 });
@@ -136,6 +166,6 @@ const snapshot = {
     assert.equal(await page.evaluate(() => window.shareFixture.creates), 2);
     assert.deepEqual(ownerErrors, []);
     await owner.close();
-    console.log('PASS: desktop/mobile shared UI, transcript-only display, hidden legacy reasoning and debug fields, no private/authenticated requests, missing-data isolation, safe text, invalidated reload; owner create/reject/retry/copy fallback; no history UI or list requests on reopen');
+    console.log('PASS: desktop/mobile member and legacy transcript-only shares, all five admin debug panels, frozen request records, no private/authenticated requests, missing-data isolation, safe text, invalidated reload; owner create/reject/retry/copy fallback; no history UI or list requests on reopen');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

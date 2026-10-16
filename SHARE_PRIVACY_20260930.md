@@ -1,5 +1,25 @@
 # Model preference visibility and public-share privacy
 
+## Existing admin links — 2026-10-01
+
+- Follow-up authorization explicitly includes already-created administrator shares. `backend/scripts/upgrade_admin_share_snapshots.py` upgrades only active admin-owned version 1 snapshots, preserving their token digests, title, timestamps, original visible transcript and message boundary. Ordinary-user shares and revoked links are excluded.
+- The script previews by default, matches saved messages against the owned source conversation, rejects unmatched assistant messages before publication, and requires a new mode-0600 rollback backup before applying. Re-running skips already-upgraded snapshots.
+- Both the main checkout and the production-compatible candidate passed 16 focused tests, including unchanged member/revoked links, unchanged existing URLs, later-turn exclusion, idempotency and refusal of mismatched historical messages. Production dry-run matched all 2,543 messages across 28 administrator links; 2 member links are outside the migration.
+- This is a data backfill using the already-deployed version 2 share UI/API; no frontend build or release-directory change is required. Original snapshots are backed up only on the server with restricted permissions.
+- Applied and verified: all 28 old admin links now use version 2; all 2,543 original messages matched, token digests and visible transcripts stayed unchanged, and both ordinary-user shares stayed byte-for-byte unchanged. Anonymous HTTPS checks passed for 2 historical admin links and both member links. Backend, frontend and PA push remain healthy. Result: `../诊断导出/管理员旧分享升级-20261001/result.json`.
+- Also corrected the current venv's Python entry symlink and `pyvenv.cfg` home to `/usr/bin/python3.10` and `/usr/bin`, removing the stale link through the deleted release. `pip check`, uvicorn launch, backend/PA-worker restart and health checks passed.
+
+## Deployed update — 2026-10-01
+
+- Newly created shares follow the creator's persisted account role. Admin shares use snapshot version 2 and freeze all five existing debug panels: reply/router reasoning, models and timings, knowledge chunks, mediator details, and per-node request records. Member shares retain the version 1 transcript-only allowlist.
+- Anonymous viewers read the saved snapshot. Knowledge and request panels never fetch private conversation endpoints using snapshot-local message IDs. Missing historical details remain unavailable.
+- Existing version 1 links retain their original publication scope, including historical snapshots that contain extra fields. Admins must create a new link to publish debug details. Viewer login and later role changes do not rewrite a published snapshot.
+- Validation: 30 backend tests passed, TypeScript passed, and desktop/mobile browser checks passed for all five admin panels, member/legacy filtering, absent details, frozen snapshots, role changes, spoofed request flags and unauthenticated viewing.
+- Deployed as `20261001T022504Z`, based on the live `20261001T014514Z` source with only seven share-related files changed. Preserved production reply interruption status, quick-reply behavior and existing request-record schema. The rebased candidate passed 14 backend tests, TypeScript and desktop/mobile checks; server production build and all 267 packaged source hashes passed. Public HTTPS, share contracts and authorization smoke checks passed.
+- At the user's request, removed all 147 previous release directories after making current Python and frontend dependencies independent and verifying services. Only the active release remains; approximately 47.93 GiB is free. No database migration or Git push. Detailed manifest, candidate source and result are saved under `../诊断导出/管理员分享部署-20261001/`. The September 30 deployment below is historical.
+
+## September 30 baseline
+
 ## Behavior
 
 - Profile model preferences appear only when the authenticated backend grants `can_manage_models`. Member GET/PATCH profile responses omit provider preference and availability; attempts to PATCH the preference, including null or mixed edits, return 403 before any write. The same gate wraps legacy and V2 profile paths.

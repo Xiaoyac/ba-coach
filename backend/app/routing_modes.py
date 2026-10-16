@@ -144,18 +144,22 @@ async def apply_router_only_decision(state, context, decision, *, stage_owned_by
             .with_for_update())).mappings().one_or_none()
         if await effective_routing_mode(db, conversation=conversation, state=actual, user_id=user_id, lock=True) != ROUTER_ONLY:
             raise ValueError("router_only_mode_not_authorized")
+        # The snapshot was read through the administrator goal scope; compare
+        # and verify against that same view, never the raw accidental binding.
+        from .goal_scope import scoped_runtime
+        visible = await scoped_runtime(db, conversation, actual)
         latest = (await db.execute(select(ConversationMessage).where(
             ConversationMessage.conversation_id == conversation.id).order_by(
             ConversationMessage.position.desc(), ConversationMessage.id.desc()).limit(1)
             .with_for_update())).scalar_one_or_none()
         if (not latest or latest.id != boundary or latest.role != "user"
-                or any(actual[key] != expected.get(key) for key in (
+                or any(visible[key] != expected.get(key) for key in (
                     "current_module", "row_version", "active_goal_id", "active_cycle_id"))):
             raise ValueError("router_only_decision_superseded")
         current = actual["current_module"]
         accepted = not decision.error_code and decision.target_module in MODULES
         target = decision.target_module if accepted and not stage_owned_by_tools else current
-        binding = await execution_plan_binding(db, conversation=conversation, state=actual,
+        binding = await execution_plan_binding(db, conversation=conversation, state=visible,
             user_id=user_id, lock=True)
         blocked = (target in EXECUTION_MODULES or
             (accepted and decision.target_module in EXECUTION_MODULES)) and not binding["ready"]

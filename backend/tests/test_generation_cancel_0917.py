@@ -1,3 +1,4 @@
+from test_admin_accounts import admin_headers
 import asyncio
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -78,8 +79,10 @@ def test_stop_before_stream_arrives_does_not_call_model(client, auth_headers, pr
 
 
 @pytest.mark.parametrize('partial', [False, True])
-def test_stop_real_graph_keeps_question_not_partial_reply_and_can_send_again(client, auth_headers, provider, monkeypatch, partial):
-    conversation = client.post('/api/conversations', headers=auth_headers).json()
+@pytest.mark.parametrize('member', [False, True])
+def test_stop_real_graph_preserves_only_visible_parallel_output_and_can_send_again(client, admin_headers, auth_headers, provider, monkeypatch, partial, member):
+    admin_headers = auth_headers if member else admin_headers
+    conversation = client.post('/api/conversations', headers=admin_headers).json()
     sid = conversation['session_id']
     initial = conversation['messages']
     generation = str(uuid4())
@@ -100,21 +103,26 @@ def test_stop_real_graph_keeps_question_not_partial_reply_and_can_send_again(cli
             yield
     monkeypatch.setattr(provider, 'stream', waiting)
     with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(client.post, '/api/chat/stream', headers=auth_headers,
+        future = pool.submit(client.post, '/api/chat/stream', headers=admin_headers,
                              json={'session_id': sid, 'message': '请先听我说', 'generation_id': generation})
         assert started.wait(10)
-        stopped = client.post('/api/chat/cancel', headers=auth_headers, json={'generation_id': generation})
+        stopped = client.post('/api/chat/cancel', headers=admin_headers, json={'generation_id': generation})
         assert stopped.json()['status'] == 'cancelled'
         assert closed.is_set()
         events = sse_events(future.result(timeout=10).text)
     assert events[-1][0] == 'cancelled'
     assert not any(name == 'persisted' for name, _ in events)
-    detail = client.get(f'/api/conversations/{sid}', headers=auth_headers).json()
-    assert len(detail['messages']) == len(initial) + 1
-    assert detail['messages'][-1]['content'] == '请先听我说'
+    detail = client.get(f'/api/conversations/{sid}', headers=admin_headers).json()
+    visible = ''.join(data['text'] for name, data in events if name == 'delta')
+    saved_partial = member and bool(visible)
+    assert len(detail['messages']) == len(initial) + 1 + int(saved_partial)
+    assert detail['messages'][-2 if saved_partial else -1]['content'] == '请先听我说'
+    if saved_partial:
+        assert detail['messages'][-1]['content'] == visible
+        assert events[-1][1]['partial_saved'] is True
     route_after_reply.assert_not_called()
     monkeypatch.setattr(provider, 'stream', original_stream)
-    followup = client.post('/api/chat/stream', headers=auth_headers,
+    followup = client.post('/api/chat/stream', headers=admin_headers,
                            json={'session_id': sid, 'message': '现在继续', 'generation_id': str(uuid4())})
     assert sse_events(followup.text)[-1] == ('persisted', {'saved': True})
-    assert client.post('/api/chat/cancel', headers=auth_headers, json={'generation_id': generation}).json()['status'] == 'cancelled'
+    assert client.post('/api/chat/cancel', headers=admin_headers, json={'generation_id': generation}).json()['status'] == 'cancelled'

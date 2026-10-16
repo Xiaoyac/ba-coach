@@ -9,7 +9,7 @@ from openpyxl import Workbook
 import pytest
 from sqlalchemy import func, select
 
-from app.models import AccountHandle, AccountSettings, Conversation, _utcnow
+from app.models import UserAccount, AccountSettings, Conversation, _utcnow
 from app.models_business import BizBase
 from app.providers.base import ProviderError, as_text
 from app.retrieval import StubKnowledgeBase
@@ -27,8 +27,8 @@ def admin_headers(register, db_sessionmaker, monkeypatch, provider):
     headers = register(username="testadmin", nickname="Test Admin")
     async def promote():
         async with db_sessionmaker() as db:
-            row = (await db.execute(select(AccountSettings).join(AccountHandle,
-                AccountHandle.account_id == AccountSettings.account_id).where(AccountHandle.normalized_base == "test admin"))).scalar_one()
+            row = (await db.execute(select(AccountSettings).join(UserAccount,
+                UserAccount.id == AccountSettings.account_id).where(UserAccount.username == "testadmin"))).scalar_one()
             row.role = "admin"
             await db.commit()
     asyncio.run(promote())
@@ -84,7 +84,7 @@ def test_execution_snapshot_followup_and_no_business_writes(client, admin_header
                     for table in [Conversation.__table__, *BizBase.metadata.sorted_tables]]
     before = asyncio.run(counts())
     case = make_case(client, admin_headers)
-    assert client.put("/api/admin/prompts/module_1", headers=admin_headers, json={"content":"CUSTOM_MODULE_SNAPSHOT"}).status_code == 200
+    assert client.put("/api/admin/prompts/module_1", headers=admin_headers, json={"base_revision":1,"content":"CUSTOM_MODULE_SNAPSHOT"}).status_code == 200
     run = run_case(client, admin_headers, case)
     assert run["status"] == "completed", run
     assert run["reply"] and run["model"] == "stub-1" and len(run["transcript"]) == 2
@@ -95,7 +95,7 @@ def test_execution_snapshot_followup_and_no_business_writes(client, admin_header
     assert "prompt_snapshot" not in run and "memory" not in run
     assert client.put(f"{ROOT}/cases/{case['id']}", headers=admin_headers,
         json={**CASE, "revision":1, "module":"module_2", "user_input":"changed"}).status_code == 200
-    client.put("/api/admin/prompts/module_1", headers=admin_headers, json={"content":"NEW_PROMPT"})
+    client.put("/api/admin/prompts/module_1", headers=admin_headers, json={"base_revision":2,"content":"NEW_PROMPT"})
     child = run_case(client, admin_headers, case, parent_run_id=run["id"], message="今天可以先做五分钟吗？")
     assert child["status"] == "completed" and len(child["transcript"]) == 4
     assert child["case_snapshot"]["revision"] == 1 and child["case_snapshot"]["module"] == "module_1"

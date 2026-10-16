@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..identity import CallerIdentity, require_admin, require_caller
-from ..models import AccountHandle, IssueReport, UserAccount, _utcnow
+from ..models import IssueReport, UserAccount, _utcnow
+from ..models_business import UserProfile
 from ..schemas import (
     AdminIssueReportItem,
     AdminIssueReportList,
@@ -68,11 +69,11 @@ def _decode_screenshot(data_url: str | None) -> tuple[bytes | None, str | None]:
     return raw, mime
 
 
-def _admin_item(report: IssueReport, account: UserAccount, handle: AccountHandle | None) -> AdminIssueReportItem:
+def _admin_item(report: IssueReport, account: UserAccount, nickname: str | None) -> AdminIssueReportItem:
     return AdminIssueReportItem(
         id=report.id,
         username=account.username,
-        display_name=handle.full_username if handle else None,
+        display_name=nickname,
         description=report.description,
         status=report.status,
         has_screenshot=report.screenshot is not None,
@@ -142,9 +143,9 @@ async def list_issue_reports(
     db: AsyncSession = Depends(get_db),
 ) -> AdminIssueReportList:
     statement = (
-        select(IssueReport, UserAccount, AccountHandle)
+        select(IssueReport, UserAccount, UserProfile.nickname)
         .join(UserAccount, UserAccount.id == IssueReport.account_id)
-        .outerjoin(AccountHandle, AccountHandle.account_id == UserAccount.id)
+        .outerjoin(UserProfile, UserProfile.uuid == UserAccount.profile_uuid)
     )
     if report_status:
         statement = statement.where(IssueReport.status == report_status)
@@ -152,7 +153,7 @@ async def list_issue_reports(
         await db.execute(statement.order_by(IssueReport.created_at.desc()).limit(limit))
     ).all()
     return AdminIssueReportList(
-        reports=[_admin_item(report, account, handle) for report, account, handle in rows]
+        reports=[_admin_item(report, account, nickname) for report, account, nickname in rows]
     )
 
 
@@ -184,18 +185,18 @@ async def update_issue_report_status(
 ) -> AdminIssueReportItem:
     row = (
         await db.execute(
-            select(IssueReport, UserAccount, AccountHandle)
+            select(IssueReport, UserAccount, UserProfile.nickname)
             .join(UserAccount, UserAccount.id == IssueReport.account_id)
-            .outerjoin(AccountHandle, AccountHandle.account_id == UserAccount.id)
+            .outerjoin(UserProfile, UserProfile.uuid == UserAccount.profile_uuid)
             .where(IssueReport.id == report_id)
         )
     ).one_or_none()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到该反馈")
 
-    report, account, handle = row
+    report, account, nickname = row
     report.status = payload.status
     report.resolved_at = _utcnow() if payload.status == "resolved" else None
     await db.commit()
     await db.refresh(report)
-    return _admin_item(report, account, handle)
+    return _admin_item(report, account, nickname)

@@ -361,7 +361,6 @@ def test_profile_context_renders_every_registration_field(db_sessionmaker) -> No
     _seed_profile(
         db_sessionmaker,
         nickname="南瓜",
-        communication_preference="温柔引导",
         physical_condition="膝关节损伤,易疲劳",
         behavior_taboo="不能剧烈运动,怕人多",
     )
@@ -369,7 +368,6 @@ def test_profile_context_renders_every_registration_field(db_sessionmaker) -> No
     blob = "\n".join(lines)
 
     assert "南瓜" in blob
-    assert "温柔引导" in blob
     assert "膝关节损伤" in blob and "易疲劳" in blob
     assert "不能剧烈运动" in blob and "怕人多" in blob
 

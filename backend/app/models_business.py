@@ -109,7 +109,7 @@ class UserProfile(BizBase):
     uuid: Mapped[str] = mapped_column(CHAR(36), nullable=False, unique=True, default=_new_uuid)
     nickname: Mapped[str | None] = mapped_column(VARCHAR(64))
     age: Mapped[int | None] = mapped_column(_UTinyInt)
-    birth_date: Mapped[date | None] = mapped_column(Date)
+    birth_year: Mapped[int | None] = mapped_column(Integer)
     living_status: Mapped[str | None] = mapped_column(_enum("独居", "和家人", "和朋友", "和恋人"))
     has_supporter: Mapped[bool] = mapped_column(_Bool, nullable=False, default=False)
     supporter1_relation: Mapped[str | None] = mapped_column(
@@ -135,9 +135,6 @@ class UserProfile(BizBase):
     # One-way ratchet: 0 -> 1 only, never back. Mirrors router_agent._clamp's
     # "no backslide past module 1" rule at the data layer.
     module1_done_flag: Mapped[bool] = mapped_column(_Bool, nullable=False, default=False)
-    communication_preference: Mapped[str | None] = mapped_column(
-        _enum("直接明了", "温柔引导", "理性分析", "轻松幽默")
-    )
     reminder_frequency: Mapped[str | None] = mapped_column(
         _enum("每天一次", "隔天一次", "每三天一次", "每周一次", "仅在我主动找你时提醒", "暂时不需要提醒")
     )

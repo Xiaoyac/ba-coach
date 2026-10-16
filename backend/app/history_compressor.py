@@ -1,4 +1,5 @@
 """Request-scoped compression settings over existing provider transports."""
+from .execution_status import track_call, track_stream
 
 from copy import copy
 import json
@@ -74,9 +75,9 @@ class HistoryCompressor:
         if effort not in {"low", "provider_default"} and not ark_kimi:
             raise ProviderError("history_compression_effort_requires_ark_kimi")
         async with timeout(self.settings.main_history_compression_timeout_seconds):
-            return await provider.route_detailed(
+            return await track_call('context_compaction', provider.route_detailed(
                 system=system, user=user,
                 max_tokens=self.settings.main_history_compression_max_tokens,
                 include_reasoning=ark_kimi,
                 reasoning_effort=effort if ark_kimi else None,
-            )
+            ), model=provider.model)

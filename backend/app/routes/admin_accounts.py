@@ -8,12 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..account_identity import audit_identity, normalize_display_name, split_display_id
+from ..account_identity import audit_identity
 from ..db import get_db
 from ..config import get_settings
 from ..identity import CallerIdentity, require_admin
 from ..models import (
-    AccountHandle,
     AccountSettings,
     AIExecutionEvent,
     AssessmentEntry,
@@ -46,13 +45,11 @@ router = APIRouter(prefix="/admin/accounts", tags=["admin-accounts"])
 
 
 def _item(row) -> AdminAccountItem:
-    account, handle, settings, nickname = row
+    account, settings, nickname = row
     return AdminAccountItem(
         id=account.id,
         username=account.username,
         nickname=nickname,
-        tag=handle.tag if handle else None,
-        display_id=handle.full_username if handle else None,
         role=settings.role if settings else "user",
         created_at=account.created_at,
         last_login_at=account.last_login_at,
@@ -61,8 +58,7 @@ def _item(row) -> AdminAccountItem:
 
 def _directory_query():
     return (
-        select(UserAccount, AccountHandle, AccountSettings, UserProfile.nickname)
-        .outerjoin(AccountHandle, AccountHandle.account_id == UserAccount.id)
+        select(UserAccount, AccountSettings, UserProfile.nickname)
         .outerjoin(AccountSettings, AccountSettings.account_id == UserAccount.id)
         .outerjoin(UserProfile, UserProfile.uuid == UserAccount.profile_uuid)
     )
@@ -76,23 +72,11 @@ async def list_admin_accounts(
 ) -> AdminAccountList:
     statement = _directory_query()
     if query and query.strip():
-        parsed = split_display_id(query)
-        if parsed is not None:
-            normalized_base, tag = parsed
-            statement = statement.where(
-                AccountHandle.normalized_base == normalized_base,
-                AccountHandle.tag == tag,
-            )
-        else:
-            needle = normalize_display_name(query)
-            statement = statement.where(
-                or_(
-                    UserAccount.username.contains(needle, autoescape=True),
-                    AccountHandle.normalized_base.contains(needle, autoescape=True),
-                    AccountHandle.tag.contains(needle, autoescape=True),
-                    UserProfile.nickname.contains(query.strip(), autoescape=True),
-                )
-            )
+        needle = query.strip()
+        statement = statement.where(or_(
+            UserAccount.username.contains(needle.casefold(), autoescape=True),
+            UserProfile.nickname.contains(needle, autoescape=True),
+        ))
     rows = (
         await db.execute(statement.order_by(UserAccount.created_at.desc()).limit(100))
     ).all()
@@ -192,6 +176,9 @@ async def _purge_account_business_data(db: AsyncSession, *, profile_uuid: str) -
         ConversationMessage.conversation_id.in_(conversation_ids)))).scalars()) if conversation_ids else []
     entry_ids = list((await db.execute(select(AssessmentEntry.id).where(
         AssessmentEntry.subject_id == profile_uuid))).scalars())
+
+    from ..activity_attribution import delete_activity_dependencies
+    await delete_activity_dependencies(db, user_id=profile_uuid)
 
     # Logs and review details point at rows that are removed below.  Remove
     # them first; telemetry is account-scoped and must not outlive the account.

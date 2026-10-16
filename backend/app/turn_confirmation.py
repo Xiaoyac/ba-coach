@@ -139,9 +139,12 @@ async def _move_from_m3(db, conversation, runtime, user, proof, target):
             "active_cycle_id": new_cycle, "evidence": proof}, "evidence_message_ids": [user.id]})
     # Shared business facts remain shared. Only ordinary chats inherit this
     # phase change; an authorized Router-only chat owns its own stage/flow.
+    # Administrator test chats own separate goals, as in plan confirmation.
+    from .goal_scope import isolated
     from .program_confirmation import confirmation_memory
     from .routing_modes import effective_routing_mode, ROUTER_ONLY
-    other_rows = (await db.execute(select(rt.c.conversation_id, rt.c.memory, Conversation.subject_id).join(
+    other_rows = [] if await isolated(db, conversation.subject_id) else (await db.execute(
+        select(rt.c.conversation_id, rt.c.memory, Conversation.subject_id).join(
         Conversation, Conversation.id == rt.c.conversation_id).where(
         Conversation.subject_id == conversation.subject_id, Conversation.id != conversation.id,
         rt.c.active_cycle_id == cycle["id"]).with_for_update())).mappings().all()

@@ -58,9 +58,11 @@ def test_describe_graph(client: TestClient) -> None:
     assert "analyze_intent" in body["nodes"]
     assert "update_memory_and_format" in body["nodes"]
     conditional = [e for e in body["edges"] if e["conditional"]]
-    # The crisis branch shares the gate's fan-out with the four modules.
+    # The crisis branch and the fail-closed risk terminal share the gate's
+    # fan-out with the four modules.
     assert {e["target"] for e in conditional} == {
         "crisis",
+        "risk_check_failed",
         "pre_reply_router",
         "module_1",
         "module_2",
@@ -127,7 +129,7 @@ def test_history_accumulates_across_turns(client: TestClient, provider) -> None:
 
     assert second["session_id"] == session_id
     assert second["reply"] == "saw 3 messages"
-    assert [m.content for m in provider.seen[-1]] == ["one", "saw 1 messages", "<user_message>two</user_message>"]
+    assert [m.source_content for m in provider.seen[-1]] == ["one", "saw 1 messages", "two"]
 
 
 def test_unknown_session_id_starts_fresh(client: TestClient) -> None:
@@ -316,16 +318,16 @@ def test_stream_reply_is_persisted(client: TestClient, provider) -> None:
     follow_up = client.post(
         "/api/chat", json={"message": "again", "session_id": session_id}
     ).json()
-    assert [m.content for m in provider.seen[-1]] == ["hi", "hello", "<user_message>again</user_message>"]
+    assert [m.source_content for m in provider.seen[-1]] == ["hi", "hello", "again"]
     assert follow_up["session_id"] == session_id
 
 
 def test_stream_reasoning_is_separate_and_persisted(
-    client: TestClient, auth_headers, provider
+    client: TestClient, admin_headers, provider
 ) -> None:
     provider.reasoning_result = "这是模型的深度思考。"
     with client.stream(
-        "POST", "/api/chat/stream", json={"message": "hi"}, headers=auth_headers
+        "POST", "/api/chat/stream", json={"message": "hi"}, headers=admin_headers
     ) as response:
         events = sse_events("".join(response.iter_text()))
 
@@ -338,7 +340,7 @@ def test_stream_reasoning_is_separate_and_persisted(
 
     session_id = events[0][1]["session_id"]
     detail = client.get(
-        f"/api/conversations/{session_id}", headers=auth_headers
+        f"/api/conversations/{session_id}", headers=admin_headers
     ).json()
     assistant = detail["messages"][-1]
     assert assistant["content"] == "hello"
@@ -347,7 +349,7 @@ def test_stream_reasoning_is_separate_and_persisted(
 
 
 def test_stream_repairs_provider_thinking_tags_before_any_user_visible_delta(
-    client: TestClient, auth_headers, provider, monkeypatch
+    client: TestClient, admin_headers, provider, monkeypatch
 ) -> None:
     async def malformed_stream(**_kwargs):
         yield StreamDelta(kind="content", text="<thi")
@@ -360,7 +362,7 @@ def test_stream_repairs_provider_thinking_tags_before_any_user_visible_delta(
 
     monkeypatch.setattr(provider, "stream", malformed_stream)
     with client.stream(
-        "POST", "/api/chat/stream", json={"message": "hi"}, headers=auth_headers
+        "POST", "/api/chat/stream", json={"message": "hi"}, headers=admin_headers
     ) as response:
         events = sse_events("".join(response.iter_text()))
 
@@ -375,19 +377,19 @@ def test_stream_repairs_provider_thinking_tags_before_any_user_visible_delta(
 
     session_id = events[0][1]["session_id"]
     detail = client.get(
-        f"/api/conversations/{session_id}", headers=auth_headers
+        f"/api/conversations/{session_id}", headers=admin_headers
     ).json()
     assert detail["messages"][-1]["content"] == visible
     assert detail["messages"][-1]["reasoning_content"] == reasoning
 
 
 def test_stream_routes_before_visible_reply_and_persists_decision(
-    client: TestClient, auth_headers, provider
+    client: TestClient, admin_headers, provider
 ) -> None:
     provider.route_result = '{"target_module":"1"}'
     provider.route_reasoning_result = "退出条件尚未满足，因此不跳转。"
     with client.stream(
-        "POST", "/api/chat/stream", json={"message": "hi"}, headers=auth_headers
+        "POST", "/api/chat/stream", json={"message": "hi"}, headers=admin_headers
     ) as response:
         events = sse_events("".join(response.iter_text()))
 
@@ -399,7 +401,7 @@ def test_stream_routes_before_visible_reply_and_persists_decision(
     assistant = None
     for _ in range(50):
         detail = client.get(
-            f"/api/conversations/{session_id}", headers=auth_headers
+            f"/api/conversations/{session_id}", headers=admin_headers
         ).json()
         assistant = detail["messages"][-1]
         if assistant["routing_reasoning_content"]:

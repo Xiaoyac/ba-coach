@@ -2,7 +2,7 @@
 from sqlalchemy import select, update, delete, or_
 from .database_v2_schema import metadata as schema
 from .models import (Conversation, ConversationMessage, AIExecutionEvent,
-                     ConversationModuleProgress, ConversationReplyEffort, ConversationContextCheckpoint, ConversationKnowledgeSettings)
+                     ConversationModuleProgress, ConversationReplyEffort, ConversationContextCheckpoint, ConversationKnowledgeSettings, ConversationMediatorNodeSettings)
 
 
 async def detach_conversation(db, conversation):
@@ -43,6 +43,8 @@ async def detach_conversation(db, conversation):
                 break
             shared.update(referenced)
     exclusive = set(candidates) - shared
+    from .activity_attribution import delete_activity_dependencies
+    await delete_activity_dependencies(db, user_id=uid, conversation_id=cid)
     activities = schema.tables["pa_activity_events"]
     await db.execute(delete(activities).where(activities.c.user_id == uid,
         activities.c.source_conversation_id == cid))
@@ -56,6 +58,7 @@ async def detach_conversation(db, conversation):
     await db.execute(delete(rt).where(rt.c.conversation_id == cid))
     await db.execute(delete(logs).where(logs.c.conversation_id == cid))
     if exclusive:
+        await delete_activity_dependencies(db, user_id=uid, goal_ids=exclusive)
         await db.execute(delete(activities).where(activities.c.goal_id.in_(exclusive)))
         await db.execute(delete(details).where(details.c.goal_id.in_(exclusive)))
         plan_details = schema.tables["pa_plan_details"]
@@ -96,6 +99,7 @@ async def detach_conversation(db, conversation):
     await db.execute(delete(ConversationContextCheckpoint).where(ConversationContextCheckpoint.conversation_id == cid))
     await db.execute(delete(ConversationReplyEffort).where(ConversationReplyEffort.conversation_id == cid))
     await db.execute(delete(ConversationKnowledgeSettings).where(ConversationKnowledgeSettings.conversation_id == cid))
+    await db.execute(delete(ConversationMediatorNodeSettings).where(ConversationMediatorNodeSettings.conversation_id == cid))
     await db.execute(delete(ConversationModuleProgress).where(ConversationModuleProgress.conversation_id == cid))
     await db.execute(delete(ConversationMessage).where(ConversationMessage.conversation_id == cid))
     await db.execute(delete(Conversation).where(Conversation.id == cid, Conversation.subject_id == uid))

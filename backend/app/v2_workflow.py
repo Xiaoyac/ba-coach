@@ -823,9 +823,19 @@ async def persist_record(maker, *, module, user_id, data, cycle_id, db_session=N
             if not messages or source_state is None:
                 return None
             messages = await cycle_messages(db, messages)
+            from .activity_attribution import review_execution_binding
+            binding = await review_execution_binding(db, user_id=user_id, state=source_state,
+                data=data, existing=existing)
+            if not binding["ready"]:
+                # Activity facts were independently captured above; a different
+                # or unresolved occasion cannot rewrite this core review.
+                if db_session is None:
+                    await db.commit()
+                return None
             values = normalize(data, messages, session_id=data["_source_session_id"], cycle_id=cycle_id,
                 assistant_message_id=(data.get("_source_assistant_message_id") or data.get("_source_user_message_id")), existing=existing,
                 cycle_status=cycle["status"], tool_closing_summary=tool_closing_summary)
+            values["phase_c"]["_m4_contract"]["execution_ref"] = {"execution_id": binding["execution_id"]}
             progress, rt = schema.tables["pa_cycle_progress"], schema.tables["conversation_runtime_states"]
             await db.execute(update(progress).where(progress.c.cycle_id == cycle_id).values(
                 module_4_scenario=values["scenario_type"], module_4_steps=values["phase_c"]["_m4_contract"]["completed_steps"],
@@ -923,6 +933,11 @@ async def clinical_context(maker, user_id, session_id):
             # A supplied session must not lend another account's workflow
             # state to this user's otherwise account-scoped context.
             context_conversation, state = None, None
+        if context_conversation:
+            from .activity_attribution import attribution_context
+            observations = await attribution_context(db, user_id=user_id, conversation_id=context_conversation.id)
+            if observations:
+                lines.append("活动事实及归属（不等于当前核心完成；归属未知需结合本轮自然澄清）：" + json.dumps(observations, ensure_ascii=False))
         one = schema.tables["module_one_record"]
         m1 = schema.tables["user_module_one_state"]
         from .goal_scope import m1_state

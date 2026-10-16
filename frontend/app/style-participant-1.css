@@ -1,0 +1,48 @@
+/* Opt-in participant feedback skin, layered over the simple base. */
+.style-participant-1 .workspace-card-header svg,
+.style-participant-1 .settings-nav-item svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.7;
+  flex-shrink: 0;
+}
+.style-participant-1 .workspace-card-header button,
+.style-participant-1 .workspace-card-header a { min-height: 44px; }
+.style-participant-1 .participant-chat-log { scrollbar-gutter: stable; overflow-anchor: none; }
+.style-participant-1 [data-message-bubble="assistant"] { background: transparent; box-shadow: none; }
+.style-participant-1 [data-message-bubble="user"] { border-radius: 14px; box-shadow: none; }
+.style-participant-1 .participant-message-author { margin: 0 0 4px 16px; font-size: 12px; color: var(--color-ink-muted); }
+.style-participant-1 .participant-goal-drawer { position: relative; display: flex; flex-direction: column; overflow: hidden; background: var(--color-raised); border: 0; border-radius: 0 0 16px 16px; padding-bottom: 0; max-height: 44%; }
+.style-participant-1 .participant-goal-drawer > div { min-height: 0; width: 100%; overflow-y: auto; overscroll-behavior: contain; }
+.style-participant-1 .participant-goal-drawer #goal-card-editor { max-height: none; overflow: visible; margin-top: 8px; background: var(--color-panel); }
+.style-participant-1 .participant-drawer-handle {
+  flex-shrink: 0; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 5px; min-height: 44px; width: 100%; background: var(--color-raised);
+  color: var(--color-ink-muted); font-size: 11px; cursor: ns-resize; touch-action: none;
+}
+.style-participant-1 .participant-drawer-handle::before { content: ""; width: 44px; height: 5px; border-radius: 8px; background: var(--color-ink-muted); opacity: .6; }
+.style-participant-1 .participant-drawer-handle:hover::before { opacity: 1; }
+.style-participant-1 .participant-drawer-handle:focus-visible { outline: 2px solid var(--color-accent-ink); outline-offset: -3px; }
+.style-participant-1 .participant-profile-group { margin-block: 16px; border-radius: 12px; background: var(--color-raised); }
+.style-participant-1 .participant-profile-group > summary { padding: 14px 16px; cursor: pointer; font-size: 14px; font-weight: 500; }
+.style-participant-1 .participant-profile-group > .participant-profile-body { padding: 0 16px 16px; }
+.style-participant-1 .participant-profile-group[open] > summary { padding-bottom: 12px; }
+.style-participant-1 .participant-profile-group button { min-height: 36px; }
+.style-participant-1 .participant-profile-group label { font-size: 13px; }
+.style-participant-1 .participant-topic-options { margin-top: 12px; }
+.style-participant-1 .participant-topic-options > summary { min-height: 40px; padding-block: 8px; cursor: pointer; color: var(--color-ink-muted); font-size: 13px; }
+.style-participant-1 .participant-reply-table { max-width: 100%; overflow-x: auto; margin-block: 16px; border: 1px solid var(--color-line-strong); border-radius: 10px; }
+.style-participant-1 .participant-reply-table:focus-visible { outline: 2px solid var(--color-accent-ink); outline-offset: 2px; }
+.style-participant-1 .participant-reply-table table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.7; }
+.style-participant-1 .participant-reply-table :is(th, td) { min-width: 7rem; padding: 10px 12px; border-bottom: 1px solid var(--color-line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.style-participant-1 .participant-reply-table th { font-weight: 600; background: var(--color-raised); }
+.style-participant-1 .participant-reply-table tr:last-child td { border-bottom: 0; }
+@media (max-width: 639px) {
+  .style-participant-1 .participant-goal-drawer { max-height: 42%; }
+  .style-participant-1 .participant-profile-group button { min-height: 44px; }
+  .style-participant-1 .participant-reply-table :is(th, td) { min-width: 6rem; padding: 8px 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .style-participant-1 .participant-goal-drawer,
+  .style-participant-1 .composer-shell { transition: none; }
+}

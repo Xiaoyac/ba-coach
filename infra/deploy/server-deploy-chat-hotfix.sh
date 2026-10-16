@@ -10,15 +10,21 @@ expected_previous="${2:-$previous}"
 [[ "$previous" == "$expected_previous" ]] || { echo 'production changed; rebase required' >&2; exit 2; }
 switched=false
 push_was_active=false
+chat_reminders_were_active=false
 if systemctl is-active --quiet bacoach-pa-push.service; then push_was_active=true; fi
+if systemctl is-active --quiet bacoach-pa-chat-reminders.service; then chat_reminders_were_active=true; fi
 rollback() {
   code=$?
   if [[ $code -ne 0 && "$switched" == true ]]; then
+    if [[ "$chat_reminders_were_active" == true ]]; then systemctl stop bacoach-pa-chat-reminders.service || true; fi
     ln -sfn "$previous" /opt/bacoach/current
     systemctl restart bacoach-backend bacoach-frontend || true
   fi
   if [[ $code -ne 0 && "$push_was_active" == true ]]; then
     systemctl restart bacoach-pa-push.service || true
+  fi
+  if [[ $code -ne 0 && "$chat_reminders_were_active" == true ]]; then
+    systemctl restart bacoach-pa-chat-reminders.service || true
   fi
   exit "$code"
 }
@@ -63,6 +69,7 @@ print('context and server clock ready')
 PY
 [[ "$(readlink -f /opt/bacoach/current)" == "$expected_previous" ]] || { echo 'production changed during build' >&2; exit 2; }
 if [[ "$push_was_active" == true ]]; then systemctl stop bacoach-pa-push.service; fi
+if [[ "$chat_reminders_were_active" == true ]]; then systemctl stop bacoach-pa-chat-reminders.service; fi
 ln -sfn "$target" /opt/bacoach/current
 switched=true
 systemctl restart bacoach-backend
@@ -75,6 +82,11 @@ if [[ "$push_was_active" == true ]]; then
   systemctl start bacoach-pa-push.service
   sleep 2
   systemctl is-active --quiet bacoach-pa-push.service
+fi
+if [[ "$chat_reminders_were_active" == true ]]; then
+  systemctl start bacoach-pa-chat-reminders.service
+  sleep 2
+  systemctl is-active --quiet bacoach-pa-chat-reminders.service
 fi
 trap - EXIT
 echo "DEPLOYED=$target PREVIOUS=$previous"

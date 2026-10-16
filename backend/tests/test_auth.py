@@ -18,8 +18,7 @@ def _register(client: TestClient, **overrides) -> dict:
         "username": "nanan",
         "password": "correct-horse-battery",
         "nickname": "南瓜",
-        "tag": "12345",
-        "birth_date": "1998-01-01",
+        "birth_year": 1998,
     }
     from invitation_helpers import issue_test_invitation
     payload["invitation_code"] = issue_test_invitation(client)
@@ -40,9 +39,9 @@ def test_register_returns_a_usable_token(client: TestClient) -> None:
 
     assert body["token"]
     assert body["account"]["username"] == "nanan"
-    assert body["account"]["tag"] == "12345"
+    assert "tag" not in body["account"]
     assert body["account"]["nickname"] == "南瓜"
-    assert body["account"]["display_id"] == "南瓜#12345"
+    assert "display_id" not in body["account"]
     assert len(body["account"]["profile_uuid"]) == 36
 
     me = client.get(
@@ -56,7 +55,6 @@ def test_register_creates_the_clinical_profile(client: TestClient) -> None:
     """The account is useless without the `user_profile` row it points at."""
     body = _register(
         client,
-        communication_preference="温柔引导",
         physical_condition=["膝关节损伤", "易疲劳"],
         behavior_taboo=["不能剧烈运动"],
     ).json()
@@ -79,7 +77,6 @@ def test_profile_preferences_are_persisted(client: TestClient, db_sessionmaker) 
         client,
         physical_condition=["膝关节损伤", "易疲劳"],
         behavior_taboo=["不能剧烈运动", "怕人多"],
-        communication_preference="理性分析",
     ).json()
     uuid = body["account"]["profile_uuid"]
 
@@ -91,7 +88,6 @@ def test_profile_preferences_are_persisted(client: TestClient, db_sessionmaker) 
 
     profile = asyncio.get_event_loop().run_until_complete(read())
     assert profile.nickname == "南瓜"
-    assert profile.communication_preference == "理性分析"
     assert "膝关节损伤" in profile.physical_condition
     assert "怕人多" in profile.behavior_taboo
 
@@ -130,19 +126,13 @@ def test_login_account_is_case_insensitively_unique(client: TestClient) -> None:
     assert _register(client, username="NaNaN", tag="54321").status_code == 409
 
 
-def test_nickname_can_repeat_with_different_user_chosen_tags(client: TestClient) -> None:
-    first = _register(client, username="firstuser", tag="12345").json()["account"]
-    second = _register(client, username="seconduser", tag="54321").json()["account"]
+def test_nickname_can_repeat_without_tags(client: TestClient) -> None:
+    first = _register(client, username="firstuser").json()["account"]
+    second = _register(client, username="seconduser").json()["account"]
     assert first["nickname"] == second["nickname"] == "南瓜"
-    assert first["display_id"] == "南瓜#12345"
-    assert second["display_id"] == "南瓜#54321"
-
-
-def test_nickname_and_tag_combination_must_be_unique(client: TestClient) -> None:
-    assert _register(client, username="firstuser").status_code == 201
-    duplicate = _register(client, username="seconduser")
-    assert duplicate.status_code == 409
-    assert duplicate.json()["detail"] == "这个昵称与标签组合已被使用"
+    assert first["profile_uuid"] != second["profile_uuid"]
+    assert first["username"] != second["username"]
+    assert "tag" not in first and "display_id" not in second
 
 
 @pytest.mark.parametrize("username", ["user-name", "用户123", "name_123", "abc#12345"])
@@ -153,8 +143,8 @@ def test_login_account_only_accepts_ascii_letters_and_digits(
 
 
 @pytest.mark.parametrize("tag", ["1234", "123456", "12a45", "１２３４５"])
-def test_tag_must_be_exactly_five_ascii_digits(client: TestClient, tag: str) -> None:
-    assert _register(client, tag=tag).status_code == 422
+def test_stale_client_tag_is_ignored(client: TestClient, tag: str) -> None:
+    assert _register(client, tag=tag).status_code == 201
 
 
 def test_short_password_is_rejected(client: TestClient) -> None:
@@ -165,9 +155,13 @@ def test_short_username_is_rejected(client: TestClient) -> None:
     assert _register(client, username="ab").status_code == 422
 
 
-def test_unknown_preference_value_is_rejected(client: TestClient) -> None:
-    """A value outside the ENUM is a 422 at the edge, not a MySQL error."""
-    assert _register(client, communication_preference="随便聊聊").status_code == 422
+def test_stale_communication_setting_is_ignored(client: TestClient) -> None:
+    """Retired fields from an old client are not persisted or returned."""
+    response = _register(client, communication_preference="温柔引导")
+    assert response.status_code == 201
+    profile = client.get("/api/profile", headers={
+        "Authorization": f"Bearer {response.json()['token']}"}).json()
+    assert "communication_preference" not in profile
 
 
 # ---------------------------------------------------------------------------
@@ -188,11 +182,12 @@ def test_login_with_correct_password(client: TestClient) -> None:
     assert response.json()["token"]
 
 
-def test_login_never_accepts_nickname_or_display_id(client: TestClient) -> None:
+@pytest.mark.parametrize("login_name", ["南瓜", "南瓜#12345"])
+def test_login_never_accepts_nickname_or_old_display_id(client: TestClient, login_name) -> None:
     account = _register(client).json()["account"]
     response = client.post(
         "/api/auth/login",
-        json={"username": account["display_id"], "password": "correct-horse-battery"},
+        json={"username": login_name, "password": "correct-horse-battery"},
     )
     assert response.status_code == 401
 

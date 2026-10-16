@@ -29,25 +29,38 @@ def background_provider(context):
     return provider
 
 
-def schedule_pa_background(state, context, *, assistant_message_id):
-    """Never register in the routing queue: the next reply must not await PA."""
+def schedule_pa_background(state, context, *, assistant_message_id, parallel=False):
+    """Start once per turn; neither this nor the next reply waits for PA."""
+    existing = getattr(context, 'pa_background_task', None)
+    if existing is not None and getattr(context, 'pa_background_turn', None) == state.get('user_message_id'):
+        return existing
     if (not state.get('pa_background_pending') or state.get('structured_goal_action_handled')
             or state.get('error') or state.get('reply_held')
             or state.get('risk') or state.get('forced_module')
             or (state.get('memory') or {}).get('sandbox_mode')
             or context.settings.database_schema_version != 'v2' or context.sessionmaker is None
             or not state.get('subject_id') or not state.get('user_message_id')
-            or assistant_message_id is None):
+            or (assistant_message_id is None and not parallel)):
         return None
     session_id = state['session_id']
     previous = _pa_tasks.get(session_id)
     if previous is not None and not previous.done():
         previous.cancel()
     task = asyncio.create_task(_run_pa_background(dict(state), context,
-        assistant_message_id=assistant_message_id))
+        assistant_message_id=assistant_message_id, parallel=parallel))
     _pa_tasks[session_id] = task
+    context.pa_background_task = task
+    context.pa_background_turn = state['user_message_id']
+    stop_waiter = None
+    if parallel and context.generation is not None:
+        async def stop_with_turn():
+            await context.generation.stop.wait()
+            task.cancel()
+        stop_waiter = asyncio.create_task(stop_with_turn())
 
     def remove(completed):
+        if stop_waiter is not None:
+            stop_waiter.cancel()
         if _pa_tasks.get(session_id) is completed:
             _pa_tasks.pop(session_id, None)
 
@@ -76,27 +89,37 @@ async def _publish(executor, context, telemetry, expected_reply=None):
     async with lock:
         async with context.sessionmaker() as db:
             conversation, _, _ = await executor._owned(db)
-            assistant = await db.get(ConversationMessage, executor.assistant_message_id)
-            expected = expected_reply or Message(role='assistant', content=assistant.content, created_at=assistant.created_at)
-            for display in executor.displays:
-                if display not in assistant.content:
-                    assistant.content += ('\n\n' if assistant.content else '') + display
-            await db.flush()
-            await finalize_tool_display(db, session_id=executor.session_id, user_id=executor.user_id,
-                assistant_message_id=assistant.id)
-            if executor.ui_enabled:
-                await finalize_ui_display(db, session_id=executor.session_id, user_id=executor.user_id,
+            assistant = (await db.get(ConversationMessage, executor.assistant_message_id)
+                         if executor.assistant_message_id is not None else None)
+            if assistant is not None:
+                # A parallel worker can append a display after persistence but
+                # before publishing. Match the in-memory prose, not that newer
+                # DB text, when synchronizing the owned last reply.
+                live = await context.store.get(executor.session_id)
+                last = live.messages[-1] if live and live.messages else None
+                expected = expected_reply or (last if last and last.role == 'assistant'
+                    and last.created_at == assistant.created_at else
+                    Message(role='assistant', content=assistant.content, created_at=assistant.created_at))
+                for display in executor.displays:
+                    if display not in assistant.content:
+                        assistant.content += ('\n\n' if assistant.content else '') + display
+                await db.flush()
+                await finalize_tool_display(db, session_id=executor.session_id, user_id=executor.user_id,
                     assistant_message_id=assistant.id)
+                if executor.ui_enabled:
+                    await finalize_ui_display(db, session_id=executor.session_id, user_id=executor.user_id,
+                        assistant_message_id=assistant.id)
             _, fresh = await runtime_for(db, executor.session_id)
-            content = assistant.content
+            content = assistant.content if assistant is not None else None
             conversation.revision += 1
             await db.commit()
-        await context.store.replace_last_reply(executor.session_id, expected=expected, content=content)
+        if content is not None:
+            await context.store.replace_last_reply(executor.session_id, expected=expected, content=content)
         await context.store.set_module(executor.session_id, fresh['current_module'])
         await context.store.set_memory(executor.session_id, fresh['memory'] or {})
 
 
-async def _run_pa_background(state, context, *, assistant_message_id):
+async def _run_pa_background(state, context, *, assistant_message_id, parallel=False):
     from .ai_telemetry import save_ai_event, request_event_scope
     from .conversation_time import current_time_context
     from .pa_card_tools import PACardTools, ToolRejected, form_ui_enabled
@@ -110,21 +133,28 @@ async def _run_pa_background(state, context, *, assistant_message_id):
     telemetry = {}
     result = {'status': 'failed', 'reason': 'not_started'}
     provider = None
+    executor = None
     started = perf_counter()
+    tools_finished = None
+    expected_reply = None
     async with request_event_scope(session_id, state['user_message_id']):
         try:
             provider = background_provider(context)
+            from .execution_status import update as progress
+            progress("pa_background_tools", "running", model=provider.model)
             executor = PACardTools(maker=context.sessionmaker, session_id=session_id, user_id=subject_id,
                 user_message_id=state['user_message_id'], assistant_message_id=assistant_message_id,
-                module=module, provider=provider, ui_enabled=form_ui_enabled(context.settings, state))
+                module=module, provider=provider, ui_enabled=form_ui_enabled(context.settings, state),
+                parallel_reply=parallel)
             async with context.sessionmaker() as db:
                 conversation, persisted, _ = await executor._owned(db)
                 if persisted['current_module'] != module:
                     raise ToolRejected('module_changed_requery_state')
                 sources = await executor.evidence(db, conversation.id)
                 from .models import ConversationMessage
-                assistant = await db.get(ConversationMessage, assistant_message_id)
-                expected_reply = Message(role='assistant', content=assistant.content, created_at=assistant.created_at)
+                if executor.assistant_message_id is not None:
+                    assistant = await db.get(ConversationMessage, executor.assistant_message_id)
+                    expected_reply = Message(role='assistant', content=assistant.content, created_at=assistant.created_at)
                 if context.prompt_snapshot is not None:
                     module_prompt = context.prompt_snapshot.get(module, '')
                 else:
@@ -136,6 +166,8 @@ async def _run_pa_background(state, context, *, assistant_message_id):
                 messages=[Message(role=m.role, content=m.content) for m in sources],
                 max_rounds=context.settings.pa_card_tool_max_rounds,
                 timeout_seconds=context.settings.pa_card_tool_timeout_seconds, telemetry=telemetry)
+            tools_finished = perf_counter()
+            progress("pa_background_tools", "publishing", detail="工具处理结束，等待绑定本轮回复")
             telemetry.setdefault('pa_background_tools', {}).update(provider=provider.name, model=provider.model)
             # Completed writes survive later LLM failure, but superseded turns
             # cannot alter the transcript or overwrite a newer runtime cache.
@@ -145,16 +177,25 @@ async def _run_pa_background(state, context, *, assistant_message_id):
             raise
         except ToolRejected as exc:
             result = {'status': 'stale', 'reason': str(exc)}
-        except Exception:
+        except Exception as exc:
+            from .execution_errors import exception_info
+            telemetry['execution_failure'] = exception_info(exc)
             result = {'status': 'failed', 'reason': 'background_pa_failed'}
             logger.exception('background PA tools failed session=%s', session_id)
         finally:
-            telemetry.setdefault('pa_background_tools', {}).update(result)
+            finished = tools_finished or perf_counter()
+            operation = telemetry.setdefault('pa_background_tools', {})
+            operation.update(result)
+            operation.update(timing='parallel_with_main_reply' if parallel else 'after_main_reply',
+                start_ms=round((started - state.get('turn_started_monotonic', started)) * 1000, 3),
+                tools_duration_ms=round((finished - started) * 1000, 3),
+                publish_wait_ms=round((perf_counter() - finished) * 1000, 3) if tools_finished else 0)
+            telemetry['user_message_id'] = state['user_message_id']
             try:
                 await save_ai_event(context.sessionmaker, stage='pa_background_tools', session_id=session_id,
-                    subject_id=subject_id, assistant_message_id=assistant_message_id,
+                    subject_id=subject_id, assistant_message_id=executor.assistant_message_id if executor is not None else assistant_message_id,
                     provider=provider.name if provider else None, model_name=provider.model if provider else None,
-                    duration_ms=int((perf_counter() - started) * 1000), usage=result.get('usage'),
+                    duration_ms=int((finished - started) * 1000), usage=result.get('usage'),
                     request_id=result.get('request_id'), error_code=result.get('reason'), event_metadata=telemetry)
             except Exception:
                 logger.exception('background PA telemetry persistence failed session=%s', session_id)

@@ -6,7 +6,8 @@ import pytest_asyncio
 from sqlalchemy import insert, update
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-from app.models import UserAccount, AccountSettings, Conversation, ConversationKnowledgeSettings
+from app.models import (UserAccount, AccountSettings, Conversation, ConversationKnowledgeSettings,
+                        ConversationMediatorNodeSettings)
 from app.conversation_knowledge import mediator_enabled_for_conversation
 
 
@@ -14,7 +15,8 @@ from app.conversation_knowledge import mediator_enabled_for_conversation
 async def mode_db():
     engine = create_async_engine('sqlite+aiosqlite://')
     async with engine.begin() as db:
-        for model in (UserAccount, AccountSettings, Conversation, ConversationKnowledgeSettings):
+        for model in (UserAccount, AccountSettings, Conversation, ConversationKnowledgeSettings,
+                      ConversationMediatorNodeSettings):
             await db.run_sync(model.__table__.create)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
@@ -37,8 +39,9 @@ async def test_effective_mode_for_new_and_existing_chats(mode_db, role, saved):
             await db.execute(insert(ConversationKnowledgeSettings), {'conversation_id': 1, 'mediator_enabled': saved})
         enabled = await mediator_enabled_for_conversation(db, session_id='owned-chat', subject_id='owned-user')
         assert enabled is (role == 'admin' and saved is not False)
+        # Unknown or unowned requests cannot borrow an administrator's legacy choice.
         for session, subject in [('owned-chat', 'other-user'), ('missing-chat', 'owned-user'), ('owned-chat', None)]:
-            assert await mediator_enabled_for_conversation(db, session_id=session, subject_id=subject)
+            assert not await mediator_enabled_for_conversation(db, session_id=session, subject_id=subject)
 
 
 @pytest.mark.asyncio
@@ -62,7 +65,7 @@ async def test_chat_request_actually_selects_hybrid_backend(mode_db, monkeypatch
     monkeypatch.setattr(conversation_reply_mode, 'effective_reply_mode', reply_mode)
     hybrid = SimpleNamespace(ranking_mode='astrbot_hybrid')
     monkeypatch.setattr(retrieval, 'get_hybrid_knowledge_base', lambda: hybrid)
-    provider = SimpleNamespace(with_thinking=lambda enabled: provider)
+    provider = SimpleNamespace(with_thinking=lambda enabled: provider, with_main_reply=lambda: provider)
     context = SimpleNamespace(provider=provider, router_provider=provider, knowledge_base=object())
     state = {}
     await chat._apply_conversation_thinking(context, session_id='owned-chat', subject_id='owned-user', state=state)

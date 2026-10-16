@@ -8,6 +8,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import AIExecutionEvent, Conversation, ConversationMessage
+from .router_trace import RouterCall, project_router_calls
 
 
 def _utc(value: datetime | None) -> datetime | None:
@@ -24,6 +25,7 @@ class ModelRequestInfo(BaseModel):
     recorded_at: datetime | None = None
     duration_ms: int | None = None
     error_code: str | None = None
+    router_calls: list[RouterCall] = Field(default_factory=list)
 
     _normalize_recorded_at = field_validator("recorded_at")(_utc)
 
@@ -100,12 +102,16 @@ async def requests_for_owned_messages(
     ).order_by(AIExecutionEvent.id))).scalars().all()
 
     def append(message_id, stage, request_id, provider, model, *, event=None,
-               recorded_at=None, duration_ms=None, error_code=None):
+               recorded_at=None, duration_ms=None, error_code=None, router_calls=None):
         item = ModelRequestInfo(stage=stage, request_id=_text(request_id),
                                 provider=_text(provider), model=_text(model),
                                 recorded_at=event.created_at if event is not None else recorded_at,
                                 duration_ms=event.duration_ms if event is not None else duration_ms,
                                 error_code=_text(event.error_code) if event is not None else _text(error_code))
+        if stage == "module_router" and event is not None:
+            item.router_calls = project_router_calls((event.event_metadata or {}).get("router_calls"))
+        if router_calls is not None:
+            item.router_calls = project_router_calls(router_calls)
         if item not in result[message_id]:
             result[message_id].append(item)
 
@@ -158,10 +164,10 @@ async def requests_for_owned_messages(
         elif event.stage == "module_router" and isinstance(recovery, dict) and recovery:
             append(message_id, "module_router_original",
                    _text(recovery.get("original_request_id")) or request_id, event.provider, model,
-                   recorded_at=event.created_at)
+                   recorded_at=event.created_at, router_calls=(metadata.get("router_calls") or [])[:1])
             if "request_id" in recovery:
                 append(message_id, "module_router_recovery", recovery.get("request_id"), event.provider, model,
-                       **recovery_details(event, recovery))
+                       router_calls=(metadata.get("router_calls") or [])[1:], **recovery_details(event, recovery))
         else:
             append(message_id, event.stage, request_id, event.provider, model, event=event)
 

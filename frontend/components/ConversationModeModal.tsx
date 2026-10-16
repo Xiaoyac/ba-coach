@@ -25,7 +25,7 @@ export default function ConversationModeModal({ busy, error, replyEffortOptions,
 
   return <dialog ref={dialog} aria-labelledby="conversation-mode-title" aria-describedby="conversation-mode-description"
     onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}
-    className="m-auto max-h-[calc(100dvh-32px)] w-[min(480px,calc(100vw-32px))] max-w-none overflow-y-auto rounded-3xl border border-line bg-panel p-0 text-ink shadow-2xl backdrop:bg-black/40">
+    className="default-style:m-auto default-style:max-h-[calc(100dvh-32px)] default-style:w-[min(480px,calc(100vw-32px))] default-style:max-w-none default-style:overflow-y-auto default-style:rounded-3xl default-style:border default-style:border-line default-style:bg-panel default-style:p-0 default-style:text-ink default-style:shadow-2xl default-style:backdrop:bg-black/40 simple:m-auto simple:max-h-[calc(100dvh-32px)] simple:w-[min(480px,calc(100vw-32px))] simple:max-w-none simple:overflow-y-auto simple:rounded-2xl simple:border simple:border-line simple:bg-panel simple:p-0 simple:text-ink simple:depth-panel simple:backdrop:bg-black/40">
     <form onSubmit={event => { event.preventDefault(); if (!busy) onChoose(mode, replyMode, replyMode === "ack_deep" ? selectedEffort : undefined); }} className="p-5 sm:p-7">
       <div className="flex items-start justify-between gap-3">
         <h2 id="conversation-mode-title" className="pt-2 text-lg font-semibold">选择新对话模式</h2>

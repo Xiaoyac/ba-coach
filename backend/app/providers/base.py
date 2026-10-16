@@ -84,6 +84,16 @@ class LLMProvider(ABC):
             yield delta
     deep_reply_enabled: bool = False
     reply_effort: str | None = None
+    main_reply_enabled: bool = False
+    on_main_retry = None
+
+    def with_main_reply(self) -> "LLMProvider":
+        """One foreground budget for both reply modes; auxiliaries keep theirs."""
+        scoped = copy(self)
+        scoped.main_reply_enabled = True
+        scoped.overload_retries = []
+        scoped.on_main_retry = None
+        return scoped
 
     def with_thinking(self, enabled: bool | None) -> "LLMProvider":
         # Registry clients are shared. Copy only the wrapper; never mutate its
@@ -92,6 +102,8 @@ class LLMProvider(ABC):
         scoped.thinking_override = enabled
         scoped.deep_reply_enabled = False
         scoped.reply_effort = None
+        scoped.main_reply_enabled = False
+        scoped.on_main_retry = None
         return scoped
 
     def reply_effort_options(self) -> tuple[str, ...]:
@@ -133,13 +145,28 @@ class LLMProvider(ABC):
 
     def _main_timeout_seconds(self) -> float:
         configured = getattr(self._settings, "provider_request_timeout_seconds", 60.0)
-        return max(configured, 180.0) if self.deep_reply_enabled else configured
+        return 180.0 if self.main_reply_enabled else (max(configured, 180.0) if self.deep_reply_enabled else configured)
+
+    def _main_total_timeout_seconds(self) -> float:
+        from .overload_retry import MAIN_TOTAL_SECONDS
+        return MAIN_TOTAL_SECONDS if self.main_reply_enabled else self._main_timeout_seconds()
+
+    def _main_stream_remaining_seconds(self) -> float:
+        from time import monotonic
+        # Headers and all streamed tokens share the successful attempt budget.
+        if self.main_reply_enabled:
+            return max(0.0, self._main_timeout_seconds() - (monotonic() - self.main_attempt_started_at))
+        return self._main_timeout_seconds()
 
     def _main_client(self):
         # Raising only the outer deadline would leave the SDK's shorter read
         # timeout in force. with_options shares transport without mutating it.
         return (self._client.with_options(timeout=self._main_timeout_seconds(), max_retries=0)
-                if self.deep_reply_enabled else self._client)
+                if self.deep_reply_enabled or self.main_reply_enabled else self._client)
+
+    async def _create_main_completion(self, **kwargs):
+        from .overload_retry import create_with_overload_retry
+        return await create_with_overload_retry(self, **kwargs)
 
     def _main_thinking_options(self, messages) -> dict:
         from ..generation_policy import deep_reply_thinking_options, main_thinking_options

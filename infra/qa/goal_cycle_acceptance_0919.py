@@ -53,7 +53,7 @@ def main():
         a = api(s, "POST", "/api/auth/register", json={**credentials,
             "email": "qagoal" + suffix + "@example.com", "nickname": "目标周期验收",
             "tag": str(int(suffix, 16) % 100000).zfill(5), "birth_date": "1995-06-15",
-            "living_status": "和家人", "communication_preference": "温柔引导",
+            "living_status": "和家人",
             "physical_condition": [], "behavior_taboo": []})
         write("credentials.local-only.json", {**credentials, "token": a["token"]})
         write("state.json", {"username": credentials["username"], "account": a.get("account"), "sessions": []})

@@ -34,10 +34,10 @@ type ActivityField = Exclude<keyof ActivityLog, "time_slot" | "activity" | "note
 type ActivityDraft = ActivityLog & { prefill?: { key: string; date: string; quote: string; timeText: string | null } };
 
 const ACTIVITY_SCALES: { key: ActivityField; label: string; hint: string }[] = [
-  { key: "achievement", label: "成就", hint: "做成了什么" },
-  { key: "connection", label: "联结", hint: "与人的靠近" },
-  { key: "enjoyment", label: "愉悦", hint: "享受的程度" },
-  { key: "importance", label: "重要", hint: "对你的意义" },
+  { key: "achievement", label: "成就感", hint: "做这件事让你觉得自己有成就感吗？" },
+  { key: "connection", label: "联结感", hint: "做这件事让你感觉与他人有连接吗？" },
+  { key: "enjoyment", label: "享受感", hint: "做这件事让你感到享受或快乐吗？" },
+  { key: "importance", label: "重视感", hint: "你觉得它是一件重要、值得做的事吗？" },
 ];
 
 type SummaryField = "completion_rate" | "activity_level" | "overall_mood" | "social_connection" | "approach_vs_avoidance";
@@ -90,7 +90,11 @@ export default function DailyAssessmentModal({
   onSaved,
   initialView = "record",
   sessionId,
+  embedded = false,
+  onDraftStateChange,
 }: {
+  embedded?: boolean;
+  onDraftStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
   onClose: () => void;
   onSaved?: () => void;
   initialView?: "record" | "history";
@@ -135,6 +139,7 @@ export default function DailyAssessmentModal({
   const dateConflict = dateExisting !== null && dateExisting.id !== editing?.id;
 
   function editRecord(record: AssessmentRecord) {
+    draftTouched.current = false;
     setEditing(record);
     setActivitiesOpen(true);
     setRecordDate(record.local_date);
@@ -147,6 +152,7 @@ export default function DailyAssessmentModal({
     setView("record");
   }
   function newRecord() {
+    draftTouched.current = false;
     setActivitiesOpen(true);
     setEditing(null); setRecordDate(localToday()); setActivities([emptyActivity()]);
     setSummary(defaultSummary()); setError(null); setView("record");
@@ -164,7 +170,8 @@ export default function DailyAssessmentModal({
   const titleId = useId();
 
   // Native modal semantics keep focus in the form and restore it on close.
-  useEffect(() => { dialogRef.current?.showModal(); }, []);
+  useEffect(() => { if (!embedded) dialogRef.current?.showModal(); }, [embedded]);
+  useEffect(() => { onDraftStateChange?.({ dirty: draftTouched.current, busy }); }, [activities, summary, recordDate, editing, view, busy, onDraftStateChange]);
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
   }, [view]);
@@ -265,6 +272,7 @@ export default function DailyAssessmentModal({
       const saved = editing
         ? await updateAssessment(editing.id, { ...payload, expected_revision: editing.revision_no ?? 1 })
         : await submitAssessment(payload);
+      draftTouched.current = false;
       setSavedRecord(saved);
       setEditing(saved);
       setDateExisting(saved);
@@ -286,25 +294,13 @@ export default function DailyAssessmentModal({
     onClose();
   }
 
-  return (
-    <dialog
-      ref={dialogRef}
-      className="m-auto max-h-[calc(100dvh-40px)] w-[min(780px,calc(100vw-40px))] max-w-none overflow-hidden rounded-3xl border-0 bg-sheet p-0 text-ink shadow-2xl backdrop:bg-black/40 max-sm:h-[100dvh] max-sm:max-h-[100dvh] max-sm:w-screen max-sm:rounded-none"
-      aria-labelledby={titleId}
-      onCancel={(event) => { if (busy) event.preventDefault(); }}
-      onClose={handleDismiss}
-      onClick={(event) => {
-        if (event.target !== event.currentTarget) return;
-        const bounds = event.currentTarget.getBoundingClientRect();
-        if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) handleDismiss();
-      }}
-    >
+  const content = (
       <form
         onSubmit={(event) => { event.preventDefault(); if (view === "record") void handleSubmit(); }}
         onChangeCapture={() => { draftTouched.current = true; }}
         onClickCapture={event => { if ((event.target as HTMLElement).closest('[role="radio"]')) draftTouched.current = true; }}
         aria-busy={busy}
-        className="flex max-h-[calc(100dvh-40px)] min-h-0 flex-col max-sm:h-full max-sm:max-h-[100dvh]"
+        className={embedded ? "flex h-full min-h-0 flex-col" : "flex max-h-[calc(100dvh-40px)] min-h-0 flex-col max-sm:h-full max-sm:max-h-[100dvh]"}
       >
         {/* ---- header ---- */}
         <header className="shrink-0 px-5 pb-4 pt-5 sm:px-7">
@@ -323,7 +319,7 @@ export default function DailyAssessmentModal({
                   : "无论有没有运动，都可以记录整天的感受。支持补记和修改。"}
               </p>
             </div>
-            <button
+            {!embedded && <button
               type="button"
               onClick={handleDismiss}
               disabled={busy}
@@ -331,7 +327,7 @@ export default function DailyAssessmentModal({
               className="ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-muted transition-colors hover:bg-raised hover:text-ink disabled:opacity-40"
             >
               <CloseMark className="h-3.5 w-3.5" />
-            </button>
+            </button>}
           </div>
 
         </header>
@@ -510,6 +506,22 @@ export default function DailyAssessmentModal({
           )}
         </div>
       </form>
+  );
+  if (embedded) return content;
+  return (
+    <dialog
+      ref={dialogRef}
+      className="default-style:m-auto default-style:max-h-[calc(100dvh-40px)] default-style:w-[min(780px,calc(100vw-40px))] default-style:max-w-none default-style:overflow-hidden default-style:rounded-3xl default-style:border-0 default-style:bg-sheet default-style:p-0 default-style:text-ink default-style:shadow-2xl default-style:backdrop:bg-black/40 default-style:max-sm:h-[100dvh] default-style:max-sm:max-h-[100dvh] default-style:max-sm:w-screen default-style:max-sm:rounded-none simple:m-auto simple:max-h-[calc(100dvh-40px)] simple:w-[min(780px,calc(100vw-40px))] simple:max-w-none simple:overflow-hidden simple:rounded-2xl simple:border-0 simple:bg-sheet simple:p-0 simple:text-ink simple:depth-panel simple:backdrop:bg-black/40 simple:max-sm:h-[100dvh] simple:max-sm:max-h-[100dvh] simple:max-sm:w-screen simple:max-sm:rounded-none"
+      aria-labelledby={titleId}
+      onCancel={(event) => { if (busy) event.preventDefault(); }}
+      onClose={handleDismiss}
+      onClick={(event) => {
+        if (event.target !== event.currentTarget) return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) handleDismiss();
+      }}
+    >
+      {content}
     </dialog>
   );
 }
@@ -558,6 +570,7 @@ function ActivityCard({
   const timeSlotMissing =
     value.activity.trim().length > 0 && (freeTime ? !value.time_slot.trim() : !validTimeRange(value.time_slot));
   const contentId = useId();
+  const noteId = useId();
 
   return (
     <section aria-label={`活动 ${index + 1}`} className="rounded-2xl bg-raised p-4 sm:p-5">
@@ -607,11 +620,11 @@ function ActivityCard({
       </div>
 
       <div data-activity-mood>
-        <SegmentedScore label="做完活动后的心情" helpKey="emotion" hint="0 · 很低落　—　5 · 很愉快" required value={value.emotion} onChange={emotion => onChange({emotion})} />
+        <SegmentedScore label="情绪评分" helpKey="emotion" hint="做这件事时，你的心情如何？（0=非常糟糕，5=非常愉悦）" required value={value.emotion} onChange={emotion => onChange({emotion})} />
       </div>
       </div>
       <details className="mt-4 rounded-xl bg-sheet/50 p-3">
-        <summary className="cursor-pointer text-sm font-medium text-ink-muted">其他感受（4 项选填）<span className="ml-2 text-xs">{ACTIVITY_SCALES.filter(s => value[s.key] !== null).length > 0 ? `已填 ${ACTIVITY_SCALES.filter(s => value[s.key] !== null).length} 项` : "成就、联结、愉悦、重要"}</span></summary>
+        <summary className="cursor-pointer text-sm font-medium text-ink-muted">其他感受（4 项选填）<span className="ml-2 text-xs">{ACTIVITY_SCALES.filter(s => value[s.key] !== null).length > 0 ? `已填 ${ACTIVITY_SCALES.filter(s => value[s.key] !== null).length} 项` : "成就感、联结感、享受感、重视感"}</span></summary>
         <div className="mt-3 grid gap-x-4 gap-y-2.5 sm:grid-cols-2">
         {ACTIVITY_SCALES.map((s) => (
           <SegmentedScore
@@ -628,13 +641,20 @@ function ActivityCard({
         <p className="mt-2 text-xs leading-5 text-ink-muted">0 · 很少 — 5 · 很多；再点一次可取消。</p>
       </details>
 
-      <input
-        value={value.note ?? ""}
-        onChange={(e) => onChange({ note: e.target.value })}
-        placeholder="一句备注（可留空）"
-        aria-label={`活动 ${index + 1} 的备注`}
-        className="mt-3 min-h-11 w-full rounded-xl border border-line bg-transparent px-3 py-2 text-sm text-ink placeholder:text-ink-muted transition-colors focus-visible:outline-2 focus-visible:outline-accent"
-      />
+      <div className="mt-4 space-y-2">
+        <label htmlFor={noteId} className="text-sm font-medium text-ink-muted">其他记录（选填）</label>
+        <p id={`${noteId}-hint`} className="text-xs leading-6 text-ink-muted">对于这个活动，你还有其他想要分享和记录的内容（如进行活动过程中特别想记录的瞬间或感受）吗？</p>
+        <textarea
+          id={noteId}
+          rows={2}
+          value={value.note ?? ""}
+          onChange={(e) => onChange({ note: e.target.value })}
+          placeholder="可留空"
+          aria-label={`活动 ${index + 1} 的其他记录`}
+          aria-describedby={`${noteId}-hint`}
+          className="min-h-20 w-full resize-y rounded-xl border border-line bg-transparent px-3 py-2 text-sm leading-6 text-ink placeholder:text-ink-muted transition-colors focus-visible:outline-2 focus-visible:outline-accent"
+        />
+      </div>
     </section>
   );
 }

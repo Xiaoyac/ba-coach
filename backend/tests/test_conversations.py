@@ -56,14 +56,19 @@ def test_create_conversation_persists_opening_and_seeds_agent_history(
     assert detail["title"] == "新对话"
     assert detail["next_module"] is None
     assert isinstance(detail["messages"][0]["id"], int)
-    assert detail["messages"][0]["created_at"].endswith("Z")
+    from datetime import datetime, timedelta
+
+    opening_created_at = detail["messages"][0]["created_at"]
+    assert isinstance(opening_created_at, str)
+    assert datetime.fromisoformat(opening_created_at.replace("Z", "+00:00")).utcoffset() == timedelta(0)
     assert detail["messages"] == [
         {
             "id": detail["messages"][0]["id"],
-            "created_at": detail["messages"][0]["created_at"],
             "reply_to_message_id": None,
+            "reply_status": None,
             "role": "assistant",
             "content": OPENING_MESSAGE_TEXT,
+            "created_at": opening_created_at,
             "reasoning_content": None,
             "model_name": None,
             "routing_reasoning_content": None,
@@ -78,16 +83,28 @@ def test_create_conversation_persists_opening_and_seeds_agent_history(
         headers=headers,
     )
     assert response.status_code == 200, response.text
-    assert provider.seen[-1][0].content == OPENING_MESSAGE_TEXT
-    current = ElementTree.fromstring(provider.seen[-1][1].content)
-    assert current.tag == "message" and current.attrib["datetime"] != "unknown"
-    assert current.text == "我叫小雨"
+    assert [message.source_content for message in provider.seen[-1]] == [
+        OPENING_MESSAGE_TEXT,
+        "我叫小雨",
+    ]
 
     refreshed = client.get(
         f"/api/conversations/{detail['session_id']}", headers=headers
     ).json()
     assert refreshed["next_module"] in {"module_1", "module_2", "module_3", "module_4"}
-    assert refreshed["messages"][0] == detail["messages"][0]
+    assert refreshed["messages"][0] == {
+        "id": detail["messages"][0]["id"],
+        "role": "assistant",
+        "content": OPENING_MESSAGE_TEXT,
+        "created_at": opening_created_at,
+        "reasoning_content": None,
+        "model_name": None,
+        "routing_reasoning_content": None,
+        "router_model_name": None,
+        "timing": None,
+        "reply_to_message_id": None,
+            "reply_status": None,
+    }
     assert len(refreshed["messages"]) == 3
 
 
@@ -649,8 +666,7 @@ def test_a_resumed_session_still_carries_its_history(
         "/api/chat", json={"message": "二", "session_id": session_id}, headers=headers
     )
     # The model saw the rehydrated history, not a bare first turn.
-    assert [ElementTree.fromstring(m.content).text if m.role == "user" else m.content
-            for m in provider.seen[-1]] == ["一", "saw 1 messages", "二"]
+    assert [m.source_content for m in provider.seen[-1]] == ["一", "saw 1 messages", "二"]
 
 
 def test_a_resumed_session_keeps_the_router_module(

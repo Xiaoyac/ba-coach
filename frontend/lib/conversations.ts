@@ -30,7 +30,8 @@ export const replyModeLabels: Record<ConversationReplyMode, string> = {
 export interface ConversationDetail extends ConversationSummary {
   revision?: number;
   thinking_enabled?: boolean | null;
-  knowledge_mediator_enabled?: boolean;
+  knowledge_mediator_enabled?: boolean; // compatibility: selects legacy retrieval
+  knowledge_mediator_node_enabled?: boolean;
   knowledge_mode?: "legacy_mediator" | "astrbot_hybrid";
   messages: ChatMessage[];
   next_module: string | null;
@@ -56,6 +57,8 @@ export interface KnowledgeReferences {
   gate_reason: string | null;
   mediator_status: string | null;
   mediator_reason: string | null;
+  mediator_validation_errors?: { field: string; type: string }[];
+  mediator_normalized_fields?: string[];
   mediator_reasoning_content: string | null;
   mediator_response_content?: string | null;
   mediator_note?: string | null;
@@ -114,6 +117,13 @@ export async function setConversationMediator(sessionId: string, enabled: boolea
     method: "PATCH", headers: apiHeaders({ json: true }), body: JSON.stringify({ enabled }),
   });
   return parse(res, "保存知识中介设置");
+}
+
+export async function setConversationMediatorNode(sessionId: string, enabled: boolean): Promise<ConversationDetail> {
+  const res = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}/mediator-node`, {
+    method: "PATCH", headers: apiHeaders({ json: true }), body: JSON.stringify({ enabled }),
+  });
+  return parse(res, "保存中介节点设置");
 }
 
 export async function setConversationReplyEffort(sessionId: string, effort: ConversationReplyEffort): Promise<ConversationDetail> {
@@ -308,4 +318,40 @@ export async function fetchContextUsage(sessionId: string, signal?: AbortSignal)
     headers: apiHeaders(), signal, cache: "no-store",
   });
   return parse(response, "读取上下文用量");
+}
+
+export interface ExecutionStage {
+  stage: string; label: string; lane: "foreground" | "parallel";
+  status: "running" | "retrying" | "publishing" | "completed" | "failed" | "cancelled" | "skipped";
+  model?: string | null; duration_ms?: number | null; elapsed_ms?: number;
+  detail?: string | null; calls: number;
+  failure?: { code: string; reason: string; suggestion: string; http_status?: number; request_id?: string } | null;
+}
+export interface ConversationExecution {
+  client_first_body_ms?: number | null;
+  session_id: string; user_message_id: number | null; module: string | null;
+  live: boolean; request_finished: boolean; server_time: number;
+  state: "empty" | "running" | "background" | "completed" | "completed_with_errors" | "failed" | "cancelled" | "incomplete";
+  stages: ExecutionStage[];
+  turns: {id: number; preview: string; created_at: string}[];
+}
+export interface ExecutionHistoryPage {
+  session_id: string;
+  current_user_message_id: number | null;
+  turns: ConversationExecution["turns"];
+  next_before_id: number | null;
+}
+export async function fetchExecutionHistory(sessionId: string, beforeId: number | null, signal?: AbortSignal): Promise<ExecutionHistoryPage> {
+  const query = beforeId === null ? "" : `?before_id=${beforeId}`;
+  const response = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}/execution/history${query}`, {
+    headers: apiHeaders(), signal, cache: "no-store",
+  });
+  return parse(response, "读取历史运行记录");
+}
+export async function fetchConversationExecution(sessionId: string, userMessageId: number | null, signal?: AbortSignal): Promise<ConversationExecution> {
+  const query = userMessageId === null ? "" : `?user_message_id=${userMessageId}`;
+  const response = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}/execution${query}`, {
+    headers: apiHeaders(), signal, cache: "no-store",
+  });
+  return parse(response, "读取模型运行状态");
 }

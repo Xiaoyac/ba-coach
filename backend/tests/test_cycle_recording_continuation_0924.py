@@ -15,6 +15,26 @@ from test_m3_program_0924 import REQUIREMENT, PLAN, FEEDBACK, LIMITATIONS, confi
 from test_turn_confirmation_m1_m4_0924 import review_turn
 
 
+
+async def legacy_shared_plan_cycle(db):
+    """Explicit fixture for legacy same-plan cycles, independent of M4 routing."""
+    from app.v2_repository import continue_reviewed_cycle
+    cycle_id = await continue_reviewed_cycle(db, user_id="a", goal_id="g1",
+        cycle_id="reviewed-cycle", conversation_id=1)
+    rt = schema.tables["conversation_runtime_states"]
+    await db.execute(update(rt).where(rt.c.conversation_id == 1).values(
+        current_module="module_3", flow_status="active", active_goal_id="g1", active_cycle_id=cycle_id))
+    # Model the distinct subsequent M2 confirmation boundary for a legacy
+    # shared-plan cycle; it no longer comes from the M4 closure event.
+    await db.execute(insert(ConversationMessage), {"id": 22, "conversation_id": 1,
+        "position": 12, "role": "user", "content": "下一轮保持原计划，我确认。"})
+    await db.execute(insert(schema.tables["ai_decision_logs"]), {
+        "conversation_id": 1, "turn_id": "22", "goal_id": "g1", "cycle_id": cycle_id,
+        "module_name": "module_2", "decision_type": "user_confirmation",
+        "decision_value": {"record_id": "cycle-plan"}, "evidence_message_ids": [22]})
+    await db.commit()
+    return cycle_id
+
 @pytest.mark.parametrize("invalid", ["missing", "draft", "wrong_goal", "wrong_plan",
                                      "missing_source", "assistant_source", "foreign_source"])
 async def test_unusable_recording_is_not_inherited_as_complete(goal_api, invalid):
@@ -41,7 +61,8 @@ async def test_unusable_recording_is_not_inherited_as_complete(goal_api, invalid
     response = await client.post("/api/program/chat-a/confirm", json=await confirmation(client))
     assert response.status_code == 200, response.text
     state = response.json()["runtime"]
-    assert state["current_module"] == "module_3" and state["flow_status"] == "active"
+    assert state["current_module"] == "module_2" and state["active_cycle_id"] is None
+    state["active_cycle_id"] = await legacy_shared_plan_cycle(db)
     cycles, progress = schema.tables["pa_cycles"], schema.tables["pa_cycle_progress"]
     successor = (await db.execute(select(cycles).where(cycles.c.id == state["active_cycle_id"]))).mappings().one()
     copied = (await db.execute(select(progress).where(progress.c.cycle_id == successor["id"]))).mappings().one()
@@ -84,8 +105,9 @@ async def test_new_cycle_can_record_new_decision_but_cannot_replay_old_draft(goa
     await db.commit()
 
     result = await apply_pre_reply_decision(state, context, type("Decision", (), {"target_module": "module_3"})())
-    assert result["current_module"] == "module_3"
-    successor_id = result["active_cycle_id"]
+    assert result["current_module"] == "module_2"
+    assert result["active_cycle_id"] is None
+    successor_id = await legacy_shared_plan_cycle(db)
     conversation, current = await runtime_for(db, "chat-a")
     assert current["flow_status"] == "active" and successor_id != "reviewed-cycle"
     assert await draft(db, current, "a") is None
@@ -95,9 +117,9 @@ async def test_new_cycle_can_record_new_decision_but_cannot_replay_old_draft(goa
     events = schema.tables["ai_decision_logs"]
     event = (await db.execute(select(events).where(events.c.module_name == "module_4",
         events.c.decision_type == "user_confirmation"))).mappings().one()
-    assert event["decision_value"]["next_cycle_id"] == successor_id
+    assert event["decision_value"]["next_cycle_id"] is None
     await db.execute(insert(ConversationMessage), {"id": 30, "conversation_id": 1,
-        "position": 12, "role": "user", "content": "这次还没决定记录方式。"})
+        "position": 13, "role": "user", "content": "这次还没决定记录方式。"})
     await db.commit()
 
     maker = async_sessionmaker(db.bind, expire_on_commit=False)
@@ -111,9 +133,9 @@ async def test_new_cycle_can_record_new_decision_but_cannot_replay_old_draft(goa
     assert not ready["ready"]
     assert "recording_decision_evidence" in ready["missing_fields"]
     await db.execute(insert(ConversationMessage), [
-        {"id": 31, "conversation_id": 1, "position": 13, "role": "assistant",
+        {"id": 31, "conversation_id": 1, "position": 14, "role": "assistant",
          "content": REQUIREMENT + PLAN + FEEDBACK + LIMITATIONS},
-        {"id": 32, "conversation_id": 1, "position": 14, "role": "user", "content": "好，就每天记一次。"},
+        {"id": 32, "conversation_id": 1, "position": 15, "role": "user", "content": "好，就每天记一次。"},
     ])
     await db.commit()
     new_evidence = {key: {**value, "message_id": 32 if key == "decision" else 31}

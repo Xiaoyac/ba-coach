@@ -31,11 +31,11 @@ const ACTIVITY_LABELS: {
   >;
   label: string;
 }[] = [
-  { key: "emotion", label: "情绪" },
-  { key: "achievement", label: "成就" },
-  { key: "connection", label: "联结" },
-  { key: "enjoyment", label: "愉悦" },
-  { key: "importance", label: "重要" },
+  { key: "emotion", label: "情绪评分" },
+  { key: "achievement", label: "成就感" },
+  { key: "connection", label: "联结感" },
+  { key: "enjoyment", label: "享受感" },
+  { key: "importance", label: "重视感" },
 ];
 
 function formatLocalDate(value: string): string {
@@ -124,8 +124,8 @@ export default function AssessmentHistory({
         return (
           <article
             key={record.id}
-            className={`overflow-clip rounded-[22px] border bg-raised depth-bubble transition-colors duration-300 ${
-              expanded ? "border-accent-edge" : "border-line"
+            className={`default-style:overflow-clip default-style:rounded-[22px] default-style:border default-style:bg-raised default-style:depth-bubble default-style:transition-colors default-style:duration-300 simple:overflow-clip simple:rounded-xl simple:border simple:bg-raised simple:depth-bubble simple:transition-colors simple:duration-300 ${
+              expanded ? "default-style:border-accent-edge simple:border-accent-edge" : "default-style:border-line simple:border-line"
             }`}
           >
             <button
@@ -243,7 +243,7 @@ function HistorySkeleton() {
   return (
     <div className="space-y-3" aria-label="正在加载历史记录" role="status">
       {[0, 1, 2].map((item) => (
-        <div key={item} className="rounded-[22px] border border-line bg-raised px-4 py-4 sm:px-5">
+        <div key={item} className="default-style:rounded-[22px] default-style:border default-style:border-line default-style:bg-raised default-style:px-4 default-style:py-4 default-style:sm:px-5 simple:rounded-xl simple:border simple:border-line simple:bg-raised simple:px-4 simple:py-4 simple:sm:px-5">
           <div className="flex animate-pulse items-center gap-3 motion-reduce:animate-none">
             <span className="h-10 w-10 rounded-2xl bg-accent-wash" />
             <span className="flex-1 space-y-2">

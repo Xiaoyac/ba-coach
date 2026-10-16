@@ -8,6 +8,6 @@ export function hasDurableReplyForTurn(
   if (detail.session_id !== turn.sessionId || turn.userMessageId === null) return false;
   if (!detail.messages.some(m => m.role === "user" && m.id === turn.userMessageId)) return false;
   return detail.messages.some(m =>
-    m.role === "assistant" && m.reply_to_message_id === turn.userMessageId && Boolean(m.content?.trim()),
+    m.role === "assistant" && m.reply_to_message_id === turn.userMessageId && Boolean(m.content?.trim()) && !m.reply_status,
   );
 }

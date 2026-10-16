@@ -30,7 +30,7 @@ def request_key(state, context, module_name, module_config):
             decision.retrieve, decision.reason, id(context.knowledge_base))
 
 
-async def retrieve(state, context, module_name, module_config):
+async def _retrieve(state, context, module_name, module_config):
     events = []
     _send = events.append
     retrieval_started = perf_counter()
@@ -150,3 +150,18 @@ async def route_with_retrieval(state, context, route):
     finally:
         if not task.done():task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+async def retrieve(state, context, module_name, module_config):
+    from .execution_status import track_call, update
+    if not module_config.retrieve:
+        return await _retrieve(state, context, module_name, module_config)
+    result = await track_call('retrieval', _retrieve(state, context, module_name, module_config))
+    from .retrieval_timing import publish_timings
+    publish_timings(result[1])
+    outcome = result[1].get('outcome')
+    if outcome == 'skipped':
+        update('retrieval', 'skipped')
+    elif outcome == 'error':
+        update('retrieval', 'failed', detail='检索未成功返回，主回复按降级策略继续')
+    return result

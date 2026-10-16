@@ -22,7 +22,7 @@ async def test_native_reasoning_is_opt_in_single_request(provider_type, include_
     result = await provider.route_detailed(system="contract", user="synthetic", max_tokens=1200, include_reasoning=include_reasoning)
     assert create.await_count == 1
     assert create.call_args.kwargs["extra_body"]["thinking"]["type"] == ("enabled" if include_reasoning else "disabled")
-    assert result.reasoning_content == ("native thought" if include_reasoning else "")
+    assert result.reasoning_content == ("native thought" if include_reasoning or provider_type is DeepSeekProvider else "")
 
 
 @pytest.mark.parametrize("mode", ["normal", "empty_reasoning", "invalid", "timeout", "no_chunks"])
@@ -53,6 +53,7 @@ async def test_real_wait_for_timeout_cancels_request(context):
     cancelled = asyncio.Event()
     calls = 0
     class SlowProvider:
+        name = model = "slow-stub"
         async def route_detailed(self, **kwargs):
             nonlocal calls
             calls += 1

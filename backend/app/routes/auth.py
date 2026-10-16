@@ -41,13 +41,11 @@ from ..identity import CallerIdentity, require_caller
 from ..account_identity import (
     find_account_by_username,
     normalize_account,
-    normalize_display_name,
 )
 from ..models import (
     RegistrationInvite,
     AccountEmail,
     AccountEmailToken,
-    AccountHandle,
     AccountSettings,
     AuthSession,
     UserAccount,
@@ -59,7 +57,7 @@ from ..schemas import (
     AccountInfo,
     AdminResetRequest,
     AuthResponse,
-    BirthDateRequest,
+    BirthYearRequest,
     ChangePasswordRequest,
     EmailAddressRequest,
     EmailTokenRequest,
@@ -189,7 +187,7 @@ async def _issue_session(db: AsyncSession, account: UserAccount) -> tuple[str, A
 
 
 async def _account_info(db: AsyncSession, account: UserAccount) -> AccountInfo:
-    from ..birth_dates import needs_birth_date
+    from ..birth_years import needs_birth_year
     from .. import v2_profile
     if v2_profile.enabled():
         from ..database_v2_schema import user_profile
@@ -203,22 +201,15 @@ async def _account_info(db: AsyncSession, account: UserAccount) -> AccountInfo:
             select(AccountSettings).where(AccountSettings.account_id == account.id)
         )
     ).scalar_one_or_none()
-    handle = (
-        await db.execute(
-            select(AccountHandle).where(AccountHandle.account_id == account.id)
-        )
-    ).scalar_one_or_none()
     account_email = (
         await db.execute(
             select(AccountEmail).where(AccountEmail.account_id == account.id)
         )
     ).scalar_one_or_none()
     return AccountInfo(
-        birth_date_required=await needs_birth_date(db, account.profile_uuid),
+        birth_year_required=await needs_birth_year(db, account.profile_uuid),
         username=account.username,
         nickname=profile.nickname if profile else None,
-        tag=handle.tag if handle else None,
-        display_id=handle.full_username if handle else None,
         profile_uuid=account.profile_uuid,
         current_module=(
             await derived_current_module(db, subject_id=account.profile_uuid)
@@ -239,7 +230,6 @@ async def register(
 ) -> AuthResponse:
     username = normalize_account(payload.username)
     nickname = payload.nickname.strip()
-    normalized_nickname = normalize_display_name(nickname)
     email = str(payload.email).strip()
     normalized_email = _normalise_email(payload.email)
     from ..invitations import claim_invitation
@@ -248,19 +238,6 @@ async def register(
 
     if await find_account_by_username(db, username) is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="登录账号已被使用")
-    duplicate_display = (
-        await db.execute(
-            select(AccountHandle.account_id).where(
-                AccountHandle.normalized_base == normalized_nickname,
-                AccountHandle.tag == payload.tag,
-            )
-        )
-    ).scalar_one_or_none()
-    if duplicate_display is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="这个昵称与标签组合已被使用",
-        )
     duplicate_email = (
         await db.execute(
             select(AccountEmail.account_id).where(
@@ -278,9 +255,8 @@ async def register(
     profile = UserProfile(
         nickname=nickname,
         age=payload.age,
-        birth_date=payload.birth_date,
+        birth_year=payload.birth_year,
         living_status=payload.living_status,
-        communication_preference=payload.communication_preference,
         physical_condition=_set_value(payload.physical_condition),
         behavior_taboo=_set_value(payload.behavior_taboo),
         current_module="开场",
@@ -301,14 +277,6 @@ async def register(
         )
         db.add(account)
         await db.flush()
-        db.add(
-            AccountHandle(
-                account_id=account.id,
-                base_username=nickname,
-                normalized_base=normalized_nickname,
-                tag=payload.tag,
-            )
-        )
         db.add(AccountSettings(account_id=account.id))
         db.add(
             AccountEmail(
@@ -337,7 +305,7 @@ async def register(
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="登录账号或昵称标签刚刚被其他人使用，请更换后重试",
+            detail="登录账号或邮箱刚刚被其他人使用，请更换后重试",
         ) from None
 
     if verification_token:
@@ -349,10 +317,9 @@ async def register(
             logger.exception("could not deliver registration verification email")
 
     logger.info(
-        "registered login account %s with display id %s#%s -> profile %s",
+        "registered login account %s with nickname %s -> profile %s",
         username,
         nickname,
-        payload.tag,
         profile.uuid,
     )
     return AuthResponse(
@@ -393,19 +360,24 @@ async def login(
     )
 
 
-@router.put("/birth-date", response_model=AccountInfo)
-async def set_birth_date(payload: BirthDateRequest,
+@router.put("/birth-date", include_in_schema=False)
+async def retired_birth_date(caller: CallerIdentity = Depends(require_caller)):
+    raise HTTPException(410, "已改为只填写出生年份，请刷新页面后重试")
+
+
+@router.put("/birth-year", response_model=AccountInfo)
+async def set_birth_year(payload: BirthYearRequest,
                          caller: CallerIdentity = Depends(require_caller),
                          db: AsyncSession = Depends(get_db)) -> AccountInfo:
     from .. import v2_profile
-    from ..birth_dates import age_on
+    from ..birth_years import age_from_year
     from ..schemas import ProfileUpdate
     if v2_profile.enabled():
-        await v2_profile.patch(db, caller.subject_id, ProfileUpdate(birth_date=payload.birth_date))
+        await v2_profile.patch(db, caller.subject_id, ProfileUpdate(birth_year=payload.birth_year))
     else:
         profile = (await db.execute(select(UserProfile).where(UserProfile.uuid == caller.subject_id))).scalar_one()
-        profile.birth_date = payload.birth_date
-        profile.age = age_on(payload.birth_date)
+        profile.birth_year = payload.birth_year
+        profile.age = age_from_year(payload.birth_year)
         await db.commit()
     return await _account_info(db, caller.account)
 

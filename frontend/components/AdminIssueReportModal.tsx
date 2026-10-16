@@ -116,13 +116,13 @@ export default function AdminIssueReportModal({ onClose }: { onClose: () => void
         type="button"
         aria-label="关闭问题反馈管理"
         onClick={onClose}
-        className="absolute inset-0 bg-canvas/75 backdrop-blur-md"
+        className="default-style:absolute default-style:inset-0 default-style:bg-canvas/75 default-style:backdrop-blur-md simple:absolute simple:inset-0 simple:bg-canvas/75 simple:backdrop-blur-sm"
       />
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="issue-manager-title"
-        className="relative flex h-[min(800px,calc(100dvh-1.5rem))] min-h-0 w-full max-w-5xl flex-col overflow-hidden rounded-[28px] border border-line bg-panel depth-panel backdrop-blur-2xl sm:h-[min(800px,calc(100dvh-2.5rem))]"
+        className="default-style:relative default-style:flex default-style:h-[min(800px,calc(100dvh-1.5rem))] default-style:min-h-0 default-style:w-full default-style:max-w-5xl default-style:flex-col default-style:overflow-hidden default-style:rounded-[28px] default-style:border default-style:border-line default-style:bg-panel default-style:depth-panel default-style:backdrop-blur-2xl default-style:sm:h-[min(800px,calc(100dvh-2.5rem))] simple:relative simple:flex simple:h-[min(800px,calc(100dvh-1.5rem))] simple:min-h-0 simple:w-full simple:max-w-5xl simple:flex-col simple:overflow-hidden simple:rounded-2xl simple:border simple:border-line simple:bg-panel simple:depth-panel simple:sm:h-[min(800px,calc(100dvh-2.5rem))]"
       >
         <header className="flex shrink-0 items-start gap-3 border-b border-line px-5 py-4 sm:px-6">
           <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-accent-edge bg-accent-wash text-accent-ink">

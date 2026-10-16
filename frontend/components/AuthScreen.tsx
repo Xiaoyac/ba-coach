@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import BirthdayPicker from "@/components/BirthdayPicker";
+import BirthYearInput from "@/components/BirthYearInput";
 import {
   AuthError,
   login,
@@ -15,17 +15,9 @@ import { EnsoMark } from "@/components/icons";
  * Mirrors the ENUM/SET values on `user_profile` (see backend
  * `app/schemas.py`, which declares the same lists as Literals). Only the
  * fields that change what the coach may safely suggest are asked here —
- * physical limits and movement taboos gate every activity recommendation, and
- * communication preference sets the tone from the first reply. Everything
- * else on that table is left for the conversation to fill in.
+ * physical limits and movement taboos gate every activity recommendation.
+ * Other profile fields can be edited later.
  */
-const COMMUNICATION_PREFERENCES = [
-  "直接明了",
-  "温柔引导",
-  "理性分析",
-  "轻松幽默",
-] as const;
-
 const PHYSICAL_CONDITIONS = [
   "膝关节损伤", "腰背酸痛", "慢性疼痛", "易疲劳", "睡眠障碍",
   "偏头痛", "哮喘", "眩晕", "鼻炎", "术后恢复期",
@@ -51,10 +43,8 @@ export default function AuthScreen({
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
   const [nickname, setNickname] = useState("");
-  const [tag, setTag] = useState("");
-  const [birthDate, setBirthDate] = useState("");
+  const [birthYear, setBirthYear] = useState("");
   const [living, setLiving] = useState<string | null>(null);
-  const [communication, setCommunication] = useState<string | null>(null);
   const [conditions, setConditions] = useState<string[]>([]);
   const [taboos, setTaboos] = useState<string[]>([]);
 
@@ -81,8 +71,8 @@ export default function AuthScreen({
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (busy) return;
-    if (mode === "register" && !birthDate) {
-      setError("请填写出生日期，不能留空。");
+    if (mode === "register" && !birthYear) {
+      setError("请填写出生年份，不能留空。");
       return;
     }
     setBusy(true);
@@ -104,11 +94,9 @@ export default function AuthScreen({
               password,
               email,
               nickname: nickname.trim(),
-              tag,
               // Only the user's explicit answer is sent, with no fallback.
-              birth_date: birthDate,
+              birth_year: Number(birthYear),
               living_status: living,
-              communication_preference: communication,
               physical_condition: conditions,
               behavior_taboo: taboos,
             });
@@ -141,11 +129,11 @@ export default function AuthScreen({
           margins only take the space that is actually free, so the child
           pins to the top once it no longer fits and the whole card stays
           reachable. */}
-      <div className="auth-shell m-auto grid w-full max-w-6xl overflow-hidden rounded-[32px] border border-line-strong backdrop-blur-2xl lg:min-h-[min(720px,calc(100dvh-5rem))] lg:grid-cols-[1.08fr_0.92fr]">
-        <section className="auth-story hidden flex-col justify-between overflow-hidden border-r border-line p-10 lg:flex xl:p-14">
+      <div className="auth-shell default-style:m-auto default-style:grid default-style:w-full default-style:max-w-6xl default-style:overflow-hidden default-style:rounded-[32px] default-style:border default-style:border-line-strong default-style:backdrop-blur-2xl default-style:lg:min-h-[min(720px,calc(100dvh-5rem))] default-style:lg:grid-cols-[1.08fr_0.92fr] simple:m-auto simple:grid simple:w-full simple:max-w-[1040px] simple:overflow-hidden simple:lg:min-h-[min(720px,calc(100dvh-5rem))] simple:lg:grid-cols-[1.08fr_0.92fr]">
+        <section className="auth-story default-style:hidden default-style:flex-col default-style:justify-between default-style:overflow-hidden default-style:border-r default-style:border-line default-style:p-10 default-style:lg:flex default-style:xl:p-14 simple:hidden simple:flex-col simple:justify-between simple:overflow-hidden simple:p-10 simple:lg:flex simple:xl:p-14">
           <div>
             <div className="flex items-center gap-3">
-              <span className="grid h-11 w-11 place-items-center rounded-2xl border border-accent-edge bg-accent-wash text-accent depth-float">
+              <span className="default-style:grid default-style:h-11 default-style:w-11 default-style:place-items-center default-style:rounded-2xl default-style:border default-style:border-accent-edge default-style:bg-accent-wash default-style:text-accent-ink default-style:depth-float simple:grid simple:h-11 simple:w-11 simple:place-items-center simple:rounded-xl simple:text-accent-ink">
                 <EnsoMark className="h-6 w-6" />
               </span>
               <div>
@@ -155,7 +143,7 @@ export default function AuthScreen({
             </div>
 
             <div className="mt-20 max-w-[34rem]">
-              <p className="eyebrow">YOUR NEXT SMALL STEP</p>
+              <p className="default-style:eyebrow simple:hidden">YOUR NEXT SMALL STEP</p>
               <h1 className="display-title mt-5 text-[clamp(2.8rem,4.6vw,4.7rem)] leading-[1.03] text-ink">
                 把很难的一天，<br />拆成下一小步。
               </h1>
@@ -171,8 +159,8 @@ export default function AuthScreen({
               ["02", "看见循环", "理解情绪与行动的联系"],
               ["03", "迈出一步", "留下可完成的小目标"],
             ].map(([step, title, copy]) => (
-              <div key={step} className="rounded-2xl border border-line bg-panel/55 p-4 backdrop-blur-xl">
-                <span className="number-chip">{step}</span>
+              <div key={step} className="default-style:rounded-2xl default-style:border default-style:border-line default-style:bg-panel/55 default-style:p-4 default-style:backdrop-blur-xl simple:py-4 ">
+                <span className="default-style:number-chip simple:text-xs simple:tabular-nums simple:text-ink-faint">{step}</span>
                 <p className="mt-4 text-sm font-medium text-ink">{title}</p>
                 <p className="mt-1 text-xs leading-5 text-ink-faint">{copy}</p>
               </div>
@@ -183,7 +171,7 @@ export default function AuthScreen({
         <div className="auth-form-panel flex min-w-0 items-center px-5 py-7 sm:px-9 lg:px-12 xl:px-16">
           <div className="w-full">
             <div className="mb-7 flex items-center gap-3 lg:hidden">
-              <span className="grid h-10 w-10 place-items-center rounded-2xl border border-accent-edge bg-accent-wash text-accent">
+              <span className="default-style:grid default-style:h-10 default-style:w-10 default-style:place-items-center default-style:rounded-2xl default-style:border default-style:border-accent-edge default-style:bg-accent-wash default-style:text-accent-ink simple:grid simple:h-10 simple:w-10 simple:place-items-center simple:rounded-xl simple:text-accent-ink">
                 <EnsoMark className="h-5 w-5" />
               </span>
               <div>
@@ -193,7 +181,7 @@ export default function AuthScreen({
             </div>
 
             <div className="mb-6">
-              <p className="eyebrow">{forgot ? "ACCOUNT RECOVERY" : registering ? "CREATE YOUR SPACE" : "WELCOME BACK"}</p>
+              <p className="default-style:eyebrow simple:hidden">{forgot ? "ACCOUNT RECOVERY" : registering ? "CREATE YOUR SPACE" : "WELCOME BACK"}</p>
               <h2 className="display-title mt-2 text-2xl text-ink sm:text-[1.75rem]">
                 {forgot ? "找回你的账号" : registering ? "建立属于你的空间" : "欢迎回来"}
               </h2>
@@ -207,16 +195,16 @@ export default function AuthScreen({
           className="w-full"
         >
           {/* Mode switch */}
-          {!forgot && <div className="mb-6 flex gap-1 rounded-2xl border border-line bg-raised/80 p-1.5">
+          {!forgot && <div className="default-style:mb-6 default-style:flex default-style:gap-1 default-style:rounded-2xl default-style:border default-style:border-line default-style:bg-raised/80 default-style:p-1.5 simple:mb-6 simple:flex simple:gap-1 simple:rounded-xl simple:bg-raised/60 simple:p-1">
             {(["login", "register"] as const).map((m) => (
               <button
                 key={m}
                 type="button"
                 onClick={() => switchMode(m)}
-                className={`flex-1 rounded-xl py-2.5 text-[0.82rem] font-medium transition-colors duration-300 ${
+                className={`default-style:flex-1 default-style:rounded-xl default-style:py-2.5 default-style:text-[0.82rem] default-style:font-medium default-style:transition-colors default-style:duration-300 simple:flex-1 simple:rounded-xl simple:py-2.5 simple:text-[0.82rem] simple:font-medium simple:transition-colors simple:duration-300 ${
                   mode === m
-                    ? "bg-panel text-ink depth-float"
-                    : "text-ink-faint hover:text-ink-muted"
+                    ? "default-style:bg-panel default-style:text-ink default-style:depth-float simple:bg-panel simple:text-ink"
+                    : "default-style:text-ink-faint default-style:hover:text-ink-muted simple:text-ink-faint simple:hover:text-ink-muted"
                 }`}
               >
                 {m === "login" ? "登录" : "注册"}
@@ -229,7 +217,7 @@ export default function AuthScreen({
               <button
                 type="button"
                 onClick={() => switchMode("login")}
-                className="mb-3 text-[0.75rem] text-ink-faint hover:text-accent"
+                className="mb-3 text-[0.75rem] text-ink-faint hover:text-accent-ink"
               >
                 ← 返回登录
               </button>
@@ -298,7 +286,7 @@ export default function AuthScreen({
 
           {registering && (
             <>
-              <Field label="昵称" hint="可以重复；会与标签组成公开显示名称">
+              <Field label="昵称" hint="用于页面显示，可以与其他用户同名">
                 <input
                   required
                   value={nickname}
@@ -309,26 +297,9 @@ export default function AuthScreen({
                 />
               </Field>
 
-              <Field label="五位数字标签" hint="由你自己选择，注册后可在个人档案修改">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-ink-faint">#</span>
-                  <input
-                    required
-                    value={tag}
-                    onChange={(e) => setTag(e.target.value.replace(/\D/g, "").slice(0, 5))}
-                    inputMode="numeric"
-                    pattern="[0-9]{5}"
-                    minLength={5}
-                    maxLength={5}
-                    placeholder="12345"
-                    className={`${inputClass} font-mono tracking-[0.18em]`}
-                  />
-                </div>
-              </Field>
-
               <div className="mb-5">
-                <p className="mb-1.5 text-[0.78rem] font-medium text-ink-muted">出生日期 <span className="text-[0.68rem] text-ink-faint">必填 · 支持 10–120 岁</span></p>
-                <BirthdayPicker value={birthDate} onChange={setBirthDate} disabled={busy} />
+                <p className="mb-1.5 text-[0.78rem] font-medium text-ink-muted">出生年份 <span className="text-[0.68rem] text-ink-faint">必填 · 按年份估算 10–120 岁</span></p>
+                <BirthYearInput value={birthYear} onChange={setBirthYear} disabled={busy} />
               </div>
 
               <Field label="目前和谁住" optional>
@@ -339,21 +310,6 @@ export default function AuthScreen({
                       label={value}
                       selected={living === value}
                       onClick={() => setLiving(living === value ? null : value)}
-                    />
-                  ))}
-                </div>
-              </Field>
-
-              <Field label="你希望我用什么方式和你说话" optional>
-                <div className="flex flex-wrap gap-1.5">
-                  {COMMUNICATION_PREFERENCES.map((value) => (
-                    <Chip
-                      key={value}
-                      label={value}
-                      selected={communication === value}
-                      onClick={() =>
-                        setCommunication(communication === value ? null : value)
-                      }
                     />
                   ))}
                 </div>
@@ -427,7 +383,7 @@ export default function AuthScreen({
             <button
               type="button"
               onClick={() => switchMode("forgot")}
-              className="mt-3 w-full text-center text-[0.73rem] text-ink-faint hover:text-accent"
+              className="mt-3 w-full text-center text-[0.73rem] text-ink-faint hover:text-accent-ink"
             >
               忘记密码？
             </button>

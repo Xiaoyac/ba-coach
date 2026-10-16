@@ -4,10 +4,10 @@ import uuid
 from fastapi import HTTPException
 from sqlalchemy import select, insert, update, delete
 from .database_v2_schema import metadata as schema
-from .models import UserAccount, AccountHandle, AccountSettings
+from .models import UserAccount, AccountSettings
 from .providers import configured_providers
 from .schemas import ProfileOut
-from .birth_dates import age_on
+from .birth_years import age_from_year
 
 
 def enabled():
@@ -27,14 +27,11 @@ async def read(db, user_id):
     limits = (await db.execute(select(constraints).where(constraints.c.user_id == user_id,
         constraints.c.status == "active", constraints.c.confirmation_status != "rejected"))).mappings().all()
     account = (await db.execute(select(UserAccount.id).where(UserAccount.profile_uuid == user_id))).scalar_one_or_none()
-    handle = await db.get(AccountHandle, account) if account else None
     settings = await db.get(AccountSettings, account) if account else None
     from .workflow_state import derived_current_module
-    return ProfileOut(nickname=profile["nickname"], birth_date=profile["birth_date"],
-        age=age_on(profile["birth_date"]) if profile["birth_date"] else profile["reported_age"],
-        living_status=profile["living_status"], tag=handle.tag if handle else None,
-        display_id=handle.full_username if handle else None,
-        communication_preference=preference.get("communication_style"),
+    return ProfileOut(nickname=profile["nickname"], birth_year=profile["birth_year"],
+        age=age_from_year(profile["birth_year"]) if profile["birth_year"] else profile["reported_age"],
+        living_status=profile["living_status"],
         reminder_frequency=preference.get("reminder_frequency"), reminder_time_slot=preference.get("reminder_time_slot"),
         reminder_window={"start_minute": preference["reminder_start_minute"], "end_minute": preference["reminder_end_minute"]}
             if preference.get("reminder_start_minute") is not None and preference.get("reminder_end_minute") is not None else None,
@@ -52,11 +49,10 @@ async def read(db, user_id):
 
 async def create(db, user_id, payload):
     await db.execute(insert(schema.tables["user_profile"]), {"uuid": user_id, "nickname": payload.nickname,
-        "birth_date": payload.birth_date, "birth_year": payload.birth_date.year,
+        "birth_year": payload.birth_year,
         "reported_age": payload.age, "age_reported_at": datetime.now(timezone.utc).replace(tzinfo=None),
         "living_status": payload.living_status})
-    await db.execute(insert(schema.tables["user_preferences"]), {"user_id": user_id,
-        "communication_style": payload.communication_preference})
+    await db.execute(insert(schema.tables["user_preferences"]), {"user_id": user_id})
     await db.execute(insert(schema.tables["user_module_one_state"]), {"user_id": user_id, "completed_steps": []})
     await replace_constraints(db, user_id, "身体", "safety_limit", payload.physical_condition)
     await replace_constraints(db, user_id, "行为边界", "user_boundary", payload.behavior_taboo)
@@ -73,8 +69,7 @@ async def replace_constraints(db, user_id, category, kind, values):
 
 
 async def patch(db, user_id, payload):
-    from .routes.profile import _load_account_handle, _load_account_settings, _account_id
-    from .routes.auth import normalize_display_name
+    from .routes.profile import _load_account_settings, _account_id
     current = await read(db, user_id)
     changes = payload.model_dump(exclude_unset=True)
     if any(k.startswith("supporter1_") or k.startswith("supporter2_") for k in changes):
@@ -85,18 +80,18 @@ async def patch(db, user_id, payload):
         raise HTTPException(422, "支持者标记由支持者列表决定")
     updates = {k: changes[k] for k in ("nickname", "living_status") if k in changes}
     if "age" in changes:
-        if current.birth_date or "birth_date" in changes:
-            raise HTTPException(422, "年龄由出生日期计算，请修改出生日期")
+        if current.birth_year or "birth_year" in changes:
+            raise HTTPException(422, "年龄由出生年份计算，请修改出生年份")
         updates.update(reported_age=changes["age"], age_reported_at=datetime.now(timezone.utc).replace(tzinfo=None))
-    if "birth_date" in changes:
-        birthday = payload.birth_date
-        updates.update(birth_date=birthday, birth_year=birthday.year, reported_age=age_on(birthday),
+    if "birth_year" in changes:
+        birthday = payload.birth_year
+        updates.update(birth_year=birthday, reported_age=age_from_year(birthday),
             age_reported_at=datetime.now(timezone.utc).replace(tzinfo=None))
     if updates:
         updates["updated_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
         await db.execute(update(profile).where(profile.c.uuid == user_id).values(**updates))
     preferences = schema.tables["user_preferences"]
-    mapping = {"communication_preference": "communication_style", "activity_intensity": "activity_atmosphere",
+    mapping = {"activity_intensity": "activity_atmosphere",
         "activity_environment": "activity_environment", "activity_social": "activity_social",
         "reminder_frequency": "reminder_frequency", "reminder_time_slot": "reminder_time_slot"}
     updates = {new: changes[old] for old, new in mapping.items() if old in changes}
@@ -121,16 +116,6 @@ async def patch(db, user_id, payload):
             ("behavior_taboo", "行为边界", "user_boundary"), ("content_taboo", "话题边界", "user_boundary")):
         if field in changes:
             await replace_constraints(db, user_id, category, kind, changes[field])
-    if "nickname" in changes or "tag" in changes:
-        nickname = (changes.get("nickname") or current.nickname or "").strip()
-        tag = changes.get("tag", current.tag)
-        if not nickname or "#" in nickname or not tag:
-            raise HTTPException(422, "请填写有效昵称和标签")
-        handle = await _load_account_handle(db, user_id)
-        if not handle:
-            handle = AccountHandle(account_id=await _account_id(db, user_id))
-            db.add(handle)
-        handle.base_username, handle.normalized_base, handle.tag = nickname, normalize_display_name(nickname), tag
     if "preferred_provider" in changes:
         settings = await _load_account_settings(db, user_id)
         if not settings:

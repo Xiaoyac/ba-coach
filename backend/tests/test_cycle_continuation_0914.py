@@ -4,7 +4,7 @@ from sqlalchemy import insert, select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from app.database_v2_schema import metadata
-from app.models import Conversation, ConversationMessage
+from app.models import AccountSettings, Conversation, ConversationMessage, UserAccount
 from app.v2_repository import V2Conflict, V2NotFound, continue_reviewed_cycle, create_goal
 
 
@@ -15,6 +15,8 @@ async def db():
         await connection.run_sync(metadata.create_all)
         await connection.run_sync(Conversation.__table__.create)
         await connection.run_sync(ConversationMessage.__table__.create)
+        await connection.run_sync(UserAccount.__table__.create)
+        await connection.run_sync(AccountSettings.__table__.create)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as session:
         await session.execute(insert(metadata.tables["user_profile"]), [{"uuid": "a"}, {"uuid": "b"}])

@@ -14,9 +14,12 @@ from test_turn_confirmation_0924 import setup_turn
 async def add_shared_chats(db, *, role="admin"):
     connection = await db.connection()
     for model in (UserAccount, AccountSettings):
-        await connection.run_sync(lambda conn, table=model.__table__: table.create(conn))
+        await connection.run_sync(lambda conn, table=model.__table__: table.create(conn, checkfirst=True))
     await db.execute(insert(UserAccount), {"id": 1, "username": "shared-admin", "password_hash": "unused", "profile_uuid": "a"})
     await db.execute(insert(AccountSettings), {"account_id": 1, "role": role})
+    # Administrator goals are scoped to the chat that created them.
+    await db.execute(update(schema.tables["pa_goals"]).where(schema.tables["pa_goals"].c.id == "g1").values(
+        created_from_conversation_id=1))
     await db.execute(insert(Conversation), {"id": 4, "session_id": "normal-peer", "subject_id": "a", "revision": 8})
     rt = schema.tables["conversation_runtime_states"]
     await db.execute(insert(rt), {"conversation_id": 4, "current_module": "module_3", "flow_status": "waiting_execution",
@@ -39,12 +42,12 @@ async def snapshots(db):
     return {row["conversation_id"]: dict(row) for row in rows}
 
 
-@pytest.mark.parametrize("scenario,source_module,target,normal_module,normal_flow", [
-    ("confirm", "module_2", "module_3", "module_3", "active"),
-    ("execution", "module_3", "module_4", "module_4", "active"),
-    ("edit", "module_3", "module_2", "module_3", "completed"),
+@pytest.mark.parametrize("scenario,source_module,target", [
+    ("confirm", "module_2", "module_3"),
+    ("execution", "module_3", "module_4"),
+    ("edit", "module_3", "module_2"),
 ])
-async def test_shared_cycle_only_updates_normal_owned_chats(goal_api, scenario, source_module, target, normal_module, normal_flow):
+async def test_shared_cycle_never_rewrites_other_admin_chats(goal_api, scenario, source_module, target):
     _, db, _ = goal_api
     text = {"confirm": "确认，就按这个计划试试。", "execution": "刚才散步完成了。", "edit": "我还没执行，想先改这个计划。"}[scenario]
     state, context = await setup_turn(db, text, module=source_module)
@@ -54,12 +57,9 @@ async def test_shared_cycle_only_updates_normal_owned_chats(goal_api, scenario, 
     result = await apply_pre_reply_decision(state, context, SimpleNamespace(target_module=target))
     after = await snapshots(db)
     assert result["current_module"] == target
-    assert after[2] == before[2]  # Mode, module, flow, memory, versions and revision all stay Router-owned.
-    assert after[3] == before[3]  # Another account never receives the broadcast.
-    assert after[4]["current_module"] == normal_module and after[4]["flow_status"] == normal_flow
-    assert after[4]["row_version"] == before[4]["row_version"] + 1
-    assert after[4]["revision"] == before[4]["revision"] + 1
-    assert after[4]["memory"]["own_note"] == "normal"
+    # Administrator test chats own separate goals: neither the Router-only
+    # chat, a normal chat bound to the same cycle, nor another account changes.
+    assert after == before
     if scenario == "confirm":
         plans = schema.tables["module_two_record"]
         assert await db.scalar(select(plans.c.record_status).where(plans.c.id == "m2-draft")) == "confirmed"
@@ -70,7 +70,7 @@ async def test_shared_cycle_only_updates_normal_owned_chats(goal_api, scenario, 
 
 
 @pytest.mark.parametrize("scenario,target", [("confirm", "module_3"), ("execution", "module_4")])
-async def test_revoked_admin_cannot_keep_router_only_exception(goal_api, scenario, target):
+async def test_demoted_admin_uses_member_router_only_policy(goal_api, scenario, target):
     _, db, _ = goal_api
     state, context = await setup_turn(db,
         "确认，就按这个计划试试。" if scenario == "confirm" else "刚才散步完成了。",
@@ -80,6 +80,5 @@ async def test_revoked_admin_cannot_keep_router_only_exception(goal_api, scenari
     await db.commit()
     await apply_pre_reply_decision(state, context, SimpleNamespace(target_module=target))
     after = await snapshots(db)
-    assert after[2]["current_module"] == target and after[2]["flow_status"] == "active"
-    assert after[2]["row_version"] == before[2]["row_version"] + 1
+    assert after[2] == before[2]  # Business confirmation cannot reroute a member peer.
     assert after[3] == before[3]

@@ -109,6 +109,7 @@ def test_graph_has_expected_nodes() -> None:
         "analyze_intent",
         "recall_memory",
         "risk_gate",
+        "risk_check_failed",
         "pre_reply_router",
         "prepare_pa_reply",
         "crisis",
@@ -134,6 +135,10 @@ def test_every_module_branches_from_intent_and_converges() -> None:
     # The crisis branch is reachable from the same gate and converges too.
     assert ("risk_gate", "crisis", True) in edges
     assert ("crisis", "route_next_module", False) in edges
+    assert ("pre_reply_router", "prepare_pa_reply", False) in edges
+    # A failed or invalid risk screen ends the turn without any module reply.
+    assert ("risk_gate", "risk_check_failed", True) in edges
+    assert ("risk_check_failed", "__end__", False) in edges
     assert ("analyze_intent", "recall_memory", False) in edges
     assert ("recall_memory", "risk_gate", False) in edges
     assert ("route_next_module", "summarizer", False) in edges
@@ -342,11 +347,7 @@ async def test_extract_memory_loads_history_for_later_turns(context, provider) -
     await run({"user_input": "two", "session_id": session_id, "metadata": {}}, context)
 
     # Turn 2's model call sees: user "one", assistant reply, user "two".
-    from xml.etree.ElementTree import fromstring
-    seen = provider.seen[-1]
-    assert [m.role for m in seen] == ['user', 'assistant', 'user']
-    assert [fromstring(seen[0].content).text, seen[1].content, fromstring(seen[2].content).text] == ['one', 'saw 1 messages', 'two']
-    assert all(fromstring(seen[i].content).tag == 'message' and fromstring(seen[i].content).get('datetime') for i in (0, 2))
+    assert [m.source_content for m in provider.seen[-1]] == ["one", "saw 1 messages", "two"]
 
 
 async def test_state_carries_the_documented_fields(context) -> None:
@@ -808,12 +809,13 @@ async def test_memory_is_fed_back_into_the_prompt(context, provider) -> None:
         {"user_input": "再说说", "session_id": first["session_id"], "metadata": {}}, context
     )
     system = as_text(provider.systems[-1])
-    assert "# Recalled Context" in system
-    assert "我该怎么办？" in system  # Early background anchor remains.
+    # The raw history already includes this turn; the remote prompt cleanup
+    # removes only its duplicate anchor, not the conversation itself.
+    assert "我该怎么办？" not in system
+    assert [m.source_content for m in provider.seen[-1]].count("我该怎么办？") == 1
     assert "turn_count" not in system
     assert "last_user_message" not in system
-    from xml.etree.ElementTree import fromstring
-    assert fromstring(provider.seen[-1][-1].content).text == '再说说'
+    assert provider.seen[-1][-1].source_content == "再说说"
 
 
 async def test_long_user_message_is_truncated_in_memory(context) -> None:
@@ -832,7 +834,8 @@ async def test_provider_failure_converges_instead_of_raising(context, provider, 
 
     # The graph still reached the post node.
     assert final["error"] == "upstream exploded"
-    assert final["memory"]["turn_count"] == "1"
+    # A failed generation is not promoted into derived memory or turn counts.
+    assert "turn_count" not in final["memory"]
 
     # The user turn is recorded; no empty assistant turn was written.
     session = await store.get(final["session_id"])
@@ -1062,11 +1065,13 @@ async def test_a_crisis_turn_never_advances_the_module(context, provider) -> Non
     assert final["next_module"] == "module_1"
 
 
-async def test_the_gate_fails_open(context, provider) -> None:
-    """A broken screen must not block the turn — see risk_gate_node."""
+async def test_the_gate_fails_closed(context, provider) -> None:
+    """An unusable verdict must never authorize ordinary conversation."""
     provider.risk_result = "the model returned prose instead of json"
     final = await run({"user_input": "你好", "metadata": {}}, context)
-    assert final["final_response"] == "saw 1 messages"
+    from app.graph.nodes import RISK_CHECK_RETRY_REPLY
+    assert final["final_response"] == RISK_CHECK_RETRY_REPLY
+    assert not provider.seen and final['reply_held']
     assert not final.get("risk")
 
 
@@ -1079,9 +1084,10 @@ async def test_the_gate_can_be_turned_off(context, provider) -> None:
     provider.risk_result = '{"risk_status": 1}'
     final = await run({"user_input": "我不想活了", "metadata": {}}, context)
 
-    # No screening call at all, and the module answered.
+    # Disabling screening does not authorize unverified ordinary replies.
     assert not any("风险信号检测器" in s for s in provider.route_systems)
-    assert final["final_response"] == "saw 1 messages"
+    from app.graph.nodes import RISK_CHECK_RETRY_REPLY
+    assert final["final_response"] == RISK_CHECK_RETRY_REPLY
 
 
 async def test_the_flagged_turn_is_recorded_once(
@@ -1142,7 +1148,6 @@ async def test_registration_profile_reaches_the_system_prompt(
             UserProfile(
                 uuid="subj-1",
                 nickname="南瓜",
-                communication_preference="温柔引导",
                 physical_condition="膝关节损伤",
                 behavior_taboo="不能剧烈运动",
             )
@@ -1153,7 +1158,6 @@ async def test_registration_profile_reaches_the_system_prompt(
 
     system = "\n".join(seg.text for seg in provider.systems[0])
     assert "南瓜" in system
-    assert "温柔引导" in system
     assert "膝关节损伤" in system
     assert "不能剧烈运动" in system
     assert "用户档案" in system

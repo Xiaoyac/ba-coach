@@ -17,6 +17,7 @@ class GenerationStopped(Exception):
 
 @dataclass
 class GenerationControl:
+    session_key: tuple[str, str] | None = None
     stop: asyncio.Event = field(default_factory=asyncio.Event)
     done: asyncio.Event = field(default_factory=asyncio.Event)
     claimed: bool = False
@@ -67,6 +68,7 @@ class GenerationControl:
 class GenerationRegistry:
     def __init__(self):
         self.entries: dict[tuple[str | None, str], GenerationControl] = {}
+        self.active_sessions: dict[tuple[str, str], GenerationControl] = {}
 
     def _get(self, owner, generation_id):
         now = time.monotonic()
@@ -82,12 +84,18 @@ class GenerationRegistry:
             self.entries[key] = GenerationControl()
         return self.entries[key]
 
-    def begin(self, owner, generation_id):
+    def begin(self, owner, generation_id, session_id=None):
+        session_key = (owner, session_id) if owner and session_id else None
+        if session_key and session_key in self.active_sessions:
+            raise ValueError("A reply is already running in this conversation")
         entry = self._get(owner, generation_id)
         if entry.claimed:
             raise ValueError("Generation id already used")
         entry.claimed = True
         entry.phase = "generating"
+        entry.session_key = session_key
+        if session_key:
+            self.active_sessions[session_key] = entry
         return entry
 
     async def cancel(self, owner, generation_id):
@@ -104,6 +112,8 @@ class GenerationRegistry:
         return entry.phase
 
     def finish(self, entry):
+        if entry.session_key and self.active_sessions.get(entry.session_key) is entry:
+            del self.active_sessions[entry.session_key]
         entry.phase = "cancelled" if entry.stop.is_set() else "finished"
         entry.updated = time.monotonic()
         entry.done.set()

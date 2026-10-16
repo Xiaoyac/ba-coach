@@ -27,9 +27,10 @@ from .retrieval import DatabaseKnowledgeBase, KnowledgeChunk
 from .retrieval_cache import SearchResult
 from .retrieval_enhanced import focus_query
 from .vector_retrieval import LocalEmbedder
+from .knowledge_llm_rerank import MAX_RERANK_CANDIDATES
 
 logger = logging.getLogger(__name__)
-VERSION = "astrbot-style-hybrid-v2"
+VERSION = "astrbot-style-hybrid-v3-cap20"
 VECTOR_FORMAT = "astrbot-style-hybrid-v1"  # Ranking changes do not re-embed unchanged passages.
 
 
@@ -272,8 +273,15 @@ class HybridDatabaseKnowledgeBase(DatabaseKnowledgeBase):
                     round(score, 6), "relative_score_fusion"))
                 if not self.settings.knowledge_hybrid_sparse_reserve and len(hits) >= top_k:
                     break
+            candidate_count = len(hits)
+            if self.settings.knowledge_rerank_model:
+                # Preserve fusion/sparse ordering; the combined, deduplicated
+                # pool has one global cap, not a separate cap per category.
+                hits = hits[:MAX_RERANK_CANDIDATES]
             if trace is not None:
                 trace.update(candidates_by_category=counts,
+                    rerank_candidates_before_limit=candidate_count,
+                    rerank_candidate_limit=MAX_RERANK_CANDIDATES,
                     dense_ids=[f"kb:{snapshot.documents[i].id}" for i, _ in dense],
                     sparse_ids=[f"kb:{snapshot.documents[i].id}" for i, _ in sparse],
                     fused_ids=[f"kb:{snapshot.documents[i].id}" for i, _ in fused[:top_k]],
@@ -302,14 +310,22 @@ class HybridDatabaseKnowledgeBase(DatabaseKnowledgeBase):
                 partial(self._search_sync, self._snapshot, module=module, query=query,
                         top_k=max(top_k, self.settings.knowledge_hybrid_candidates), trace=trace)),
                 timeout=self.settings.knowledge_hybrid_timeout_seconds)
+            from .retrieval_timing import publish_timings
+            publish_timings({'ranking_mode': self.ranking_mode,
+                             'exact_cache': {'retriever_details': trace}}, local_only=True)
             rerank_status = "disabled"
             if self.settings.knowledge_rerank_model and hits:
                 trace["rerank_api_calls"] = 1
+                trace['rerank_candidate_count'] = len(hits)
+                trace['rerank_model'] = self.settings.knowledge_rerank_model
                 rerank_started = perf_counter()
                 # Dense/sparse focusing must not erase explicit refusals from
                 # the LLM relevance judge's view of the user's original request.
                 rerank_query = query if self.settings.knowledge_rerank_backend in {"k3", "llm"} else focus_query(query)
-                ranked = await self._rerank(rerank_query, hits, trace=trace)
+                from .execution_status import track_call
+                ranked = await track_call('knowledge_reranker',
+                    self._rerank(rerank_query, hits, trace=trace),
+                    model=self.settings.knowledge_rerank_model)
                 trace["rerank_duration_ms"] = round((perf_counter() - rerank_started) * 1000, 3)
                 rerank_status = "failed_retained_fusion" if ranked is hits else "completed"
                 if ranked is hits and self.settings.knowledge_hybrid_require_rerank:
@@ -337,6 +353,8 @@ class HybridDatabaseKnowledgeBase(DatabaseKnowledgeBase):
 
     async def _rerank(self, query, hits, *, trace=None):
         """Optional dedicated rerank API. Failure retains the fused candidates."""
+        if len(hits) > MAX_RERANK_CANDIDATES:
+            hits = hits[:MAX_RERANK_CANDIDATES]
         import httpx
         from dataclasses import replace
         try:

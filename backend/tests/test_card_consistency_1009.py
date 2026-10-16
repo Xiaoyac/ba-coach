@@ -28,6 +28,7 @@ async def mediate(quote, source=None, application='依据原文回应，不替�
     raw = json.dumps({'decision': 'use', 'selections': [
         {'id': 'test-kb', 'quote': quote, 'application': application}], 'note': ''}, ensure_ascii=False)
     class Provider:
+        name = model = 'test-flash'
         async def route_detailed(self, **kwargs):
             return Completion(text=raw, model='test-flash', usage={}, reasoning_content='', finish_reason='stop')
     return await mediate_knowledge(state={'user_input': '想先从简单活动开始。'}, module='module_2',
@@ -52,7 +53,8 @@ async def test_longer_quote_does_not_bypass_evidence_or_schema_checks():
     chunks, advice, metrics = await mediate('字' * 241)
     assert not chunks and not advice and metrics['reason'] == 'invalid_schema'
     assert metrics['validation_errors'] == [{'field': 'selections.0.quote', 'type': 'string_too_long'}]
-    chunks, advice, metrics = await mediate('原文', application='字' * 71)
+    # Applications may use up to 120 characters (see test_mediator_application_120).
+    chunks, advice, metrics = await mediate('原文', application='字' * 121)
     assert not chunks and not advice
     assert metrics['validation_errors'][0]['field'] == 'selections.0.application'
 
@@ -168,15 +170,16 @@ async def test_pre_reply_tools_review_then_durable_display_then_owned_confirmati
     provider = ToolProvider()
     monkeypatch.setattr(pa_background, 'background_provider', lambda _: provider)
     settings = Settings(_env_file=None, database_schema_version='v2', goal_card_ui_enabled=True)
-    context = SimpleNamespace(settings=settings, sessionmaker=card_db,
+    context = SimpleNamespace(settings=settings, sessionmaker=card_db, generation=None,
         prompt_snapshot={'module_2': '遵循真实来源核验当前卡片。'})
     state = {'session_id': 'm2-test', 'subject_id': 'a', 'user_message_id': 101,
         'current_module': 'module_2', 'extracted_intent': 'module_2', 'memory': {}}
+    # The PA writer runs in parallel with the main reply; the node never blocks.
     update_result = await prepare_pa_reply_node(state, SimpleNamespace(context=context))
+    assert update_result['pa_background_pending'] and not update_result['pa_operations_completed']
+    assert update_result['telemetry']['pa_background_tools']['timing'] == 'parallel_with_main_reply'
+    await context.pa_background_task
     assert provider.calls == 2
-    assert update_result['pa_operations_completed'] and not update_result['pa_background_pending']
-    assert update_result['current_module'] == 'module_2'
-    display = update_result['pa_operation_displays'][0]
     async with card_db() as db:
         card = dict((await db.execute(select(schema.tables['goal_card_workspaces']))).mappings().one())
         runtime_state = dict((await db.execute(select(schema.tables['conversation_runtime_states']))).mappings().one())
@@ -184,7 +187,8 @@ async def test_pre_reply_tools_review_then_durable_display_then_owned_confirmati
         unavailable = await confirmation_status(db, await db.get(Conversation, 1), runtime_state, card)
         assert not unavailable['allowed']  # not yet shown to the user
         event = (await db.execute(select(AIExecutionEvent))).scalar_one()
-        assert event.event_metadata['pa_background_tools']['timing'] == 'before_main_reply'
+        assert event.event_metadata['pa_background_tools']['timing'] == 'parallel_with_main_reply'
+        display = card['display_text']
         await db.execute(insert(ConversationMessage), {'id': 102, 'conversation_id': 1,
             'position': 1, 'role': 'assistant', 'content': '一起核对这份安排。\n\n' + display})
         await finalize_tool_display(db, session_id='m2-test', user_id='a', assistant_message_id=102)
@@ -208,15 +212,13 @@ async def test_pre_reply_provider_failure_keeps_truthful_state(card_db, monkeypa
     settings = Settings(_env_file=None, database_schema_version='v2', goal_card_ui_enabled=True)
     from app import config
     monkeypatch.setattr(config, 'get_settings', lambda: settings)
-    context = SimpleNamespace(settings=settings, sessionmaker=card_db, prompt_snapshot={})
+    context = SimpleNamespace(settings=settings, sessionmaker=card_db, prompt_snapshot={}, generation=None)
     state = {'session_id': 'm2-test', 'subject_id': 'a', 'user_message_id': 101,
         'current_module': 'module_2', 'extracted_intent': 'module_2', 'memory': {}}
     prepared = await prepare_pa_reply_node(state, SimpleNamespace(context=context))
-    assert prepared['pa_operations_completed'] and not prepared['pa_background_pending']
-    assert prepared['pa_operation_displays'] == []
-    assert 'confirmation_receipt' not in prepared
-    assert prepared['current_module'] == 'module_2'
+    assert prepared['pa_background_pending'] and 'confirmation_receipt' not in prepared
+    await context.pa_background_task  # the failure is contained in the worker
     authority = await read_reply_workflow(card_db, 'a', 'm2-test')
     assert not authority['plan_confirmed']
     assert authority['goal_card_operation']['status'] != 'running'
-    assert authority['goal_card_operation']['previous_attempt']['reason'] == 'card_preparation_failed'
+    assert authority['goal_card_operation']['previous_attempt']['reason'] == 'background_pa_failed'

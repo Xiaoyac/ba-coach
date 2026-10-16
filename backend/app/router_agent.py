@@ -16,6 +16,7 @@ from time import perf_counter
 from pathlib import Path
 
 from .providers.base import LLMProvider
+from .module_router import use_module_router
 from .reasoning import normalize_reasoning_channels
 from .workflow_state import normalise_completed_steps
 
@@ -87,6 +88,7 @@ class RouterDecision:
     revocation_evidence: str | None = None
     json_recovery: dict = field(default_factory=dict)
     knowledge_task: str = "general"
+    request_calls: list[dict] = field(default_factory=list)
 
 
 def format_routing_reasoning(decision, current, applied_target=None, *, diagnostics=None):
@@ -236,6 +238,7 @@ async def decide_target_module(
     return decision.target_module
 
 
+@use_module_router
 async def decide_target_module_with_reasoning(
     provider: LLMProvider,
     *,

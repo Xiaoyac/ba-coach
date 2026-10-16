@@ -1,7 +1,8 @@
 """Compile the reply pipeline.
 
 Load context -> safety screening -> current-turn router -> verified business
-commit -> selected module reply -> background-extraction marker -> persistence.
+commit -> launch independent PA writer -> selected module reply -> persistence.
+PA writes overlap retrieval/generation; only display publication waits for the reply.
 A crisis turn bypasses the router and business transitions entirely.
 """
 
@@ -21,6 +22,7 @@ from .nodes import (
     extract_memory_node,
     recall_memory_node,
     risk_gate_node,
+    risk_check_failed_node,
     route_next_module_node,
     summarizer_node,
     update_memory_and_format_node,
@@ -43,6 +45,7 @@ def build_graph() -> StateGraph:
     builder.add_node("analyze_intent", analyze_intent_node)
     builder.add_node("recall_memory", recall_memory_node)
     builder.add_node(RISK_NODE, risk_gate_node)
+    builder.add_node('risk_check_failed', risk_check_failed_node)
     builder.add_node("pre_reply_router", pre_reply_router_node)
     builder.add_node("prepare_pa_reply", prepare_pa_reply_node)
 
@@ -65,8 +68,10 @@ def build_graph() -> StateGraph:
     builder.add_conditional_edges(
         RISK_NODE,
         route_to_pre_reply,
-        {"pre_reply_router": "pre_reply_router", CRISIS_NODE: CRISIS_NODE},
+        {"pre_reply_router": "pre_reply_router", CRISIS_NODE: CRISIS_NODE,
+         'risk_check_failed':'risk_check_failed'},
     )
+    builder.add_edge('risk_check_failed', END)
     builder.add_edge("pre_reply_router", "prepare_pa_reply")
     builder.add_conditional_edges(
         "prepare_pa_reply",

@@ -4,12 +4,14 @@ The decision model sees prior dialogue and the current user message. The
 confirmation service owns all business mutations and can veto its proposal.
 """
 from __future__ import annotations
+from .execution_status import track_call, track_stream, routing_model
 
 import asyncio
 import logging
 from time import perf_counter
 
 from langgraph.config import get_stream_writer
+from .module_router import module_router_model
 from .router_agent import RouterDecision, decide_target_module_with_reasoning, format_routing_reasoning
 from .schemas import Message
 from .conversation_time import current_time_context, timed_transcript
@@ -189,22 +191,23 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
     # not cancel native reasoning before the final routing JSON can arrive.
     router_timeout = (
         context.settings.router_request_timeout_seconds
-        if context.settings.module_router_reasoning_effort == "disabled"
+        if not hasattr(context.router_provider, "_settings") and context.settings.module_router_reasoning_effort == "disabled"
         else context.settings.background_model_timeout_seconds
     )
+    router_calls = []
     try:
-        decision = await asyncio.wait_for(decide_target_module_with_reasoning(context.router_provider,
+        decision = await track_call('module_router', asyncio.wait_for(decide_target_module_with_reasoning(context.router_provider,
             current_module=current, user_input=state["user_input"],
             has_pa_card=bool(prepared["routing_state"].get("has_pa_card")),
             conversation_context=history, business_state=prepared["routing_state"],
             system_prompt=context.router_prompt, max_tokens=context.settings.router_reasoning_max_tokens,
-            clock_context=clock_context,
+            clock_context=clock_context, _request_calls=router_calls,
             routing_mode=prepared["routing_mode"],
             completed_steps=(prepared.get("module_steps") or {}).get(current, [])),
-            timeout=router_timeout)
+            timeout=router_timeout), model=module_router_model(context.router_provider))
     except asyncio.TimeoutError:
-        decision = RouterDecision(target_module=current, reasoning_content="", model="", completed_steps=[],
-                                  usage={}, error_code="router_timeout")
+        decision = RouterDecision(target_module=current, reasoning_content="", model=module_router_model(context.router_provider), completed_steps=[],
+                                  usage={}, error_code="router_timeout", request_calls=router_calls)
     routing_ms = round((perf_counter() - started) * 1000, 3)
     record_span(telemetry, "router_pre_reply", started, origin=origin,
                 status="failed" if decision.error_code else "completed")
@@ -221,7 +224,7 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
     if context.sessionmaker is not None and state.get("subject_id"):
         from .ai_telemetry import save_ai_event
         await save_ai_event(context.sessionmaker, stage="module_router", session_id=state["session_id"],
-            subject_id=state["subject_id"], provider=context.router_provider.name,
+            subject_id=state["subject_id"], provider="deepseek" if hasattr(context.router_provider, "_settings") else context.router_provider.name,
             model_name=decision.model, duration_ms=int(routing_ms), usage=decision.usage,
             request_id=decision.request_id, finish_reason=decision.finish_reason,
             error_code=decision.error_code, prompt_version=source["version"],
@@ -230,7 +233,7 @@ this coordinator cannot turn a proposal or a failed commit into a module hop.
                 "routing_mode":prepared["routing_mode"],
                 "database_transition_preconditions_disabled":prepared["routing_mode"] == ROUTER_ONLY,
                 "execution_plan_binding_required": prepared["routing_mode"] == ROUTER_ONLY,
-                "json_recovery":decision.json_recovery, "user_message_id":state.get("user_message_id")})
+                "json_recovery":decision.json_recovery, "router_calls":decision.request_calls, "user_message_id":state.get("user_message_id")})
     applied = {}
     authoritative = context.settings.database_schema_version == "v2" and context.sessionmaker is not None and state.get("subject_id")
     if authoritative or apply_decision is not None:
@@ -338,4 +341,7 @@ def route_after_pre_reply(state):
 
 
 def route_to_pre_reply(state):
-    return "crisis" if state.get("risk") else "pre_reply_router"
+    if state.get('risk'):
+        return 'crisis'
+    return ('pre_reply_router' if (state.get('telemetry') or {}).get('risk_gate_status') == 'passed'
+            else 'risk_check_failed')

@@ -59,7 +59,8 @@ def test_m4_contract_and_evidence_are_reported_separately():
                                m4_missing_fields=["m4_milestone_2"])
     assert not result["ready"]
     assert any(item["code"] == M4_EVIDENCE_MISSING for item in result["reasons"])
-    assert "review_decision" in result["missing_fields"]
+    assert "execution_result" in result["missing_fields"]
+    assert "review_decision" not in result["missing_fields"]
 
 
 def test_confirmation_markers_fail_closed_with_specific_codes():

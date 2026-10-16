@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ConversationSummary } from "@/lib/conversations";
 import type { SandboxModule } from "@/lib/adminSandbox";
 import AdminSandboxControl from "@/components/AdminSandboxControl";
-import ThemeToggle from "@/components/ThemeToggle";
+import SettingsLink from "@/components/SettingsLink";
 import KnowledgeCacheMetric from "@/components/KnowledgeCacheMetric";
 import {
   ChatBubbleMark,
@@ -51,7 +51,6 @@ export default function ConversationSidebar({
   onTogglePin,
   onStartSandbox,
   onOpenTestWorkbench,
-  onOpenAssessment,
   onOpenGoals,
   onReportIssue,
   reportPreparing = false,
@@ -72,7 +71,6 @@ export default function ConversationSidebar({
   /** Present only for administrators; absence removes the control entirely. */
   onStartSandbox?: (module: SandboxModule) => void;
   onOpenTestWorkbench?: () => void;
-  onOpenAssessment?: () => void;
   onOpenGoals?: () => void;
   onReportIssue?: () => void;
   reportPreparing?: boolean;
@@ -95,7 +93,7 @@ export default function ConversationSidebar({
     if (!open || window.matchMedia("(min-width: 768px)").matches) return;
     const previous = document.activeElement as HTMLElement | null;
     const rail = railRef.current;
-    const controls = () => Array.from(rail?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), [tabindex="0"]') ?? []).filter(el => el.getClientRects().length > 0);
+    const controls = () => Array.from(rail?.querySelectorAll<HTMLElement>('a[href], button:not(:disabled), input:not(:disabled), [tabindex="0"]') ?? []).filter(el => el.getClientRects().length > 0);
     controls()[0]?.focus();
     const trap = (event: KeyboardEvent) => {
       if (event.key === "Escape") { event.preventDefault(); onClose(); }
@@ -175,7 +173,7 @@ export default function ConversationSidebar({
       >
         <div className="shrink-0 px-3 pb-2 pt-5">
           <div className="mb-3 flex items-center gap-2 px-1">
-            <span className="grid h-8 w-8 place-items-center rounded-xl bg-accent-wash text-accent">
+            <span className="grid h-8 w-8 place-items-center rounded-xl bg-accent-wash text-accent-ink">
               <EnsoMark className="h-4 w-4" />
             </span>
             <div className="min-w-0">
@@ -188,10 +186,7 @@ export default function ConversationSidebar({
           {onOpenGoals && <button type="button" onClick={onOpenGoals}
             className="surface-button flex min-h-11 w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-ink-muted">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true" className="h-4 w-4"><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="4.5" /><circle cx="12" cy="12" r="1" /></svg>
-            我的目标</button>}
-          {onOpenAssessment && <button type="button" onClick={onOpenAssessment}
-            className="surface-button flex min-h-11 w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-ink-muted">
-            <NotebookMark className="h-4 w-4" />每日记录</button>}
+            目标与记录</button>}
           {(onOpenTestWorkbench || onStartSandbox) && <div className="pt-1">
             <button type="button" onClick={() => setAdminToolsOpen((value) => !value)} aria-expanded={adminToolsOpen}
               className="surface-button flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-[0.75rem] text-ink-muted">
@@ -320,7 +315,7 @@ export default function ConversationSidebar({
                   >
                     <span className="flex items-center gap-1.5">
                       {c.pinned && (
-                        <PinMark className="h-3 w-3 shrink-0 text-accent" />
+                        <PinMark className="h-3 w-3 shrink-0 text-accent-ink" />
                       )}
                       <span className="truncate text-[0.82rem]">
                         {c.title || "新对话"}
@@ -350,7 +345,7 @@ export default function ConversationSidebar({
                   {menuOpen && (
                     <div
                       role="menu"
-                      className="absolute right-1.5 top-full z-40 mt-1 w-36 overflow-clip rounded-xl border border-line bg-panel py-1 depth-panel backdrop-blur-2xl"
+                      className="default-style:absolute default-style:right-1.5 default-style:top-full default-style:z-40 default-style:mt-1 default-style:w-36 default-style:overflow-clip default-style:rounded-xl default-style:border default-style:border-line default-style:bg-panel default-style:py-1 default-style:depth-panel default-style:backdrop-blur-2xl simple:absolute simple:right-1.5 simple:top-full simple:z-40 simple:mt-1 simple:w-36 simple:overflow-clip simple:rounded-xl simple:border simple:border-line simple:bg-panel simple:py-1 simple:depth-panel "
                     >
                       <MenuItem
                         icon={<PencilMark className="h-3.5 w-3.5" />}
@@ -391,7 +386,7 @@ export default function ConversationSidebar({
         </div>
         <div className="flex shrink-0 items-center justify-between gap-2 px-3 pb-3 pt-2">
           {onReportIssue && <button type="button" onClick={onReportIssue} disabled={reportPreparing} data-screenshot-exclude="true" className="surface-button min-h-11 rounded-xl px-3 text-xs text-ink-muted disabled:opacity-50">{reportPreparing ? "正在准备截图…" : "帮助与反馈"}</button>}
-          <ThemeToggle inline />
+          <SettingsLink onClick={onClose} />
         </div>
       </aside>
     </>

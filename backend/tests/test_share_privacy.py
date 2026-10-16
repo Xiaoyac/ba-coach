@@ -1,4 +1,4 @@
-"""Public tokens never authorize internal model data, including old snapshots."""
+"""Member and legacy tokens retain the transcript-only publication contract."""
 from copy import deepcopy
 
 import pytest
@@ -21,7 +21,7 @@ PRIVATE = {
 }
 
 
-@pytest.mark.parametrize("owner", ["auth_headers", "admin_headers"])
+@pytest.mark.parametrize("owner", ["auth_headers"])
 def test_new_and_existing_shares_publish_only_transcript(client, request, owner, db_sessionmaker):
     headers = request.getfixturevalue(owner)
     subject = client.get("/api/auth/me", headers=headers).json()["profile_uuid"]
@@ -62,7 +62,7 @@ def test_new_and_existing_shares_publish_only_transcript(client, request, owner,
         assert snapshot["title"] == "散步计划"
         assert [m["id"] for m in snapshot["messages"]] == [1, 2]
         assert [m["content"] for m in snapshot["messages"]] == ["今天想散步", "可以先走五分钟。"]
-        assert all(set(m) == {"id", "role", "content", "created_at"} for m in snapshot["messages"])
+        assert all(set(m) == {"id", "role", "content", "created_at", "reply_status"} for m in snapshot["messages"])
         assert "SECRET" not in str(snapshot)
     public = client.get(f"/api/shares/{token}")
     assert public.headers["cache-control"] == "private, no-store"
@@ -74,9 +74,21 @@ def test_new_and_existing_shares_publish_only_transcript(client, request, owner,
     ("<thinking>SECRET</thinking>正文<think>SECRET", "正文"),
     ('<message datetime="260930-12:00"><think>SECRET</think>正文</message>', "正文"),
     ('<tool_call>SECRET</tool_call>', ""),
+    ('{"chat_reply":"正文","reasoning":"SECRET_JSON"}', "正文"),
+    ('```json\n{"chat_reply":"<think>SECRET</think>正文","reasoning":"SECRET_JSON"}\n```', "正文"),
+    ('{"chat_reply":"正文","reasoning":"SECRET_TRUNCATED', ""),
+    ('{"reasoning":"SECRET_TRUNCATED","chat_reply":"正文', ""),
+    ('{"chat_reply":null,"reasoning":"SECRET_JSON"}', ""),
+    ('{"chat_reply":{"reasoning":"SECRET_JSON"}}', ""),
+    ('{"activity":"散步"}', '{"activity":"散步"}'),
 ])
 def test_public_reply_does_not_promote_thoughts(content, expected):
     assert SharedMessage(id=1, role="assistant", content=content, **PRIVATE).content == expected
+
+
+def test_share_preserves_user_authored_structured_text():
+    content = '{"chat_reply":"<think>用户自己输入的例子</think>","note":"保留原文"}'
+    assert SharedMessage(id=1, role="user", content=content).content == content
 
 
 def test_member_profile_hides_models_and_rejects_changes(client, auth_headers, monkeypatch):

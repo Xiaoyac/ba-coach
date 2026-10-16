@@ -17,6 +17,7 @@ import {
   replyModeLabels,
   routingModeLabels,
   setConversationMediator,
+  setConversationMediatorNode,
   setConversationReplyEffort,
   subscribeConversation,
   updateConversation,
@@ -27,20 +28,17 @@ import {
   type ConversationReplyEffort,
 } from "@/lib/conversations";
 import Chat from "@/components/Chat";
+import { beginResponseTiming, bindResponseTiming, noteBodyOffset, endResponseTiming } from "@/lib/responseTiming";
 import ConversationShareModal from "@/components/ConversationShareModal";
 import ConversationModeModal from "@/components/ConversationModeModal";
 import ConversationSidebar from "@/components/ConversationSidebar";
-import ChangePasswordModal from "@/components/ChangePasswordModal";
-import EmailSettingsModal from "@/components/EmailSettingsModal";
-import ProfileModal from "@/components/ProfileModal";
-import DailyAssessmentModal from "@/components/DailyAssessmentModal";
+import GoalsAndRecordsModal from "@/components/GoalsAndRecordsModal";
 import PromptManagerModal from "@/components/PromptManagerModal";
 import AdminAccountManagerModal from "@/components/AdminAccountManagerModal";
 import IssueReportModal from "@/components/IssueReportModal";
 import AdminIssueReportModal from "@/components/AdminIssueReportModal";
 import AdminDailyRecords from "@/components/AdminDailyRecords";
 import TestWorkbench from "@/components/TestWorkbench";
-import GoalOverview from "@/components/GoalOverview";
 import PushReminderModal from "@/components/PushReminderModal";
 import { captureViewport } from "@/lib/capture";
 import {
@@ -90,7 +88,6 @@ export default function ConversationWorkspace({
   displayName,
   accountUsername,
   accountId,
-  displayIdentity,
   accountRole,
   accountEmail,
   accountEmailVerified,
@@ -101,7 +98,6 @@ export default function ConversationWorkspace({
   displayName: string;
   accountUsername: string;
   accountId: string;
-  displayIdentity: string | null;
   accountRole: "user" | "admin";
   accountEmail: string | null;
   accountEmailVerified: boolean;
@@ -117,6 +113,7 @@ export default function ConversationWorkspace({
   const [replyWaiting, setReplyWaiting] = useState(false);
   const [replyComplete, setReplyComplete] = useState(false);
   const [mediatorEnabled, setMediatorEnabled] = useState(true);
+  const [mediatorNodeEnabled, setMediatorNodeEnabled] = useState(false);
   const [mediatorSavingSessions, setMediatorSavingSessions] = useState<string[]>([]);
   const mediatorSaveRef = useRef(new Set<string>());
   const mediatorSaving = Boolean(sessionId && mediatorSavingSessions.includes(sessionId));
@@ -125,7 +122,7 @@ export default function ConversationWorkspace({
   const [replyEffortSavingSessions, setReplyEffortSavingSessions] = useState<string[]>([]);
   const replyEffortSaveRef = useRef(new Set<string>());
   const replySettingsBySession = useRef(new Map<string, {
-    revision: number; effort: ConversationReplyEffort; options: ConversationReplyEffort[] | null; mediatorEnabled: boolean;
+    revision: number; effort: ConversationReplyEffort; options: ConversationReplyEffort[] | null; mediatorEnabled: boolean; mediatorNodeEnabled: boolean;
   }>());
   const replyEffortSaving = Boolean(sessionId && replyEffortSavingSessions.includes(sessionId));
   const [modeChooserOpen, setModeChooserOpen] = useState(false);
@@ -141,6 +138,8 @@ export default function ConversationWorkspace({
   const [stopping, setStopping] = useState(false);
   const [generationNotice, setGenerationNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const retryingSend = useRef(false);
+  const [recoveringSend, setRecoveringSend] = useState(false);
   const [failedSends, setFailedSends] = useState<FailedChatSend[]>([]);
   const failedSendsRef = useRef<FailedChatSend[]>([]);
   const lastSendError = useRef<{ id: string; sessionId: string; message: string } | null>(null);
@@ -221,9 +220,6 @@ export default function ConversationWorkspace({
       turns.current.clear();
     };
   }, []);
-  const [passwordOpen, setPasswordOpen] = useState(false);
-  const [emailSettingsOpen, setEmailSettingsOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
   const [promptManagerOpen, setPromptManagerOpen] = useState(false);
   const [accountManagerOpen, setAccountManagerOpen] = useState(false);
   const [issueManagerOpen, setIssueManagerOpen] = useState(false);
@@ -261,11 +257,13 @@ export default function ConversationWorkspace({
     const settings = known && known.revision > revision ? known : {
       revision, effort: detail.reply_effort ?? "low", options: detail.reply_effort_options ?? null,
       mediatorEnabled: detail.knowledge_mediator_enabled ?? true,
+      mediatorNodeEnabled: detail.knowledge_mediator_node_enabled ?? false,
     };
     replySettingsBySession.current.set(detail.session_id, settings);
     if (activeSessionIdRef.current === detail.session_id) {
       setReplyEffort(settings.effort);
       setMediatorEnabled(settings.mediatorEnabled);
+      setMediatorNodeEnabled(settings.mediatorNodeEnabled);
       setReplyEffortOptions(settings.options);
     }
   }, []);
@@ -745,7 +743,7 @@ export default function ConversationWorkspace({
     }
   }
 
-  async function handleMediatorToggle() {
+  async function handleMediatorToggle(node = false) {
     const target = activeSessionIdRef.current;
     if (!isAdmin || !target || loadingConversation || turns.current.has(target)
       || mediatorSaveRef.current.has(target) || replyEffortSaveRef.current.has(target)) return;
@@ -753,7 +751,9 @@ export default function ConversationWorkspace({
     setMediatorSavingSessions(previous => [...previous, target]);
     setError(null);
     try {
-      const detail = await setConversationMediator(target, !mediatorEnabled);
+      const detail = node
+        ? await setConversationMediatorNode(target, !mediatorNodeEnabled)
+        : await setConversationMediator(target, !mediatorEnabled);
       if (activeSessionIdRef.current === target) applyRemoteSnapshot(detail);
       else syncReplySettings(detail);
     } catch (err) {
@@ -784,7 +784,41 @@ export default function ConversationWorkspace({
     }
   }
 
-  async function handleSend(text: string, metadata?: Record<string, string>) {
+  async function handleRetryFailedSend(item: FailedChatSend) {
+    const sourceId = activeSessionIdRef.current;
+    if (retryingSend.current || busyRef.current || loadingConversation || item.sessionId !== sourceId || item.userMessageId === null) return;
+    retryingSend.current = true;
+    setRecoveringSend(true);
+    try {
+      const status = await cancelGeneration(item.id);
+      if (status.status === "stopping" || status.status === "finalizing") {
+        if (activeSessionIdRef.current === sourceId) setError("上一条请求尚未结束，请稍后检查记录再重试。");
+        return;
+      }
+      const detail = await fetchConversation(item.sessionId, AbortSignal.timeout(10000));
+      if (!mountedRef.current || activeSessionIdRef.current !== sourceId) return;
+      applyRemoteSnapshot(detail);
+      if (hasDurableReplyForTurn(detail, item)) {
+        reconcileFailedHistory(detail);
+        setError(null);
+        return;
+      }
+      const lastUser = detail.messages.filter(message => message.role === "user").at(-1);
+      if (lastUser?.id !== item.userMessageId) {
+        setError("对话已有新消息，请在当前对话继续说明，不要重试旧问题。");
+        return;
+      }
+      await handleSend(item.text, undefined, { item, messages: detail.messages });
+    } catch {
+      if (mountedRef.current && activeSessionIdRef.current === sourceId) setError("暂时无法核对上次请求，没有重新发送。请稍后重试。");
+    } finally {
+      retryingSend.current = false;
+      if (mountedRef.current) setRecoveringSend(false);
+    }
+  }
+
+  async function handleSend(text: string, metadata?: Record<string, string>, retry?: { item: FailedChatSend; messages: ChatMessage[] }) {
+    const submittedAt = performance.now();
     const sourceId = activeSessionIdRef.current;
     if ((sourceId && (replyEffortSaveRef.current.has(sourceId) || mediatorSaveRef.current.has(sourceId)))
       || !sourceId || sourceId !== sessionId || loadingConversation || turns.current.has(sourceId)) {
@@ -792,16 +826,18 @@ export default function ConversationWorkspace({
       return;
     }
     const controller = new AbortController();
-    const baseline = messages.length;
+    const baseMessages = retry?.messages ?? messages;
+    const baseline = baseMessages.length;
     const turn: ConversationTurn = {
       id: crypto.randomUUID(), sessionId: sourceId, userMessageId: null,
       startedAt: Date.now(), controller, cancelled: false, stopRequested: false,
-      messages: [...messages, { role: "user", content: text, created_at: new Date().toISOString() }, {
+      messages: [...baseMessages, { role: "user", content: text, created_at: new Date().toISOString() }, {
         role: "assistant", content: "", reasoning_content: "", model_name: null,
         routing_reasoning_content: "", router_model_name: null,
       }],
       routing: { ...routing }, error: null, notice: null, replyWaiting: false, replyComplete: false, replyWaitPhase: "awaiting",
     };
+    if (isAdmin) beginResponseTiming(turn.id, sourceId, submittedAt);
     turns.current.set(sourceId, turn);
     // Persist before the first network await: 401, refresh or logout may
     // unmount this workspace before a failure handler can save the original.
@@ -846,13 +882,19 @@ export default function ConversationWorkspace({
       } catch { /* The next bounded poll retries. */ }
       finally { window.clearTimeout(readTimeout); checking = false; }
     }, 5000);
-    // The experiment's main request can itself use 180 seconds; leave room
-    // for the unchanged risk, routing and retrieval stages ahead of it.
-    const deadline = window.setTimeout(() => controller.abort(), conversationReplyMode === "ack_deep" ? 240000 : 180000);
+    // Six attempts at 180s plus bounded backoff; leave room for routing and saving.
+    // Allow bounded room for safety, routing, retrieval and final persistence.
+    const deadline = window.setTimeout(() => controller.abort(), 1230000);
     try {
       await streamChat(
-        { message: text, session_id: sourceId, generation_id: turn.id, ...(metadata ? {metadata} : {}) },
+        { message: text, session_id: sourceId, generation_id: turn.id, ...(retry ? { retry_of_message_id: retry.item.userMessageId! } : {}), ...(metadata ? {metadata} : {}) },
         {
+          onRetry: value => {
+            if (!ownsTask() || value.generation_id !== turn.id || turn.stopRequested || turn.cancelled) return;
+            if (value.retrying) turn.notice = "重新连接中(网络超时)";
+            else if (turn.notice === "重新连接中(网络超时)") turn.notice = null;
+            publishTurn(turn);
+          },
           onReplyWait: value => {
             if (!isAdmin || conversationReplyMode !== "ack_deep" || !ownsTask() || activeSessionIdRef.current !== sourceId
               || value.generation_id !== turn.id || turn.replyWaitPhase === "closed") return;
@@ -863,10 +905,11 @@ export default function ConversationWorkspace({
           },
           onPersisted: saved => {
             terminalAcknowledged = true; replySaved = saved;
-            if (saved && ownsTask() && mountedRef.current) updateFailedSends(items => items.filter(item => item.id !== turn.id));
+            if (saved && !turn.error && ownsTask() && mountedRef.current) updateFailedSends(items => items.filter(item => item.id !== turn.id));
           },
           onDone: () => {
             if (!ownsTask()) return;
+            if (turn.notice === "重新连接中(网络超时)") turn.notice = null;
             turn.replyComplete = !turn.cancelled;
             turn.replyWaiting = false;
             turn.replyWaitPhase = "closed";
@@ -883,7 +926,9 @@ export default function ConversationWorkspace({
             if (!ownsTask() || (meta.session_id && meta.session_id !== sourceId)) return;
             if (Number.isSafeInteger(meta.user_message_id) && meta.user_message_id! > 0) {
               turn.userMessageId = meta.user_message_id!;
-              updateFailedSends(items => acknowledgeChatSend(items, turn.id, turn.userMessageId!));
+              bindResponseTiming(turn.id, turn.userMessageId);
+              updateAssistant(message => ({ ...message, reply_to_message_id: turn.userMessageId }));
+              updateFailedSends(items => acknowledgeChatSend(retry ? items.filter(item => item.id !== retry.item.id) : items, turn.id, turn.userMessageId!));
             }
             if (meta.user_created_at) {
               turn.messages = turn.messages.map((message, index) => index === baseline
@@ -897,12 +942,20 @@ export default function ConversationWorkspace({
             else publishTurn(turn);
           },
           onDelta: (delta, phase) => {
+            if (phase !== "lead" && delta.trim()) {
+              noteBodyOffset(turn.id, turn.messages.at(-1)?.content.length ?? 0);
+            }
             if (delta.trim()) turn.replyComplete = false;
             if (phase !== "lead" && delta.trim() && turn.replyWaitPhase === "waiting") {
               turn.replyWaiting = false;
               turn.replyWaitPhase = "closed";
             }
-            updateAssistant(message => ({ ...message, content: message.content + delta }));
+            updateAssistant(message => ({ ...message, content: message.content + delta,
+              stream_phase: phase === "lead" && message.stream_phase !== "body" ? "lead"
+                : delta.trim() ? "body" : message.stream_phase,
+              stream_lead_length: phase === "lead" && message.stream_phase !== "body"
+                ? (message.stream_lead_length ?? 0) + delta.length : message.stream_lead_length,
+            }));
           },
           onReasoningDelta: delta => updateAssistant(message => ({
             ...message, reasoning_content: (message.reasoning_content ?? "") + delta,
@@ -914,6 +967,7 @@ export default function ConversationWorkspace({
             if (!ownsTask()) return;
             turn.replyWaiting = false;
             turn.replyWaitPhase = "closed";
+            if (turn.notice === "重新连接中(网络超时)") turn.notice = null;
             turn.error = detail;
             publishTurn(turn);
           },
@@ -925,11 +979,12 @@ export default function ConversationWorkspace({
         turn.replyWaiting = false;
         turn.replyWaitPhase = "closed";
         turn.error = controller.signal.aborted
-          ? "等待回复超时，已停止转圈并继续同步记录。请稍后查看，避免重复发送。"
+          ? "等待回复已超时，原文已保留。请检查记录后重新尝试。"
           : safeChatTransportError(err);
         publishTurn(turn);
       }
     } finally {
+      if (turn.notice === "重新连接中(网络超时)") turn.notice = null;
       turn.replyWaiting = false;
       turn.replyWaitPhase = "closed";
       if (ownsTask() && activeSessionIdRef.current === sourceId) setReplyWaiting(false);
@@ -950,7 +1005,7 @@ export default function ConversationWorkspace({
       }
       // The save/cancel SSE receipt releases the turn immediately. A subsequent
       // best-effort history GET must not hold the composer or generation state.
-      if (terminalAcknowledged && !replySaved && ownsTask() && turn.error && !turn.cancelled && !metadata && mountedRef.current) {
+      if (terminalAcknowledged && (!replySaved || turn.error) && ownsTask() && turn.error && !turn.cancelled && !metadata && mountedRef.current) {
         updateFailedSends(items => [...items.filter(item => item.id !== turn.id), {
           id: turn.id, sessionId: sourceId, text, userMessageId: turn.userMessageId,
         }]);
@@ -979,11 +1034,12 @@ export default function ConversationWorkspace({
       // Recheck ownership AFTER awaiting: navigation or deletion can happen
       // during the final fetch, not just before it.
       if (detail && mountedRef.current) reconcileFailedHistory(detail);
+      if (retry && turn.userMessageId === null && mountedRef.current) updateFailedSends(items => items.filter(item => item.id !== turn.id));
       if (ownsTask()) {
         if (detail && hasDurableReply(detail)) {
           turn.error = null;
           pendingFloors.current.delete(sourceId);
-        } else if (turn.error && !turn.cancelled && !metadata && mountedRef.current) {
+        } else if (turn.error && !turn.cancelled && !metadata && (!retry || turn.userMessageId !== null) && mountedRef.current) {
           const failure = { id: turn.id, sessionId: sourceId, text, userMessageId: turn.userMessageId };
           updateFailedSends(items => [...items.filter(item => item.id !== turn.id), failure]);
           lastSendError.current = { id: turn.id, sessionId: sourceId, message: turn.error };
@@ -993,6 +1049,7 @@ export default function ConversationWorkspace({
 
       // Remove only this generation's entry. Never delete a newer turn that
       // could have been created after a navigation race.
+      endResponseTiming(turn.id);
       const sameTurn = turns.current.get(sourceId) === turn;
       if (sameTurn) {
         turns.current.delete(sourceId);
@@ -1199,7 +1256,6 @@ export default function ConversationWorkspace({
         }
         sandboxBusy={busy || sandboxStarting}
         onOpenTestWorkbench={accountRole === "admin" ? () => setTestWorkbenchOpen(true) : undefined}
-        onOpenAssessment={dailyRecordsAvailable ? () => { setAssessmentView("record"); setAssessmentOpen(true); setSidebarOpen(false); } : undefined}
         onOpenGoals={() => { setGoalArchiveKind("all"); setGoalsOpen(true); setSidebarOpen(false); }}
         open={sidebarOpen}
         collapsed={sidebarCollapsed}
@@ -1231,7 +1287,9 @@ export default function ConversationWorkspace({
           replyMode={conversationReplyMode}
           mediatorEnabled={mediatorEnabled}
           mediatorBusy={mediatorSaving}
-          onToggleMediator={isAdmin && sessionId ? handleMediatorToggle : undefined}
+          onToggleMediator={isAdmin && sessionId ? () => handleMediatorToggle() : undefined}
+          onToggleMediatorNode={isAdmin && sessionId ? () => handleMediatorToggle(true) : undefined}
+          mediatorNodeEnabled={mediatorNodeEnabled}
           replyEffort={replyEffort}
           replyEffortOptions={replyEffortOptions ?? []}
           replyEffortBusy={replyEffortSaving}
@@ -1241,6 +1299,8 @@ export default function ConversationWorkspace({
           loading={loadingConversation}
           error={error}
           failedSends={visibleFailedSends(failedSends, sessionId, sessionId ? turns.current.get(sessionId)?.id : undefined)}
+          onRetryFailedSend={handleRetryFailedSend}
+          recoveringSend={recoveringSend}
           onDismissFailedSend={id => updateFailedSends(items => items.filter(item => item.id !== id))}
           onSend={handleSend}
           onStop={busy ? handleStop : undefined}
@@ -1259,12 +1319,7 @@ export default function ConversationWorkspace({
           onOpenPushSettings={() => setPushSettingsOpen(true)}
           displayName={displayName}
           accountUsername={accountUsername}
-          displayIdentity={displayIdentity}
           accountRole={accountRole}
-          onLogout={onLogout}
-          onChangePassword={() => setPasswordOpen(true)}
-          onOpenEmailSettings={() => setEmailSettingsOpen(true)}
-          onOpenProfile={() => setProfileOpen(true)}
           onOpenPromptManager={() => setPromptManagerOpen(true)}
           onOpenAccountManager={() => setAccountManagerOpen(true)}
           onOpenIssueManager={() => setIssueManagerOpen(true)}
@@ -1278,9 +1333,10 @@ export default function ConversationWorkspace({
       {isAdmin && modeChooserOpen && <ConversationModeModal busy={modeChooserBusy} error={modeChooserError} replyEffortOptions={replyEffortOptions}
         onChoose={handleModeChoice} onClose={() => { if (!creatingConversationRef.current) setModeChooserOpen(false); }} />}
 
-      <GoalOverview key={`${accountId}:${sessionId}`} open={goalsOpen} initialKind={goalArchiveKind} sessionId={sessionId} busy={busy || loadingConversation}
-        onOpenReminders={() => setPushSettingsOpen(true)}
-        refreshKey={programRefreshKey} onClose={() => setGoalsOpen(false)} />
+      {dailyRecordsAvailable && (goalsOpen || assessmentOpen) && <GoalsAndRecordsModal key={`${accountId}:${sessionId}`} sessionId={sessionId}
+        initialTab={assessmentOpen ? "record" : "goals"} initialGoalKind={goalArchiveKind} initialRecordView={assessmentView}
+        refreshKey={programRefreshKey} onSaved={() => setAssessmentRefreshKey(key => key + 1)}
+        onOpenReminders={() => setPushSettingsOpen(true)} onClose={() => { setGoalsOpen(false); setAssessmentOpen(false); }} />}
       {pushSettingsOpen && <PushReminderModal onClose={() => setPushSettingsOpen(false)} />}
       {shareTarget && <ConversationShareModal
         key={shareTarget.sessionId}
@@ -1290,27 +1346,6 @@ export default function ConversationWorkspace({
         generationPending={turns.current.has(shareTarget.sessionId) || (shareTarget.sessionId === sessionId && (busy || !!routing.routing_pending))}
         onClose={() => setShareTarget(null)}
       />}
-
-      {passwordOpen && (
-        <ChangePasswordModal onClose={() => setPasswordOpen(false)} />
-      )}
-
-      {emailSettingsOpen && (
-        <EmailSettingsModal
-          currentEmail={accountEmail}
-          verified={accountEmailVerified}
-          deliveryAvailable={emailDeliveryAvailable}
-          onSaved={onAccountRefresh}
-          onClose={() => setEmailSettingsOpen(false)}
-        />
-      )}
-
-      {profileOpen && (
-        <ProfileModal
-          onClose={() => setProfileOpen(false)}
-          onSaved={onAccountRefresh}
-        />
-      )}
 
       {accountRole === "admin" && promptManagerOpen && (
         <PromptManagerModal onClose={() => setPromptManagerOpen(false)} />
@@ -1343,9 +1378,6 @@ export default function ConversationWorkspace({
         />
       )}
 
-      {dailyRecordsAvailable && assessmentOpen && (
-        <DailyAssessmentModal key={`${accountId}:${sessionId}`} sessionId={sessionId} initialView={assessmentView} onSaved={() => setAssessmentRefreshKey(key => key + 1)} onClose={() => setAssessmentOpen(false)} />
-      )}
     </div>
   );
 }

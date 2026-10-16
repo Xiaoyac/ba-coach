@@ -20,9 +20,13 @@ release_dir="$root_dir/releases/$release_id"
 current_link="$root_dir/current"
 previous_target=""
 push_was_active="false"
+chat_reminders_were_active="false"
 deploy_env_file=""
 if systemctl is-active --quiet bacoach-pa-push.service; then
   push_was_active="true"
+fi
+if systemctl is-active --quiet bacoach-pa-chat-reminders.service; then
+  chat_reminders_were_active="true"
 fi
 
 if [[ ! "$release_id" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]; then
@@ -52,10 +56,16 @@ rollback() {
     if [[ "$push_was_active" == "true" ]]; then
       systemctl stop bacoach-pa-push.service || true
     fi
+    if [[ "$chat_reminders_were_active" == "true" ]]; then
+      systemctl stop bacoach-pa-chat-reminders.service || true
+    fi
     ln -sfn "$previous_target" "$current_link"
     systemctl restart bacoach-backend.service bacoach-frontend.service || true
     if [[ "$push_was_active" == "true" && -f "$previous_target/backend/scripts/pa_push_worker.py" ]]; then
       systemctl start bacoach-pa-push.service || true
+    fi
+    if [[ "$chat_reminders_were_active" == "true" && -f "$previous_target/backend/scripts/pa_chat_reminder_worker.py" ]]; then
+      systemctl start bacoach-pa-chat-reminders.service || true
     fi
   fi
   exit "$status"
@@ -99,6 +109,9 @@ fi
 if [[ "$push_was_active" == "true" ]]; then
   systemctl stop bacoach-pa-push.service
 fi
+if [[ "$chat_reminders_were_active" == "true" ]]; then
+  systemctl stop bacoach-pa-chat-reminders.service
+fi
 ln -sfn "$release_dir" "$current_link"
 systemctl daemon-reload
 systemctl restart bacoach-backend.service
@@ -124,6 +137,11 @@ if [[ "$push_was_active" == "true" ]]; then
   systemctl restart bacoach-pa-push.service
   sleep 2
   systemctl is-active --quiet bacoach-pa-push.service
+fi
+if [[ "$chat_reminders_were_active" == "true" ]]; then
+  systemctl restart bacoach-pa-chat-reminders.service
+  sleep 2
+  systemctl is-active --quiet bacoach-pa-chat-reminders.service
 fi
 
 trap - EXIT

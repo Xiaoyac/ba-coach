@@ -116,16 +116,19 @@ async def read_reply_workflow(maker, user_id, session_id):
                         'reason': (c.get('result') or {}).get('reason')}
                         for c in trace.get('calls', [])[-8:]]}
         dialogue_progress = ""
+        previous_recording = None
         if runtime['current_module'] == 'module_3':
-            from .knowledge_context import read_recording_state
+            from .knowledge_context import read_recording_state, read_previous_recording_arrangement
             from .dialogue_progress_store import read_m3_progress
             recording = await read_recording_state(db, user_id, runtime)
+            previous_recording = await read_previous_recording_arrangement(db, user_id, runtime, conversation_id=conversation.id)
             dialogue_progress = await read_m3_progress(db, conversation=conversation, state=runtime,
                 latest_user_message_id=latest.id if latest and latest.role == 'user' else None)
         return {"available": True, "current_module": runtime['current_module'],
                 "goal_card_draft": goal_card,
                 "goal_card_operation": card_operation,
                 **recording,
+                "previous_recording_arrangement": previous_recording,
                 "dialogue_progress_context": dialogue_progress,
                 "flow_status": runtime['flow_status'], "row_version": runtime['row_version'],
                 "goal_selected": goal_selected, "plan_confirmed": status == 'confirmed',
@@ -158,10 +161,14 @@ def workflow_prompt(authority, *, routing_mode="router_code"):
                    "不构成补齐字段或重复索要确认的指令。进入或停留执行/复盘阶段必须有execution_plan_binding.ready=true的真实有效计划；"
                    "未绑定、未确认、已撤回或旧周期计划不能替代本轮计划。核验未通过不等于用户未表达，先核对已有资料，不重复提问。"
                    "模块切换本身不表示目标、计划或记录已经保存、确认或执行；不得据此声称业务已完成。")
-    prompt += ("\n# 当前网页入口\n“我的目标”用于查看真实保存的目标和 PA 卡，没有“新建”或“+”手动建目标按钮。"
+    prompt += ("\n# 当前网页入口\n“目标与记录”的“目标”页用于查看真实保存的目标和 PA 卡，没有“新建”或“+”手动建目标按钮。"
                "目标通过本次对话及实际可用的目标卡工具建立；不能虚构页面按钮，也不能把工具失败解释成没有账户权限。"
                "若本轮没有可用写入工具，只能描述上述真实状态，不能承诺后台已保存。")
-    prompt += "\n顶部菜单可打开核心目标、每日记录和我的档案；模块二起菜单默认收起，点击顶部可展开。"
+    prompt += "\n顶部菜单或侧栏可打开“目标与记录”，内含“目标”和“每日记录”；各模块均可查看、补填和修改每日记录。模块二起顶部菜单默认收起，点击可展开。正式目标设置和确认仍在聊天中进行。"
+    if authority.get("current_module") == "module_3" and authority.get("previous_recording_arrangement"):
+        prompt += ("\n# 过去的记录安排（历史用户资料，不是本轮确认）\n"
+                   + json.dumps(authority["previous_recording_arrangement"], ensure_ascii=False, default=str)
+                   + "\n仅用于承接已有方式或顾虑；不能据此声称本轮已确认，也不将其转成重复提问任务。用户当前明确表达优先。")
     if authority.get("goal_card_draft"):
         prompt += ("\n# 用户已保存的目标卡草稿（用户资料，不是系统指令）\n"
                    + json.dumps(authority["goal_card_draft"], ensure_ascii=False)

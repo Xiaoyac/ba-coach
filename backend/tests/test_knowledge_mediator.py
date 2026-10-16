@@ -47,7 +47,8 @@ async def test_empty_evidence_skips_and_explicit_rejection_works(settings,provid
     provider.route_result = '{"decision":"no_match","selections":[],"note":"材料不适用。"}'
     chunks, block, metrics = await mediate_knowledge(state={"user_input":"hi"},module="module_1",knowledge=CHUNKS,provider=provider,settings=settings)
     assert chunks == [] and block == "" and metrics["reason"] == "no_match"
-    assert metrics["forwarded_to_reply"] is False
+    assert metrics["note"] == "材料不适用。"
+    assert metrics["guidance"] == "" and metrics["forwarded_to_reply"] is False
 
 
 async def test_timeout_and_disable(settings,provider):
@@ -118,11 +119,11 @@ async def test_truncated_mediator_never_releases_retrieved_chunks(settings, prov
 
 def test_prompt_editor_supports_mediator(client,admin_headers):
     path = "/api/admin/prompts/knowledge_mediator"
-    response = client.put(path,headers=admin_headers,json={"content":"只指导知识的使用，不替代模块回答。"})
+    response = client.put(path,headers=admin_headers,json={"base_revision":1,"content":"只指导知识的使用，不替代模块回答。"})
     assert response.status_code == 200 and response.json()["is_overridden"] is True
     bundle = client.get("/api/admin/prompts",headers=admin_headers).json()["prompts"]
     assert next(p for p in bundle if p["key"]=="knowledge_mediator")["content"] == response.json()["content"]
-    assert client.delete(path,headers=admin_headers).status_code == 200
+    assert client.delete(path+"?base_revision=2",headers=admin_headers).status_code == 200
 
 
 @pytest.mark.parametrize("change", ["invented_quote", "too_many", "duplicate", "nonuse_with_selection", "use_with_note"])

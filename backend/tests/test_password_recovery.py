@@ -21,7 +21,7 @@ def _registration(**overrides) -> dict:
         "email": "recoverme@example.com",
         "nickname": "小河",
         "tag": "48291",
-        "birth_date": "1998-01-01",
+        "birth_year": 1998,
     }
     data.update(overrides)
     return data

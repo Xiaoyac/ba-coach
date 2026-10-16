@@ -1,0 +1,109 @@
+/* "claude trying": admin-only experiment layered over the simple base.
+ * Goal: drop the stock "generated UI" tells — glass, glow, uniform soft
+ * radii, gold on every hover, avatar tiles, breathing dots — and let the
+ * conversation read like written text on a plain page. Palettes are untouched;
+ * only shape, depth, type and accent usage change. */
+
+html.style-claude {
+  --font-claude-serif: "Iowan Old Style", Georgia, "Songti SC", "Noto Serif SC",
+    "Source Han Serif SC", "Noto Serif CJK SC", STSong, serif;
+
+  /* Two working radii instead of 16px pills on everything. Tailwind's
+     rounded-* utilities read these variables, so this reshapes every card. */
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+  --radius-2xl: 10px;
+  --radius-3xl: 12px;
+
+  /* Gold is kept for primary actions, links and focus; hover and selected
+     states use a neutral tint instead. */
+  --color-accent-wash: color-mix(in srgb, var(--color-ink) 7%, transparent);
+  --color-accent-edge: var(--color-line-strong);
+
+  /* Short, close shadows that sit on the page instead of floating over it. */
+  --shadow-panel: 0 0 0 1px var(--color-line), 0 8px 24px -12px rgb(0 0 0 / 0.45);
+  --shadow-float: 0 0 0 1px var(--color-line), 0 4px 12px -6px rgb(0 0 0 / 0.4);
+  --shadow-bubble: none;
+  --shadow-composer: none;
+}
+
+html.style-claude:is(.theme-warm, .theme-porcelain) {
+  --shadow-panel: 0 0 0 1px var(--color-line), 0 8px 24px -12px rgb(40 32 20 / 0.14);
+  --shadow-float: 0 0 0 1px var(--color-line), 0 4px 12px -6px rgb(40 32 20 / 0.16);
+}
+
+/* No frosted glass and no ambient glow anywhere. */
+.style-claude *,
+.style-claude *::before,
+.style-claude *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.style-claude .ambient-orb { display: none; }
+.style-claude .app-canvas::before,
+.style-claude .app-canvas::after { content: none; }
+
+/* Headings get a typeface with a voice; controls stay in the system sans. */
+.style-claude :is(.display-title, .workspace-card-header h1, [role="dialog"] h2, [aria-label="设置页面"] h2) {
+  font-family: var(--font-claude-serif);
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.style-claude .eyebrow {
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--color-ink-faint);
+}
+
+/* Conversation: the coach's reply is unboxed text, like a letter; the
+   person's own turns are a quiet tinted block. No icon tiles beside turns. */
+.style-claude .message-avatar { display: none; }
+.style-claude [data-message-bubble="assistant"] {
+  padding-inline: 0;
+  background: transparent;
+  box-shadow: none;
+  font-family: var(--font-claude-serif);
+  font-size: 1.02rem;
+  letter-spacing: 0;
+}
+.style-claude [data-message-bubble="user"] {
+  border-radius: 10px;
+  background: var(--color-raised);
+  color: var(--color-ink);
+  box-shadow: none;
+  letter-spacing: 0;
+}
+
+/* Waiting state is a sentence, not three pulsing dots. */
+.style-claude [data-generation-status] > span[aria-hidden="true"] { display: none; }
+
+.style-claude .composer-shell {
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: var(--color-panel);
+}
+.style-claude .composer-shell:focus-within { border-color: var(--color-line-strong); }
+
+.style-claude .reply-vote-button { border-radius: 6px; }
+.style-claude .reply-vote-button:hover,
+.style-claude .reply-vote-button.is-selected,
+.style-claude .reply-feedback-reason:hover,
+.style-claude .reply-feedback-reason.is-selected {
+  color: var(--color-ink);
+}
+.style-claude .reply-feedback-panel,
+.style-claude .reply-feedback-reason { border-radius: 8px; }
+
+/* Calmer motion: a short fade instead of rising, scaling turns and buttons. */
+@media (prefers-reduced-motion: no-preference) {
+  .style-claude :is(.zen-message-user, .zen-message-agent, .zen-page-enter) {
+    animation: claude-fade 160ms ease-out both;
+  }
+  .style-claude button:not(:disabled):active { transform: none; }
+}
+@keyframes claude-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

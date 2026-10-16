@@ -12,6 +12,8 @@ from pathlib import Path
 from sqlalchemy import select, inspect
 from app.db import get_sessionmaker, get_engine, dispose_db
 from app.models import PromptOverride
+from app.prompt_history_models import PromptHistoryState
+from sqlalchemy import update
 from app.prompts import MODULE_PROMPTS
 from app.database_v2_schema import metadata
 
@@ -47,6 +49,7 @@ async def run(args):
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump({"version": "m4-20260917-v1", "key": "module_4", "before": before,
                        "published_hash": digest(content)}, handle, ensure_ascii=False, indent=2)
+        await db.execute(update(PromptHistoryState).where(PromptHistoryState.prompt_key == "module_4").values(pending_actor="deployment:m4-20260917"))
         if row is None:
             db.add(PromptOverride(prompt_key="module_4", content=content, updated_by="deployment:m4-20260917"))
         else:

@@ -52,6 +52,7 @@ class Message(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=20_000)
     generation_id: UUID | None = None
+    retry_of_message_id: int | None = Field(default=None, gt=0)
     # Omit on the first turn — the server mints one and returns it.
     session_id: str | None = None
     # Override the server default for this request ("claude" | "deepseek").
@@ -251,7 +252,6 @@ class AssessmentHistoryPage(BaseModel):
 # Declared as Literals so a bad value is a 422 at the edge rather than a MySQL
 # "Data truncated for column" error deep inside a transaction — and so the
 # frontend can render the exact option list from one source.
-CommunicationPreference = Literal["直接明了", "温柔引导", "理性分析", "轻松幽默"]
 PhysicalCondition = Literal[
     "膝关节损伤", "腰背酸痛", "慢性疼痛", "易疲劳", "睡眠障碍",
     "偏头痛", "哮喘", "眩晕", "鼻炎", "术后恢复期",
@@ -284,6 +284,7 @@ PromptKey = Literal[
 
 
 class AdminPromptItem(BaseModel):
+    revision: int
     key: PromptKey
     label: str
     description: str
@@ -297,7 +298,11 @@ class AdminPromptBundle(BaseModel):
     prompts: list[AdminPromptItem]
 
 
-class AdminPromptUpdate(BaseModel):
+class AdminPromptRestore(BaseModel):
+    base_revision: int = Field(..., ge=1)
+
+
+class AdminPromptUpdate(AdminPromptRestore):
     content: str = Field(..., min_length=1, max_length=100_000)
 
 
@@ -335,15 +340,24 @@ class AdminSandboxStartRequest(BaseModel):
     module: SandboxModule
 
 
-class RegisterRequest(BaseModel):
+class BirthYearOnlyModel(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def reject_full_birth_date(cls, value):
+        if isinstance(value, dict) and "birth_date" in value:
+            raise ValueError("已改为只填写出生年份，请刷新页面后重试")
+        return value
+
+
+class RegisterRequest(BirthYearOnlyModel):
     """POST /api/auth/register.
 
     Carries two kinds of field, on purpose:
 
     * things that do not really change (age, living situation), which are
       cheapest to ask once and never again; and
-    * the two safety constraints (physical limits, movement taboos) plus the
-      tone preference, which *do* change — but which the coach needs from its
+    * the two safety constraints (physical limits, movement taboos),
+      which can change — but which the coach needs from its
       very first reply, so a blank profile would mean the first session runs
       without them.
 
@@ -372,23 +386,21 @@ class RegisterRequest(BaseModel):
     email: EmailStr
 
     nickname: str = Field(..., min_length=1, max_length=58)
-    tag: str = Field(..., min_length=5, max_length=5, pattern=r"^[0-9]{5}$")
     # TINYINT UNSIGNED on the column. The upper bound is a typo guard, not a
     # claim about human lifespans.
-    birth_date: date
+    birth_year: int
 
-    @field_validator("birth_date", mode="before")
+    @field_validator("birth_year", mode="before")
     @classmethod
-    def validate_birthday(cls, value):
-        from .birth_dates import validate_birth_date
-        return validate_birth_date(value)
+    def validate_birthyear(cls, value):
+        from .birth_years import validate_birth_year
+        return validate_birth_year(value)
 
     @property
     def age(self) -> int:
-        from .birth_dates import age_on
-        return age_on(self.birth_date)
+        from .birth_years import age_from_year
+        return age_from_year(self.birth_year)
     living_status: LivingStatus | None = None
-    communication_preference: CommunicationPreference | None = None
     # SET columns: any combination, including none at all.
     physical_condition: list[PhysicalCondition] = Field(default_factory=list)
     behavior_taboo: list[BehaviorTaboo] = Field(default_factory=list)
@@ -409,8 +421,6 @@ class RegisterRequest(BaseModel):
         value = value.strip()
         if not value:
             raise ValueError("昵称不能为空")
-        if "#" in value:
-            raise ValueError("昵称不能包含 #")
         return value
 
 
@@ -441,10 +451,8 @@ class ProfileOut(BaseModel):
     """GET /api/profile — everything the subject may see and change."""
 
     nickname: str | None = None
-    tag: str | None = None
-    display_id: str | None = None
     age: int | None = None
-    birth_date: date | None = None
+    birth_year: int | None = None
     living_status: LivingStatus | None = None
 
     has_supporter: bool = False
@@ -455,7 +463,6 @@ class ProfileOut(BaseModel):
     supporter2_nickname: str | None = None
     supporter2_influence: SupporterInfluence | None = None
 
-    communication_preference: CommunicationPreference | None = None
     reminder_frequency: ReminderFrequency | None = None
     reminder_time_slot: ReminderTimeSlot | None = None
 
@@ -487,7 +494,7 @@ class ProfileOut(BaseModel):
     current_module: str | None = None
 
 
-class ProfileUpdate(BaseModel):
+class ProfileUpdate(BirthYearOnlyModel):
     """PATCH /api/profile. Omitted fields are left alone; null clears one.
 
     The distinction matters: a form that only edits one section must not wipe
@@ -503,17 +510,22 @@ class ProfileUpdate(BaseModel):
     """
 
     nickname: str | None = Field(default=None, min_length=1, max_length=58)
-    tag: str | None = Field(
-        default=None, min_length=5, max_length=5, pattern=r"^[0-9]{5}$"
-    )
-    age: int | None = Field(default=None, ge=10, le=120)
-    birth_date: date | None = None
 
-    @field_validator("birth_date", mode="before")
+    @field_validator("nickname")
     @classmethod
-    def validate_birthday(cls, value):
-        from .birth_dates import validate_birth_date
-        return validate_birth_date(value)
+    def validate_nickname(cls, value: str | None) -> str:
+        if value is None or not value.strip():
+            raise ValueError("昵称不能为空")
+        return value.strip()
+
+    age: int | None = Field(default=None, ge=10, le=120)
+    birth_year: int | None = None
+
+    @field_validator("birth_year", mode="before")
+    @classmethod
+    def validate_birthyear(cls, value):
+        from .birth_years import validate_birth_year
+        return validate_birth_year(value)
     living_status: LivingStatus | None = None
 
     has_supporter: bool | None = None
@@ -524,7 +536,6 @@ class ProfileUpdate(BaseModel):
     supporter2_nickname: str | None = Field(default=None, max_length=64)
     supporter2_influence: SupporterInfluence | None = None
 
-    communication_preference: CommunicationPreference | None = None
     reminder_frequency: ReminderFrequency | None = None
     reminder_time_slot: ReminderTimeSlot | None = None
 
@@ -549,14 +560,14 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=128)
 
 
-class BirthDateRequest(BaseModel):
-    birth_date: date
+class BirthYearRequest(BirthYearOnlyModel):
+    birth_year: int
 
-    @field_validator("birth_date", mode="before")
+    @field_validator("birth_year", mode="before")
     @classmethod
-    def validate_birthday(cls, value):
-        from .birth_dates import validate_birth_date
-        return validate_birth_date(value)
+    def validate_birthyear(cls, value):
+        from .birth_years import validate_birth_year
+        return validate_birth_year(value)
 
 
 class ChangePasswordRequest(BaseModel):
@@ -613,8 +624,6 @@ class AccountInfo(BaseModel):
 
     username: str
     nickname: str | None = None
-    tag: str | None = None
-    display_id: str | None = None
     # `user_profile.uuid`. The frontend does not need it, but it is what every
     # clinical table keys on, so surfacing it makes support questions ("which
     # row is mine?") answerable without a database session.
@@ -624,7 +633,7 @@ class AccountInfo(BaseModel):
     email: EmailStr | None = None
     email_verified: bool = False
     email_required: bool = True
-    birth_date_required: bool = False
+    birth_year_required: bool = False
     email_delivery_available: bool = False
 
 
@@ -632,8 +641,6 @@ class AdminAccountItem(BaseModel):
     id: int
     username: str
     nickname: str | None = None
-    tag: str | None = None
-    display_id: str | None = None
     role: Literal["user", "admin"]
     created_at: datetime
     last_login_at: datetime | None = None
@@ -769,7 +776,8 @@ class ConversationDetail(ConversationSummary):
 
     revision: int = 0
     thinking_enabled: bool | None = None
-    knowledge_mediator_enabled: bool = True
+    knowledge_mediator_enabled: bool = True  # historical architecture selector
+    knowledge_mediator_node_enabled: bool = False
     knowledge_mode: Literal["legacy_mediator", "astrbot_hybrid"] = "legacy_mediator"
     reply_mode: Literal["standard", "ack_deep"] = "standard"
     reply_effort: Literal["low", "high", "max"] | None = None

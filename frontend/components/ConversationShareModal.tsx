@@ -64,9 +64,9 @@ export default function ConversationShareModal({ sessionId, title, generationPen
 
   const url = created ? shareUrl(created.token, typeof window === "undefined" ? "" : window.location.origin) : "";
   return <div className="zen-overlay-enter fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-5">
-    <div aria-hidden onClick={() => { if (!busy) onClose(); }} className="absolute inset-0 bg-canvas/75 backdrop-blur-md" />
+    <div aria-hidden onClick={() => { if (!busy) onClose(); }} className="default-style:absolute default-style:inset-0 default-style:bg-canvas/75 default-style:backdrop-blur-md simple:absolute simple:inset-0 simple:bg-canvas/75 simple:backdrop-blur-sm" />
     <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="conversation-share-title"
-      className="relative flex max-h-[calc(100dvh-2rem)] w-full max-w-xl flex-col overflow-hidden rounded-[28px] border border-line bg-panel depth-panel outline-none">
+      className="default-style:relative default-style:flex default-style:max-h-[calc(100dvh-2rem)] default-style:w-full default-style:max-w-xl default-style:flex-col default-style:overflow-hidden default-style:rounded-[28px] default-style:border default-style:border-line default-style:bg-panel default-style:depth-panel default-style:outline-none simple:relative simple:flex simple:max-h-[calc(100dvh-2rem)] simple:w-full simple:max-w-xl simple:flex-col simple:overflow-hidden simple:rounded-2xl simple:border simple:border-line simple:bg-panel simple:depth-panel simple:outline-none">
       <header className="flex items-start gap-3 border-b border-line px-5 py-4">
         <div className="min-w-0 flex-1"><h2 id="conversation-share-title" className="text-base font-medium text-ink">分享对话</h2><p className="mt-1 truncate text-sm text-ink-muted">{title}</p></div>
         <button type="button" onClick={onClose} disabled={!!busy} aria-label="关闭分享" className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-ink-muted hover:bg-raised disabled:opacity-50"><CloseMark className="h-4 w-4" /></button>

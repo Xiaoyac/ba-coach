@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { DEFAULT_THEME, THEME_KEY, THEME_META_COLOR } from "@/lib/theme";
+import { DEFAULT_THEME, THEME_KEY, THEME_META_COLOR, THEMES } from "@/lib/theme";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -20,9 +20,7 @@ export const viewport: Viewport = {
  * anything deferred to React would land a paint too late, which is the flash
  * every theme switcher is trying to avoid.
  */
-const themeScript = `try{var dark=localStorage.getItem(${JSON.stringify(
-  THEME_KEY,
-)})==="dark";document.documentElement.classList.toggle("theme-warm",!dark);var meta=document.querySelector('meta[name="theme-color"]');if(meta)meta.setAttribute("content",dark?${JSON.stringify(THEME_META_COLOR.dark)}:${JSON.stringify(THEME_META_COLOR.warm)})}catch(e){}`;
+const themeScript = `try{var ids=${JSON.stringify(THEMES.map(theme => theme.id))};var theme=localStorage.getItem(${JSON.stringify(THEME_KEY)});if(!ids.includes(theme))theme=${JSON.stringify(DEFAULT_THEME)};ids.forEach(function(id){document.documentElement.classList.toggle('theme-'+id,id===theme)});var meta=document.querySelector('meta[name="theme-color"]');if(meta)meta.setAttribute('content',${JSON.stringify(THEME_META_COLOR)}[theme])}catch(e){}`;
 
 export default function RootLayout({
   children,
