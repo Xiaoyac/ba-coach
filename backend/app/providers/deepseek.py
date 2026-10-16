@@ -25,7 +25,7 @@ from .request_ids import request_id as extract_request_id
 from ..generation_policy import main_thinking_options, native_thinking_options
 from .prompt_cache import system_messages
 from .usage import openai_usage
-from ..generation_policy import is_ark_kimi, ark_kimi_effort, auxiliary_output_budget
+from ..generation_policy import is_ark_kimi, ark_kimi_effort, auxiliary_output_budget, supports_tail_system
 from .base import (
     Completion,
     LLMProvider,
@@ -107,9 +107,9 @@ class DeepSeekProvider(LLMProvider):
 
     @property
     def supports_tail_system(self) -> bool:
-        # Verified on the configured Ark K3 channel; other transports retain
-        # their existing layout until separately tested.
-        return is_ark_kimi(self._settings, self.name, model=self.model)
+        # Verified on the Ark coding channel (K3 and Flash); other transports
+        # retain their existing layout until separately tested.
+        return supports_tail_system(self._settings, self.name, model=self.model)
 
     async def complete_without_reasoning(
         self, *, system: SystemPrompt, messages: list[Message]
