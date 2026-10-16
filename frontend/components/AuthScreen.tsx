@@ -6,7 +6,6 @@ import {
   AuthError,
   login,
   register,
-  requestPasswordReset,
   type Account,
 } from "@/lib/auth";
 import { EnsoMark } from "@/components/icons";
@@ -30,7 +29,7 @@ const BEHAVIOR_TABOOS = [
   "怕拥挤闭塞的地方", "不坐公共交通",
 ] as const;
 
-type Mode = "login" | "register" | "forgot";
+type Mode = "login" | "register";
 
 export default function AuthScreen({
   onAuthenticated,
@@ -41,7 +40,6 @@ export default function AuthScreen({
   const [invitationCode, setInvitationCode] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [email, setEmail] = useState("");
   const [nickname, setNickname] = useState("");
   const [birthYear, setBirthYear] = useState("");
   const [living, setLiving] = useState<string | null>(null);
@@ -50,7 +48,6 @@ export default function AuthScreen({
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   function toggle(list: string[], value: string): string[] {
     return list.includes(value)
@@ -65,7 +62,6 @@ export default function AuthScreen({
     // password is deliberately not carried.
     setPassword("");
     setError(null);
-    setNotice(null);
   }
 
   async function handleSubmit(event: React.FormEvent) {
@@ -77,14 +73,7 @@ export default function AuthScreen({
     }
     setBusy(true);
     setError(null);
-    setNotice(null);
     try {
-      if (mode === "forgot") {
-        const message = await requestPasswordReset(email);
-        setNotice(message);
-        setBusy(false);
-        return;
-      }
       const account =
         mode === "login"
           ? await login(username, password)
@@ -92,7 +81,6 @@ export default function AuthScreen({
               invitation_code: invitationCode.trim(),
               username,
               password,
-              email,
               nickname: nickname.trim(),
               // Only the user's explicit answer is sent, with no fallback.
               birth_year: Number(birthYear),
@@ -112,7 +100,6 @@ export default function AuthScreen({
   }
 
   const registering = mode === "register";
-  const forgot = mode === "forgot";
 
   return (
     // No <main> here: this renders *inside* the one in app/page.tsx, and
@@ -181,12 +168,12 @@ export default function AuthScreen({
             </div>
 
             <div className="mb-6">
-              <p className="default-style:eyebrow simple:hidden">{forgot ? "ACCOUNT RECOVERY" : registering ? "CREATE YOUR SPACE" : "WELCOME BACK"}</p>
+              <p className="default-style:eyebrow simple:hidden">{registering ? "CREATE YOUR SPACE" : "WELCOME BACK"}</p>
               <h2 className="display-title mt-2 text-2xl text-ink sm:text-[1.75rem]">
-                {forgot ? "找回你的账号" : registering ? "建立属于你的空间" : "欢迎回来"}
+                {registering ? "建立属于你的空间" : "欢迎回来"}
               </h2>
               <p className="mt-2 text-sm leading-6 text-ink-faint">
-                {forgot ? "输入已验证邮箱，我们会发送安全的重置入口。" : registering ? "先填写必要信息，其他内容可以之后慢慢补充。" : "继续上一次对话，或者从今天重新开始。"}
+                {registering ? "先填写必要信息，其他内容可以之后慢慢补充。" : "继续上一次对话，或者从今天重新开始。"}
               </p>
             </div>
 
@@ -195,7 +182,7 @@ export default function AuthScreen({
           className="w-full"
         >
           {/* Mode switch */}
-          {!forgot && <div className="default-style:mb-6 default-style:flex default-style:gap-1 default-style:rounded-2xl default-style:border default-style:border-line default-style:bg-raised/80 default-style:p-1.5 simple:mb-6 simple:flex simple:gap-1 simple:rounded-xl simple:bg-raised/60 simple:p-1">
+          <div className="default-style:mb-6 default-style:flex default-style:gap-1 default-style:rounded-2xl default-style:border default-style:border-line default-style:bg-raised/80 default-style:p-1.5 simple:mb-6 simple:flex simple:gap-1 simple:rounded-xl simple:bg-raised/60 simple:p-1">
             {(["login", "register"] as const).map((m) => (
               <button
                 key={m}
@@ -210,22 +197,7 @@ export default function AuthScreen({
                 {m === "login" ? "登录" : "注册"}
               </button>
             ))}
-          </div>}
-
-          {forgot && (
-            <div className="mb-5">
-              <button
-                type="button"
-                onClick={() => switchMode("login")}
-                className="mb-3 text-[0.75rem] text-ink-faint hover:text-accent-ink"
-              >
-                ← 返回登录
-              </button>
-              <p className="text-[0.72rem] leading-relaxed text-ink-faint">
-                为保护账号隐私，无论邮箱是否存在，页面都会显示相同结果。
-              </p>
-            </div>
-          )}
+          </div>
 
           {registering && <Field label="邀请码" hint="必填，请向管理员获取；每码仅可注册一次，长期有效">
             <input required value={invitationCode} onChange={(e) => setInvitationCode(e.target.value)}
@@ -233,7 +205,7 @@ export default function AuthScreen({
               placeholder="粘贴管理员提供的邀请码" className={inputClass} />
           </Field>}
 
-          {!forgot && <Field
+          <Field
             label="登录账号"
             hint={registering ? "仅限 3–32 位英文字母和数字，不会显示给其他用户" : undefined}
           >
@@ -248,9 +220,9 @@ export default function AuthScreen({
               placeholder="例如 quietriver"
               className={inputClass}
             />
-          </Field>}
+          </Field>
 
-          {!forgot && <Field label="密码" hint={registering ? "至少 8 位" : undefined}>
+          <Field label="密码" hint={registering ? "至少 8 位" : undefined}>
             <input
               required
               type="password"
@@ -264,25 +236,7 @@ export default function AuthScreen({
               maxLength={128}
               className={inputClass}
             />
-          </Field>}
-
-          {(registering || forgot) && (
-            <Field
-              label={forgot ? "注册时填写的邮箱" : "邮箱"}
-              hint={registering ? "用于验证身份和忘记密码时找回账号" : undefined}
-            >
-              <input
-                required
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoComplete="email"
-                maxLength={320}
-                placeholder="name@example.com"
-                className={inputClass}
-              />
-            </Field>
-          )}
+          </Field>
 
           {registering && (
             <>
@@ -356,15 +310,6 @@ export default function AuthScreen({
             </p>
           )}
 
-          {notice && (
-            <p
-              role="status"
-              className="mb-4 rounded-xl border border-accent-edge bg-accent-wash px-3 py-2.5 text-[0.78rem] leading-relaxed text-accent-ink"
-            >
-              {notice}
-            </p>
-          )}
-
           <button
             type="submit"
             disabled={busy}
@@ -372,22 +317,12 @@ export default function AuthScreen({
           >
             {busy
               ? "请稍候…"
-              : forgot
-                ? "发送重置链接"
-                : registering
+              : registering
                   ? "创建账号"
                   : "登录"}
           </button>
 
-          {mode === "login" && (
-            <button
-              type="button"
-              onClick={() => switchMode("forgot")}
-              className="mt-3 w-full text-center text-[0.73rem] text-ink-faint hover:text-accent-ink"
-            >
-              忘记密码？
-            </button>
-          )}
+          <p className="mt-3 text-center text-[0.73rem] text-ink-faint">暂不支持自助找回密码，请妥善保存账号和密码。</p>
 
           {registering && (
             <>

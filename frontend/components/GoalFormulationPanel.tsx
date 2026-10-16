@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParticipantStyle } from "@/lib/useParticipantStyle";
-import { fetchGoalCard, submitGoalCard, goalCardFieldLabels, goalCardFieldValue, goalCardKind,
+import { fetchGoalCard, submitGoalCard, redisplayGoalCard, goalCardFieldLabels, goalCardFieldValue, goalCardKind,
   canConfirmCard, type GoalCardConfirmationResult, type FormulationCard, type GoalCardFields } from "@/lib/goal-card";
 
 type Props = {
@@ -126,6 +126,11 @@ export default function GoalFormulationPanel({sessionId, accountKey, module, bus
               changedFields.current = new Set(Array.isArray(parsed.changed) ? parsed.changed.filter((key: keyof GoalCardFields) => keys.includes(key)) : keys);
             }
           } catch { /* Ignore only a malformed local draft. */ } }
+          if (restored) {
+            const server = draftOf(next.fields);
+            changedFields.current = new Set([...changedFields.current].filter(key => restored![key] !== server[key]));
+            if (!changedFields.current.size) { restored = null; storageRemove(`${originalPrefix}:draft:${next.id}`); }
+          }
           dirtyRef.current = restored !== null;
           setDirty(restored !== null);
           setDraft(restored ? Object.fromEntries(keys.map(key => [key, changedFields.current.has(key) ? restored![key] : draftOf(next.fields)[key]])) as Draft : draftOf(next.fields));
@@ -226,6 +231,33 @@ export default function GoalFormulationPanel({sessionId, accountKey, module, bus
     finally { if (mounted.current) { formWriteRef.current = false; savingRef.current = false; setSaving(false); setRetry(value => value + 1); } }
   }
 
+  async function recoverDisplay() {
+    if (!card || !sessionId || busy || loading || savingRef.current || dirtyRef.current) return;
+    const targetPrefix = prefix;
+    const controller = new AbortController(); mutation.current = controller;
+    savingRef.current = true; formWriteRef.current = true; setSaving(true); setError(""); readGeneration.current++;
+    try {
+      const result = await redisplayGoalCard(sessionId, card, AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]));
+      if (!mounted.current || controller.signal.aborted || prefixRef.current !== targetPrefix) return;
+      cardRef.current = result.card; setCard(result.card); setExpanded(true);
+      setNotice("卡片已重新展示。请核对内容，再决定是否确认执行。"); onUpdatedRef.current?.();
+    } catch (reason) {
+      if (mounted.current && !controller.signal.aborted && prefixRef.current === targetPrefix)
+        setError(reason instanceof Error ? reason.message : "展示未完成，请重试；尚未确认执行。");
+    } finally {
+      if (mounted.current && prefixRef.current === targetPrefix) {
+        savingRef.current = false; formWriteRef.current = false; setSaving(false); setRetry(value => value + 1);
+      }
+    }
+  }
+
+  function discardLocalDraft() {
+    if (!card || savingRef.current) return;
+    storageRemove(`${prefix}:draft:${card.id}`); changedFields.current.clear();
+    dirtyRef.current = false; setDirty(false); setDraft(draftOf(card.fields));
+    setNotice("已恢复服务器保存的卡片内容。");
+  }
+
   async function resume() {
     if (!card || busy || loading || savingRef.current) return;
     savingRef.current = true; setSaving(true); setError("");
@@ -261,7 +293,7 @@ export default function GoalFormulationPanel({sessionId, accountKey, module, bus
         <button type="button" onClick={onOpenGoals} aria-haspopup="dialog" className="default-style:min-h-10 default-style:shrink-0 default-style:rounded-xl default-style:border default-style:border-line default-style:px-3 default-style:text-xs default-style:text-ink-muted default-style:hover:bg-raised simple:min-h-10 simple:shrink-0 simple:rounded-xl simple:px-3 simple:text-xs simple:text-ink-muted simple:hover:bg-raised">{card ? "我的目标 ↗" : "查看全部 ↗"}</button>
       </div>
       {(error || readError) && <p role="alert" className="mt-2 text-xs leading-5 text-alert-ink">{error || readError} <button type="button" disabled={saving} onClick={() => setRetry(value => value + 1)} className="min-h-8 px-2 underline underline-offset-4">重试读取</button>{dirty && "未提交的填写仍保留。"}</p>}
-      {dirty && <p className="mt-1 text-xs text-ink-muted">填写尚未暂存，教练暂时看不到这些修改。</p>}
+      {dirty && <p className="mt-1 text-xs text-ink-muted">填写尚未暂存，教练暂时看不到这些修改。<button type="button" disabled={saving} onClick={discardLocalDraft} className="min-h-9 px-2 underline">放弃本地修改，恢复已保存内容</button></p>}
       {notice && <p role="status" className="mt-1 text-xs leading-5 text-accent-ink">{notice}</p>}
       {card && ["formulating", "discussing"].includes(card.phase) && !dirty && card.confirmation?.message && <p role="status" className="mt-1 text-xs leading-5 text-ink-muted">{card.confirmation.message}</p>}
       {card?.phase === "confirmed" && dirty && <p className="mt-1 text-xs leading-5 text-ink-muted">本次保存不包含你尚未提交的填写；这些内容仍保留在下方卡片中。</p>}
@@ -284,7 +316,7 @@ export default function GoalFormulationPanel({sessionId, accountKey, module, bus
       {card?.phase === "ready" && <div className="default-style:mt-3 default-style:rounded-xl default-style:border default-style:border-accent-edge default-style:bg-panel default-style:p-3 simple:mt-3 simple:rounded-xl simple:bg-panel simple:p-3">
         <p className="text-xs leading-5 text-ink-muted">教练已核对{card.content_revision ? `内容第 ${card.content_revision} 版` : "当前安排"}，请查看后决定。{dirty ? "你还有未提交的修改，请先交给教练核对。" : "需要调整也可以继续聊天。"}</p>
           {card.confirmation?.allowed !== true && <p role="status" className="mt-2 text-xs text-alert-ink">{card.confirmation?.message || "正在核对这版卡片的确认状态…"}</p>}
-          <div className="mt-2 flex flex-wrap gap-2"><button type="button" disabled={!canConfirmCard(card, lock, dirty)} onClick={() => void sendChoice("confirm")} className="min-h-10 rounded-xl bg-accent px-4 text-sm font-medium text-on-accent disabled:opacity-50">确认这个安排</button><button type="button" disabled={lock} onClick={() => setExpanded(true)} className="min-h-10 rounded-xl px-3 text-sm text-accent-ink">先查看或修改</button></div>
+          <div className="mt-2 flex flex-wrap gap-2">{card.confirmation?.recoverable && <button type="button" disabled={lock || dirty} onClick={() => void recoverDisplay()} className="min-h-10 rounded-xl bg-accent-wash px-4 text-sm text-accent-ink disabled:opacity-50">重新展示并核对</button>}<button type="button" disabled={!canConfirmCard(card, lock, dirty)} onClick={() => void sendChoice("confirm")} className="min-h-10 rounded-xl bg-accent px-4 text-sm font-medium text-on-accent disabled:opacity-50">确认这个安排</button><button type="button" disabled={lock} onClick={() => setExpanded(true)} className="min-h-10 rounded-xl px-3 text-sm text-accent-ink">先查看或修改</button></div>
       </div>}
       {card && !["confirmed","paused"].includes(card.phase) && (expanded || card.phase === "ready") && <button type="button" disabled={lock} onClick={() => void sendChoice("pause")} className="mt-1 min-h-9 px-1 text-xs text-ink-muted underline decoration-line-strong underline-offset-4 disabled:opacity-50">暂不继续细化，保留草稿</button>}
     </div>

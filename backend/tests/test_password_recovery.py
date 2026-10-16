@@ -1,159 +1,78 @@
-"""Email collection, verification, and one-time password recovery."""
-
-from __future__ import annotations
-
-from invitation_helpers import with_test_invitation
-
+"""Email retirement preserves password access and historical email data."""
 import asyncio
-import re
+import smtplib
+from datetime import timedelta
+import pytest
+from sqlalchemy import select, func
+from invitation_helpers import with_test_invitation
+from app.models import AccountEmail, AccountEmailToken, UserAccount, _utcnow
+from app.security import hash_token
 
-from fastapi.testclient import TestClient
-from sqlalchemy import select
+PASSWORD='correct-horse-battery'
+def register(client, **extra):
+    payload=dict(username='emailfree',password=PASSWORD,nickname='小河',birth_year=1998)
+    response=client.post('/api/auth/register',json=with_test_invitation(client,{**payload,**extra}))
+    assert response.status_code==201,response.text
+    return response.json()
 
-from app.models import AccountEmail, AccountEmailToken
-from app.routes import auth as auth_route
+@pytest.fixture(autouse=True)
+def forbid_mail(monkeypatch):
+    def unexpected(*args,**kwargs): raise AssertionError('Email transport must not be called')
+    monkeypatch.setattr(smtplib,'SMTP',unexpected);monkeypatch.setattr(smtplib,'SMTP_SSL',unexpected)
+    monkeypatch.setenv('SMTP_HOST','smtp.example.invalid');monkeypatch.setenv('SMTP_FROM_EMAIL','test@example.invalid')
 
-
-def _registration(**overrides) -> dict:
-    data = {
-        "username": "recoverme",
-        "password": "correct-horse-battery",
-        "email": "recoverme@example.com",
-        "nickname": "小河",
-        "tag": "48291",
-        "birth_year": 1998,
-    }
-    data.update(overrides)
-    return data
-
-
-def _capture_mail(monkeypatch) -> list[dict[str, str]]:
-    sent: list[dict[str, str]] = []
-
-    async def fake_send(**message: str) -> None:
-        sent.append(message)
-
-    monkeypatch.setattr(auth_route, "email_delivery_configured", lambda: True)
-    monkeypatch.setattr(auth_route, "send_account_email", fake_send)
-    return sent
-
-
-def _token(message: dict[str, str], path: str) -> str:
-    match = re.search(rf"/{path}\?token=([^\s]+)", message["text"])
-    assert match, message["text"]
-    return match.group(1)
-
-
-def test_registration_requires_email(client: TestClient) -> None:
-    payload = _registration()
-    payload.pop("email")
-    assert client.post("/api/auth/register", json=with_test_invitation(client, payload)).status_code == 422
-
-
-def test_register_verify_forgot_and_reset_is_single_use(
-    client: TestClient, monkeypatch
-) -> None:
-    sent = _capture_mail(monkeypatch)
-    registered = client.post("/api/auth/register", json=with_test_invitation(client, _registration()))
-    assert registered.status_code == 201, registered.text
-    account = registered.json()["account"]
-    assert account["email"] == "recoverme@example.com"
-    assert account["email_required"] is False
-    assert account["email_verified"] is False
-    assert len(sent) == 1
-
-    verify_token = _token(sent[0], "verify-email")
-    verified = client.post("/api/auth/email/verify", json={"token": verify_token})
-    assert verified.status_code == 200, verified.text
-    # Verification links are single-use.
-    assert client.post(
-        "/api/auth/email/verify", json={"token": verify_token}
-    ).status_code == 400
-
-    forgot = client.post(
-        "/api/auth/password/forgot", json={"email": " RECOVERME@example.com "}
-    )
-    assert forgot.status_code == 202
-    reset_token = _token(sent[-1], "reset-password")
-    reset = client.post(
-        "/api/auth/password/reset",
-        json={"token": reset_token, "new_password": "a-new-safe-password"},
-    )
-    assert reset.status_code == 200, reset.text
-
-    old_session = registered.json()["token"]
-    assert client.get(
-        "/api/auth/me", headers={"Authorization": f"Bearer {old_session}"}
-    ).status_code == 401
-    assert client.post(
-        "/api/auth/login",
-        json={"username": "recoverme", "password": "correct-horse-battery"},
-    ).status_code == 401
-    assert client.post(
-        "/api/auth/login",
-        json={"username": "recoverme", "password": "a-new-safe-password"},
-    ).status_code == 200
-    assert client.post(
-        "/api/auth/password/reset",
-        json={"token": reset_token, "new_password": "cannot-reuse-this"},
-    ).status_code == 400
-
-
-def test_forgot_response_does_not_reveal_unknown_or_unverified_email(
-    client: TestClient, monkeypatch
-) -> None:
-    sent = _capture_mail(monkeypatch)
-    assert client.post("/api/auth/register", json=with_test_invitation(client, _registration())).status_code == 201
-    sent.clear()
-    unknown = client.post(
-        "/api/auth/password/forgot", json={"email": "ghost@example.com"}
-    )
-    unverified = client.post(
-        "/api/auth/password/forgot", json={"email": "recoverme@example.com"}
-    )
-    assert unknown.status_code == unverified.status_code == 202
-    assert unknown.json() == unverified.json()
-    assert sent == []
-
-
-def test_legacy_account_is_prompted_until_it_adds_email(
-    client: TestClient, db_sessionmaker, monkeypatch
-) -> None:
-    sent = _capture_mail(monkeypatch)
-    registered = client.post("/api/auth/register", json=with_test_invitation(client, _registration())).json()
-
-    async def remove_email() -> None:
+@pytest.mark.parametrize('legacy_email',[None,'old-client@example.invalid'])
+def test_registration_without_email_and_legacy_client_field(client,db_sessionmaker,legacy_email):
+    response=register(client,**({'email':legacy_email} if legacy_email else {}));account=response['account']
+    assert account['email'] is None and not account['email_required'] and not account['email_delivery_available']
+    async def counts():
         async with db_sessionmaker() as db:
-            for row in (await db.execute(select(AccountEmailToken))).scalars().all():
-                await db.delete(row)
-            email = (await db.execute(select(AccountEmail))).scalar_one()
-            await db.delete(email)
+            return (await db.scalar(select(func.count()).select_from(AccountEmail)),await db.scalar(select(func.count()).select_from(AccountEmailToken)))
+    assert asyncio.get_event_loop().run_until_complete(counts())==(0,0)
+    login=client.post('/api/auth/login',json={'username':'emailfree','password':PASSWORD})
+    assert login.status_code==200 and not login.json()['account']['email_required']
+    me=client.get('/api/auth/me',headers={'Authorization':'Bearer '+response['token']})
+    assert me.status_code==200 and not me.json()['email_required']
+
+ROUTES=[('put','/email'),('post','/email/verification/resend'),('post','/email/verify'),('post','/password/forgot'),('post','/password/reset')]
+def test_legacy_email_and_tokens_unchanged_and_password_login_works(client,db_sessionmaker):
+    response=register(client)
+    async def seed():
+        async with db_sessionmaker() as db:
+            account=await db.scalar(select(UserAccount).where(UserAccount.username=='emailfree'))
+            db.add(AccountEmail(account_id=account.id,email='legacy@example.com',normalized_email='legacy@example.com',verified_at=_utcnow()))
+            for purpose in ['verify_email','password_reset']:
+                db.add(AccountEmailToken(account_id=account.id,purpose=purpose,token_hash=hash_token(purpose+'-old-token'),expires_at=_utcnow()+timedelta(hours=1)))
             await db.commit()
+    async def snapshot():
+        async with db_sessionmaker() as db:
+            emails=(await db.execute(select(AccountEmail))).scalars().all();tokens=(await db.execute(select(AccountEmailToken))).scalars().all()
+            return ([(x.account_id,x.email,x.normalized_email,x.verified_at) for x in emails],[(x.id,x.token_hash,x.consumed_at,x.expires_at) for x in tokens])
+    loop=asyncio.get_event_loop();loop.run_until_complete(seed());before=loop.run_until_complete(snapshot())
+    login=client.post('/api/auth/login',json={'username':'emailfree','password':PASSWORD});assert login.status_code==200
+    account=login.json()['account'];assert account['email']=='legacy@example.com' and account['email_verified'] and not account['email_required']
+    for method,path in ROUTES:
+        assert getattr(client,method)('/api/auth'+path,headers={'Authorization':'Bearer '+response['token']},json={'email':'new@example.invalid','token':'password_reset-old-token','new_password':'cannot-change-this'}).status_code==404
+    assert loop.run_until_complete(snapshot())==before
+    assert client.post('/api/auth/login',json={'username':'emailfree','password':PASSWORD}).status_code==200
 
-    asyncio.get_event_loop().run_until_complete(remove_email())
-    headers = {"Authorization": f"Bearer {registered['token']}"}
-    me = client.get("/api/auth/me", headers=headers)
-    assert me.status_code == 200
-    assert me.json()["email"] is None
-    assert me.json()["email_required"] is True
+@pytest.mark.parametrize('method,path',ROUTES)
+def test_email_routes_absent_from_schema_and_unauthenticated_requests(client,method,path):
+    assert '/api/auth'+path not in client.get('/openapi.json').json()['paths']
+    assert getattr(client,method)('/api/auth'+path,json={}).status_code==404
 
-    sent.clear()
-    saved = client.put(
-        "/api/auth/email", json={"email": "legacy@example.com"}, headers=headers
-    )
-    assert saved.status_code == 202, saved.text
-    assert saved.json()["email_required"] is False
-    assert saved.json()["email_verified"] is False
-    assert len(sent) == 1
+def test_logged_in_password_change_keeps_current_password_check(client):
+    response=register(client);headers={'Authorization':'Bearer '+response['token']}
+    assert client.post('/api/auth/password',json={'current_password':PASSWORD,'new_password':'new-safe-password'}).status_code==401
+    assert client.post('/api/auth/password',headers=headers,json={'current_password':'wrong','new_password':'new-safe-password'}).status_code==403
+    assert client.post('/api/auth/password',headers=headers,json={'current_password':PASSWORD,'new_password':'new-safe-password'}).status_code==204
+    assert client.post('/api/auth/login',json={'username':'emailfree','password':PASSWORD}).status_code==401
+    assert client.post('/api/auth/login',json={'username':'emailfree','password':'new-safe-password'}).status_code==200
 
-
-def test_email_address_is_globally_unique(client: TestClient) -> None:
-    assert client.post("/api/auth/register", json=with_test_invitation(client, _registration())).status_code == 201
-    second = client.post(
-        "/api/auth/register",
-        json=with_test_invitation(client, _registration(
-            username="anotheruser", nickname="另一个", tag="59302",
-            email="RECOVERME@example.com",
-        )),
-    )
-    assert second.status_code == 409
+def test_invitation_password_and_birthday_requirements_remain(client):
+    payload=dict(username='emailfree',password=PASSWORD,nickname='小河',birth_year=1998)
+    assert client.post('/api/auth/register',json=payload).status_code==422
+    for field,value in [('password','short'),('birth_year',None)]:
+        assert client.post('/api/auth/register',json=with_test_invitation(client,{**payload,field:value})).status_code==422
+    register(client)
+    assert client.post('/api/auth/register',json=with_test_invitation(client,payload)).status_code==409

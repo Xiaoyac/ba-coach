@@ -226,6 +226,69 @@ async def put_goal_card(session_id: str, payload: CardSubmission, user_id=Depend
     return result
 
 
+class CardRecovery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    card_id: str = Field(min_length=1, max_length=36)
+    revision: int = Field(strict=True, ge=1)
+
+
+@router.post("/{session_id}/goal-card/redisplay")
+async def redisplay_goal_card(session_id: str, payload: CardRecovery,
+        user_id=Depends(require_subject_id), db=Depends(get_db), store=Depends(get_session_store)):
+    """Explicit display recovery, without model calls or business confirmation.
+
+    Reuse the exact reviewed snapshot. Display, anchor and audit are one transaction;
+    retrying the same version returns its durable anchor without a second message.
+    """
+    from ..config import get_settings
+    from ..goal_card_workspace import read_card_row, public_card, _audit
+    from ..goal_card_confirmation import confirmation_status
+    from ..models import Conversation
+    if not enabled() or not get_settings().goal_card_ui_enabled:
+        raise HTTPException(409, "目标卡填写功能尚未开启")
+    await own_state(db, session_id, user_id)
+    lock = await store.get_turn_lock(session_id)
+    if lock.locked():
+        raise HTTPException(409, "教练正在回应，请等本轮结束后再恢复展示")
+    async with lock:
+        profiles, rt = schema.tables['user_profile'], schema.tables['conversation_runtime_states']
+        await db.execute(select(profiles.c.uuid).where(profiles.c.uuid == user_id).with_for_update())
+        conversation, state = await own_state(db, session_id, user_id)
+        await db.execute(select(Conversation.id).where(Conversation.id == conversation.id).with_for_update())
+        await db.execute(select(rt).where(rt.c.conversation_id == conversation.id).with_for_update())
+        # Re-read after locks; scoped_runtime also preserves administrator isolation.
+        conversation, state = await own_state(db, session_id, user_id)
+        row = await read_card_row(db, conversation.id, user_id, lock=True)
+        if not row or row['id'] != payload.card_id or row['revision'] != payload.revision:
+            raise HTTPException(409, "目标卡已有更新，请重新读取并核对")
+        gate = await confirmation_status(db, conversation, state, row)
+        if not gate['allowed']:
+            if not gate.get('recoverable'):
+                raise HTTPException(409, gate['message'])
+            position = (await db.scalar(select(func.max(ConversationMessage.position)).where(
+                ConversationMessage.conversation_id == conversation.id)) or 0) + 1
+            action = ConversationMessage(conversation_id=conversation.id, position=position, role='user',
+                content='请重新展示这版目标卡供我核对；这次操作不代表确认执行。')
+            assistant = ConversationMessage(conversation_id=conversation.id, position=position+1, role='assistant',
+                content=row['display_text'])
+            db.add_all([action, assistant])
+            await db.flush()
+            table = schema.tables['goal_card_workspaces']
+            await db.execute(update(table).where(table.c.id == row['id'], table.c.revision == row['revision']).values(
+                display_user_message_id=action.id, display_assistant_message_id=assistant.id))
+            row = {**row, 'display_user_message_id': action.id, 'display_assistant_message_id': assistant.id}
+            await _audit(db, row, 'user_requested_display_recovery', action.id)
+            conversation.revision += 1
+            gate = await confirmation_status(db, conversation, state, row)
+            if not gate['allowed']:
+                raise HTTPException(409, gate['message'])
+            await db.commit()
+            # Drop the old transcript cache; the next turn hydrates the durable pair.
+            await store.reset(session_id)
+        return {'enabled': True, 'card': {**public_card(row), 'confirmation': gate},
+                'display_text': row['display_text']}
+
+
 @router.post("/{session_id}/goal")
 async def select_goal(session_id: str, payload: Selection, user_id=Depends(require_subject_id),
                       db=Depends(get_db), store=Depends(get_session_store)):
