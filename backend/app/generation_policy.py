@@ -73,6 +73,21 @@ def is_ark_kimi(settings, provider: str, *, model: str | None = None) -> bool:
             and url.path.rstrip("/") == "/api/coding/v3")
 
 
+def supports_tail_system(settings, provider: str, *, model: str | None = None) -> bool:
+    """Channels verified to accept system messages after the dialogue history.
+
+    Flash on the same Ark coding endpoint was checked live on 2026-10-16:
+    replies stayed normal and 98% of a repeated prefix was cache-read.
+    """
+    if is_ark_kimi(settings, provider, model=model):
+        return True
+    url = urlparse(str(getattr(settings, f"{provider}_base_url", "") or ""))
+    name = str(model or getattr(settings, f"{provider}_model", "") or "").casefold()
+    return (provider == "deepseek" and name in {"deepseek-v4.1-flash", "deepseek-v4-1-flash"}
+            and url.hostname == "ark.cn-beijing.volces.com"
+            and url.path.rstrip("/") == "/api/coding/v3")
+
+
 def ark_kimi_effort(effort: str | None) -> str:
     if effort in {None, "provider_default", "disabled"}:
         return "low"

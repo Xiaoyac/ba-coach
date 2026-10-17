@@ -117,3 +117,23 @@ async def test_real_sdk_wire_retains_roles_effort_budget_and_request_id(path):
         assert body["messages"][0]["role"] == "system"
     finally:
         await p._client.close()
+
+
+@pytest.mark.parametrize("url,model,expected", [
+    (URL, "kimi-k3", True),
+    (URL, "deepseek-v4.1-flash", True),
+    (URL, "deepseek-v4-1-flash", True),
+    (URL, "doubao-seed-2-1-turbo-260628", False),
+    ("https://ark.cn-beijing.volces.com/api/v3", "deepseek-v4.1-flash", False),
+    ("https://api.deepseek.com/v1", "deepseek-v4.1-flash", False),
+])
+def test_tail_system_layout_only_on_verified_ark_coding_models(url, model, expected):
+    cfg = settings().model_copy(update={"deepseek_base_url": url, "deepseek_model": model})
+    assert DeepSeekProvider(cfg).supports_tail_system is expected
+
+
+def test_flash_lead_uses_cache_friendly_layout():
+    from app.provisional_reply import select_lead_provider
+    lead = select_lead_provider(DeepSeekProvider(settings()), settings())
+    assert lead.model in {"deepseek-v4.1-flash", "deepseek-v4-1-flash"}
+    assert lead.supports_tail_system
