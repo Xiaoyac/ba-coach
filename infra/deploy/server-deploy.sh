@@ -76,6 +76,14 @@ install -d -m 0750 -o bacoach -g bacoach "$release_dir"
 tar -xzf "$archive" -C "$release_dir"
 chown -R bacoach:bacoach "$release_dir"
 
+# Settings such as GOAL_CARD_UI_ENABLED and the KNOWLEDGE_* options live in
+# backend/.env, which is not in the archive. Carry it forward (resolved to the
+# real file) or the new release silently runs on code defaults.
+if [[ -n "$previous_target" && -e "$previous_target/backend/.env" ]]; then
+  ln -s "$(readlink -f "$previous_target/backend/.env")" "$release_dir/backend/.env"
+  chown -h bacoach:bacoach "$release_dir/backend/.env"
+fi
+
 echo "creating backend virtual environment"
 runuser -u bacoach -- python3 -m venv "$release_dir/backend/.venv"
 runuser -u bacoach -- env \
