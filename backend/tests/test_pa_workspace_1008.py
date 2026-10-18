@@ -134,3 +134,31 @@ async def test_number_free_confirm_button_keeps_exact_version_safety(goal_api, c
     conversation, _ = await runtime_for(db, 'chat-a')
     evidence = await structured_confirmation_evidence(db, conversation, user)
     assert evidence is not None
+
+
+async def test_reply_context_says_who_filled_each_card_field(goal_api):
+    # Feedback 1.2: the coach wrote 饭后散步 itself, then told the user "I see you filled it in".
+    client, db, _ = goal_api
+    conversation, state, user, card = await setup_card(db)
+    row = await read_card_row(db, 1, 'a')
+    row = await record_card_update(db, row, {'fields': {'activity_content': '饭后散步'}, 'phase': 'discussing'},
+                                   reason='business_plan_discussing')
+    await db.commit()
+    maker = async_sessionmaker(db.bind, expire_on_commit=False)
+    authority = await read_reply_workflow(maker, 'a', 'chat-a')
+    assert authority['goal_card_draft']['filled_by'] == {'activity_content': 'assistant'}
+    prompt = workflow_prompt(authority)
+    assert '"filled_by": {"activity_content": "assistant"}' in prompt and '代填的内容不要说成用户填写的' in prompt
+    result = await client.put('/api/program/chat-a/goal-card', json={
+        'card_id': card['id'], 'revision': row['revision'], 'mode': 'draft',
+        'fields': {'activity_content': '饭后散步', 'schedule_text': '每天晚饭后'}})
+    assert result.status_code == 200, result.text
+    authority = await read_reply_workflow(maker, 'a', 'chat-a')
+    assert authority['goal_card_draft']['filled_by'] == {
+        'activity_content': 'assistant', 'schedule_text': 'participant'}
+    result = await client.put('/api/program/chat-a/goal-card', json={
+        'card_id': card['id'], 'revision': result.json()['card']['revision'], 'mode': 'draft',
+        'fields': {'activity_content': '午饭后散步', 'schedule_text': ''}})
+    assert result.status_code == 200, result.text
+    authority = await read_reply_workflow(maker, 'a', 'chat-a')
+    assert authority['goal_card_draft']['filled_by'] == {'activity_content': 'participant'}

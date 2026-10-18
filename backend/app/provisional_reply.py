@@ -124,11 +124,35 @@ def parallel_reply_system(system, lead=""):
         cacheable=False, after_history=any(s.after_history for s in segments))]
 
 
+def _copied_through(candidate, target):
+    """Match ``target`` at the start of ``candidate`` ignoring whitespace.
+
+    Returns the candidate index just after the copy, -1 while the candidate is
+    still a possible copy, or None once it diverges. Models often drop or add
+    a space after full-width punctuation when echoing the opening.
+    """
+    i = j = 0
+    while True:
+        while j < len(target) and target[j].isspace():
+            j += 1
+        if j == len(target):
+            return i
+        while i < len(candidate) and candidate[i].isspace():
+            i += 1
+        if i == len(candidate):
+            return -1
+        if candidate[i] != target[j]:
+            return None
+        i += 1
+        j += 1
+
+
 class ContinuationPrefix:
-    """Remove an exact copied opening before any of its bytes reach the user.
+    """Remove a copied opening before any of its bytes reach the user.
 
     Buffer at most the opening length. A differing continuation immediately
     streams normally; raw provider output remains available in graph telemetry.
+    Whitespace differences alone do not make a copy new content.
     """
     def __init__(self, lead):
         self.lead = lead
@@ -146,22 +170,24 @@ class ContinuationPrefix:
             return text
         self.pending += text
         candidate = self.pending.lstrip()
-        if candidate.startswith(self.lead):
+        end = _copied_through(candidate, self.lead)
+        if end is not None and end >= 0:
             self.resolved = self.removed = True
-            result = candidate[len(self.lead):].lstrip()
+            result = candidate[end:].lstrip()
             self.trim = not bool(result)
             self.pending = ""
             return result
-        if (candidate.startswith(self.stem) and len(candidate) > len(self.stem)
-                and candidate[len(self.stem)] in "。！.!…，,；;\n "):
+        stem_end = _copied_through(candidate, self.stem)
+        if (stem_end is not None and 0 <= stem_end < len(candidate)
+                and candidate[stem_end] in "。！.!…，,；;\n "):
             self.resolved = self.removed = True
-            result = candidate[len(self.stem):].lstrip("。！.!…，,；;\n ")
+            result = candidate[stem_end:].lstrip("。！.!…，,；;\n ")
             self.trim = not bool(result)
             self.pending = ""
             return result
-        if candidate == self.stem:
+        if stem_end is not None and stem_end >= 0:
             return ""
-        if self.lead.startswith(candidate):
+        if end == -1:
             return ""
         self.resolved = True
         result, self.pending = self.pending, ""
@@ -169,7 +195,7 @@ class ContinuationPrefix:
 
     def finish(self):
         result, self.pending = self.pending, ""
-        if result.strip() == self.stem:
+        if result.strip() and _copied_through(result.strip(), self.stem) == len(result.strip()):
             result = ""
             self.removed = True
         self.resolved = True

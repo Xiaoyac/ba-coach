@@ -123,6 +123,36 @@ async def record_card_update(db, row, changes, *, reason, message_id=None):
     return fresh
 
 
+_PARTICIPANT_EDITS = frozenset({"user_edited_form", "user_saved_draft"})
+
+
+async def field_sources(db, row):
+    """Who last wrote each filled field, replayed from the revision receipts.
+
+    Only the participant's own form saves count as ``participant``; every
+    other content change came from the card tools or a saved plan.
+    """
+    logs = schema.tables["ai_decision_logs"]
+    receipts = (await db.execute(select(logs.c.decision_value, logs.c.reason_summary).where(
+        logs.c.conversation_id == row["conversation_id"],
+        logs.c.decision_type == "goal_card_revision").order_by(logs.c.id))).all()
+    sources, previous = {}, {}
+    for snapshot, reason in receipts:
+        if not isinstance(snapshot, Mapping) or snapshot.get("id") != row["id"]:
+            continue
+        current = content_fields(snapshot.get("fields"))
+        author = "participant" if reason in _PARTICIPANT_EDITS else "assistant"
+        for key in current.keys() | previous.keys():
+            if current.get(key) != previous.get(key):
+                if key in current:
+                    sources[key] = author
+                else:
+                    sources.pop(key, None)
+        previous = current
+    filled = content_fields(row["fields"])
+    return {key: author for key, author in sources.items() if filled.get(key) == previous.get(key)}
+
+
 async def _select_card(db, row, message_id):
     latest = await read_card_row(db, row["conversation_id"], row["user_id"], lock=True)
     if latest and latest["id"] != row["id"]:

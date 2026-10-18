@@ -133,6 +133,24 @@ async def test_copied_opening_removed_across_chunk_and_punctuation_boundaries(si
     text=''.join(prefix.push(raw[i:i+size]) for i in range(0,len(raw),size))+prefix.finish()
     assert text=='后续正文' and prefix.removed
 
+SPACED_LEAD = ('小凌，饭后散步这个想法挺好，而且它已经嵌在你原有的出门吃饭、走回来的动线里，不用额外挤时间。 '
+               '那我们就以它为基础来细化，先看一下怎么让它更可行、也更容易坚持。')
+
+@pytest.mark.parametrize('size',[1,3,1000])
+async def test_copied_opening_removed_when_only_whitespace_differs(size):
+    # Live 2026-10-15: the lead had a space after 。 and the main reply's copy did not.
+    from app.provisional_reply import ContinuationPrefix
+    prefix=ContinuationPrefix(SPACED_LEAD)
+    raw=SPACED_LEAD.replace('。 ','。')+'\n\n我想先补一个关键信息：执行时间。'
+    text=''.join(prefix.push(raw[i:i+size]) for i in range(0,len(raw),size))+prefix.finish()
+    assert text=='我想先补一个关键信息：执行时间。' and prefix.removed
+
+async def test_whitespace_tolerance_does_not_delete_new_content():
+    from app.provisional_reply import ContinuationPrefix
+    prefix=ContinuationPrefix('先走一步。 再看看感受。')
+    raw='先走一步。再看看别的安排。'
+    assert prefix.push(raw)+prefix.finish()==raw and not prefix.removed
+
 async def test_similar_new_sentence_is_not_deleted():
     from app.provisional_reply import ContinuationPrefix
     prefix=ContinuationPrefix('先走一步。')

@@ -285,7 +285,7 @@ export default function GoalFormulationPanel({sessionId, accountKey, module, bus
     <div className="mx-auto max-w-[58rem]">
       <div className="flex min-h-10 items-center justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-ink">{card ? `${kind}卡` : "我的目标"}{card && <span className="ml-2 text-xs font-normal text-ink-muted">{phaseLabel}</span>}</p>
+          <p className="text-sm font-medium text-ink">{card ? `${kind}卡` : "我的目标"}{card && !["formulating", "discussing"].includes(card.phase) && <span className="ml-2 text-xs font-normal text-ink-muted">{phaseLabel}</span>}</p>
           {!participant && !card && isM2 && enabled && <p className="mt-1 text-xs leading-5 text-ink-muted">先聊聊你的想法，开始制定目标时，卡片会在这里展开。</p>}
           {card && !expanded && <p className="mt-1 truncate text-xs text-ink-muted">{card.fields.activity_content || "想做什么、怎么安排，可以想到多少先填多少。"}</p>}
         </div>
@@ -295,11 +295,10 @@ export default function GoalFormulationPanel({sessionId, accountKey, module, bus
       {(error || readError) && <p role="alert" className="mt-2 text-xs leading-5 text-alert-ink">{error || readError} <button type="button" disabled={saving} onClick={() => setRetry(value => value + 1)} className="min-h-8 px-2 underline underline-offset-4">重试读取</button>{dirty && "未提交的填写仍保留。"}</p>}
       {dirty && <p className="mt-1 text-xs text-ink-muted">填写尚未暂存，教练暂时看不到这些修改。<button type="button" disabled={saving} onClick={discardLocalDraft} className="min-h-9 px-2 underline">放弃本地修改，恢复已保存内容</button></p>}
       {notice && <p role="status" className="mt-1 text-xs leading-5 text-accent-ink">{notice}</p>}
-      {card && ["formulating", "discussing"].includes(card.phase) && !dirty && card.confirmation?.message && <p role="status" className="mt-1 text-xs leading-5 text-ink-muted">{card.confirmation.message}</p>}
       {card?.phase === "confirmed" && dirty && <p className="mt-1 text-xs leading-5 text-ink-muted">本次保存不包含你尚未提交的填写；这些内容仍保留在下方卡片中。</p>}
       {card && expanded && <div id="goal-card-editor" className="zen-scroll default-style:mt-3 default-style:max-h-[min(35dvh,420px)] default-style:overflow-y-auto default-style:rounded-2xl default-style:border default-style:border-accent-edge default-style:bg-panel default-style:p-4 default-style:sm:p-5 simple:mt-3 simple:max-h-[min(35dvh,420px)] simple:overflow-y-auto simple:rounded-2xl simple:bg-panel simple:p-4 simple:sm:p-5">
         {editable ? <form onSubmit={event => void submit(event)}>
-          <div className="mb-4"><h3 className="text-base font-semibold">{participant ? "编辑目标草稿" : "先写下你想到的"}</h3><p className="mt-1 text-xs leading-5 text-ink-muted">都可以先留空。填完后一起讨论，确认之前只是一份草稿。{card.kind === "secondary" ? "这是额外活动，不会替换原来的核心目标。" : "活动、时间和难度，都可以和教练再调整。"}</p></div>
+          <div className="mb-4"><h3 className="text-base font-semibold">{participant ? "编辑目标草稿" : "先写下你想到的"}</h3><p className="mt-1 text-xs leading-5 text-ink-muted">填完后一起讨论，可以与教练再调整。</p></div>
           <div className="grid gap-4 sm:grid-cols-2">
             {fieldKeys.map(key => <label key={key} className={`block min-w-0 ${key === "activity_content" ? "sm:col-span-2" : ""}`}>
               <span className="mb-1.5 block text-xs font-medium text-ink-muted">{goalCardFieldLabels[key]}{key === "difficulty_rating" ? "（0～10，可不填）" : ""}</span>
