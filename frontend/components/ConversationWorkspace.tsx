@@ -34,8 +34,6 @@ import ConversationModeModal from "@/components/ConversationModeModal";
 import ConversationSidebar from "@/components/ConversationSidebar";
 import { goalReuseDraft } from "@/lib/goal-reuse";
 import GoalsAndRecordsModal from "@/components/GoalsAndRecordsModal";
-import type { AssessmentRecord } from "@/lib/assessment";
-import { dailyRecordMessage } from "@/lib/dailyRecordMessage";
 import PromptManagerModal from "@/components/PromptManagerModal";
 import AdminAccountManagerModal from "@/components/AdminAccountManagerModal";
 import IssueReportModal from "@/components/IssueReportModal";
@@ -815,18 +813,6 @@ export default function ConversationWorkspace({
     }
   }
 
-  /** A saved daily record reaches the coach as the user's chat message. While
-   * a reply is still running it waits in the composer instead of being lost. */
-  function shareDailyRecord(record: AssessmentRecord, updated: boolean) {
-    if (!sessionId) return;
-    const text = dailyRecordMessage(record, updated);
-    if (busy || loadingConversation || turns.current.has(sessionId)) {
-      setReuseDraft({ text, sessionId, nonce: Date.now() });
-      return;
-    }
-    void handleSend(text);
-  }
-
   async function handleSend(text: string, metadata?: Record<string, string>, retry?: { item: FailedChatSend; messages: ChatMessage[] }) {
     const submittedAt = performance.now();
     const sourceId = activeSessionIdRef.current;
@@ -1347,7 +1333,7 @@ export default function ConversationWorkspace({
       {dailyRecordsAvailable && (goalsOpen || assessmentOpen) && <GoalsAndRecordsModal key={`${accountId}:${sessionId}`} sessionId={sessionId}
         busy={busy || loadingConversation} onReuse={fields => { setReuseDraft({text:goalReuseDraft(fields), sessionId, nonce:Date.now()}); setGoalsOpen(false); setAssessmentOpen(false); }}
         initialTab={assessmentOpen ? "record" : "goals"} initialGoalKind={goalArchiveKind} initialRecordView={assessmentView}
-        refreshKey={programRefreshKey} onSaved={(record, updated) => { setAssessmentRefreshKey(key => key + 1); shareDailyRecord(record, updated); }}
+        refreshKey={programRefreshKey} onSaved={() => setAssessmentRefreshKey(key => key + 1)}
         onOpenReminders={() => setPushSettingsOpen(true)} onClose={() => { setGoalsOpen(false); setAssessmentOpen(false); }} />}
       {pushSettingsOpen && <PushReminderModal onClose={() => setPushSettingsOpen(false)} />}
       {shareTarget && <ConversationShareModal
