@@ -186,7 +186,7 @@ def affirmative(text):
         rf"(?:{acknowledgement}|{agreement}|{action}|{evaluation}|{ability}|{ability_first}|我同意这样记录|我会这样记录)+", clean))
 
 
-def summary_present(module, text, record):
+def summary_present(module, text, record, *, said_at=None):
     if re.search(r"(?:目标面板|网页|按钮).{0,24}(?:确认|保存|提交)", text):
         return False
     if not re.search(r"确认|愿意|可以吗|合适吗|符合|对吗|正确吗|怎么样|可行吗|觉得如何", text):
@@ -224,7 +224,14 @@ def summary_present(module, text, record):
                 return False
         elif any(compact(x["plan"]) not in body for x in record["barrier_coping_plan"]):
             return False
-        return _schedule_visible(record, body)
+        if _schedule_visible(record, body):
+            return True
+        # The stored schedule is dated (明天 -> 10.20); the reply may still say
+        # 明天, which means the same day when read on the day it was shown.
+        if said_at is None:
+            return False
+        from .schedule_dates import date_relative_days, local_day
+        return _schedule_visible(record, compact(date_relative_days(text, local_day(said_at))))
     if not confirmation_fields_complete("module_3", record):
         return False
     plan = _plan_text(record.get("negotiated_record_plan"))
@@ -421,7 +428,7 @@ async def advance_from_dialogue(db, *, session_id, user_id, assistant_message_id
             not previous and len(rows) == 3 and rows[0].role == "assistant"
             and affirmative(user.content)
             and confirmation_fields_complete(module, pending)
-            and summary_present(module, rows[0].content, pending)
+            and summary_present(module, rows[0].content, pending, said_at=rows[0].created_at)
         )
         # Compatibility with markers written before the structured snapshot
         # was introduced.  This path still requires a complete plan and a
@@ -430,7 +437,7 @@ async def advance_from_dialogue(db, *, session_id, user_id, assistant_message_id
             # Compatibility with markers written before summary_verified was
             # introduced. New markers use the immutable result below.
             marker_ok = (confirmation_fields_complete(module, pending)
-                         and summary_present(module, rows[0].content, pending))
+                         and summary_present(module, rows[0].content, pending, said_at=rows[0].created_at))
         accepted = legacy_lagged_card or (
             len(rows) == 3 and rows[0].role == "assistant" and affirmative(user.content)
             and previous.get("module") == module and previous.get("cycle_id") == state["active_cycle_id"]
@@ -459,7 +466,7 @@ async def advance_from_dialogue(db, *, session_id, user_id, assistant_message_id
             # boolean plus the stable executable fingerprint.
             "field_complete": confirmation_fields_complete(module, pending),
             "summary_verified": (confirmation_fields_complete(module, pending)
-                                  and summary_present(module, rows[-1].content, pending))}
+                                  and summary_present(module, rows[-1].content, pending, said_at=rows[-1].created_at))}
         rt = schema.tables["conversation_runtime_states"]
         await db.execute(update(rt).where(rt.c.conversation_id == conversation.id).values(
             memory={**memory, "dialogue_draft": marker}))

@@ -43,7 +43,7 @@ async def scoped_context(monkeypatch):
         await db.commit()
 
     async def runtime_for(db, session_id):
-        return SimpleNamespace(subject_id="a"), {"active_goal_id":"goal", "active_cycle_id":"current-cycle"}
+        return SimpleNamespace(id=1, subject_id="a"), {"active_goal_id":"goal", "active_cycle_id":"current-cycle"}
 
     monkeypatch.setattr(knowledge_context, "runtime_for", runtime_for)
     yield maker

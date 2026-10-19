@@ -69,7 +69,9 @@ async def read_reply_workflow(maker, user_id, session_id):
                     confirmation_summary = {'text': text, 'record_id': pending['id'],
                                             'record_hash': record_hash(pending)}
         if runtime['current_module'] == 'module_4' and pending:
-            from .m4_contract import contract_for, missing_fields
+            from .m4_contract import contract_for, missing_fields, previous_attempt
+            if await previous_attempt(db, pending, conversation.id):
+                pending = {}  # the draft still holds an earlier attempt's review
             contract = contract_for(pending)
             missing = missing_fields(pending, session_id=session_id,
                                      cycle_id=runtime.get('active_cycle_id'))

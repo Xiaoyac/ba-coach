@@ -339,8 +339,73 @@ def contract_for(record):
     return value if isinstance(value, dict) and value.get("version") in {VERSION, LEGACY_VERSION} else {}
 
 
+async def round_boundary(db, conversation_id):
+    """Position of the last M1/M2 turn that followed an M4 turn in this chat.
+
+    Reviews are rarely confirmed, so a cycle can hold one long-lived M4 draft.
+    Going back to planning after a review ends that attempt: anything before
+    this boundary is an earlier review, usable as experience but never as the
+    facts of the next one. -1 when the chat has not returned to planning.
+    """
+    from .database_v2_schema import metadata
+    from .models import ConversationMessage
+    logs = metadata.tables["ai_decision_logs"]
+    rows = (await db.execute(select(logs.c.turn_id, logs.c.module_name, logs.c.decision_type,
+        logs.c.decision_value).where(logs.c.conversation_id == conversation_id,
+        logs.c.decision_type.in_(["step_completion", "router_only_decision"])))).all()
+    turns = {}
+    for turn_id, module, kind, value in rows:
+        if kind == "router_only_decision":
+            # The router row is filed under the module it left; the module that
+            # handled the turn is the applied one.
+            module = value.get("applied_module") if isinstance(value, dict) else None
+        if module and str(turn_id).isdigit():
+            turns.setdefault(int(turn_id), set()).add(module)
+    if not turns:
+        return -1
+    positions = dict((await db.execute(select(ConversationMessage.id, ConversationMessage.position).where(
+        ConversationMessage.conversation_id == conversation_id,
+        ConversationMessage.id.in_(list(turns))))).all())
+    boundary, reviewed = -1, False
+    for position, modules in sorted((positions[i], m) for i, m in turns.items() if i in positions):
+        if "module_4" in modules:
+            reviewed = True
+        elif reviewed and modules & {"module_1", "module_2"}:
+            boundary = position
+    return boundary
+
+
+async def previous_attempt(db, record, conversation_id):
+    """True when an M4 draft's last snapshot predates this chat's return to planning."""
+    anchor = contract_for(record).get("assistant_message_id")
+    if type(anchor) is not int:
+        return False
+    boundary = await round_boundary(db, conversation_id)
+    if boundary < 0:
+        return False
+    from .models import ConversationMessage
+    message = await db.get(ConversationMessage, anchor)
+    return bool(message and message.conversation_id == conversation_id and message.position <= boundary)
+
+
+def attempt_snapshot(record):
+    """The JSON-safe review content kept in the audit log when an attempt is archived."""
+    keys = ("scenario_type", "execution_result", "phase_a", "phase_b", "phase_c", "abc_chain_summary",
+            "chain_confirmation_status", "core_difficulty_type", "difficulty_description",
+            "ba_reeducation_content", "next_coping_strategy", "review_decision", "review_summary")
+    return json.loads(json.dumps({key: record.get(key) for key in keys}, ensure_ascii=False, default=str))
+
+
+# Columns normalize() does not return; a new attempt must not inherit them.
+NEW_ATTEMPT_RESET = {"confirmed_at": None}
+
+
 async def cycle_messages(db, messages):
-    """Cut at this chat's last authenticated M3/M4 completion, never by LLM IDs."""
+    """Cut at this chat's last authenticated M3/M4 completion, never by LLM IDs.
+
+    A return to planning after a review (round_boundary) also starts a new
+    attempt, so the previous review's turns stay out of this one's evidence.
+    """
     if not messages:
         return []
     from .database_v2_schema import metadata
@@ -350,7 +415,7 @@ async def cycle_messages(db, messages):
         logs.c.decision_type == "user_confirmation",
         logs.c.module_name.in_(["module_3", "module_4"])))) .scalars())
     positions = [m.position for m in messages if str(m.id) in ids]
-    cutoff = max(positions, default=-1)
+    cutoff = max(max(positions, default=-1), await round_boundary(db, messages[0].conversation_id))
     return [m for m in messages if m.position > cutoff]
 
 

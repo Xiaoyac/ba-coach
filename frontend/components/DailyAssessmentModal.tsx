@@ -96,7 +96,7 @@ export default function DailyAssessmentModal({
   embedded?: boolean;
   onDraftStateChange?: (state: { dirty: boolean; busy: boolean }) => void;
   onClose: () => void;
-  onSaved?: () => void;
+  onSaved?: (record: AssessmentRecord, updated: boolean) => void;
   initialView?: "record" | "history";
   sessionId?: string | null;
 }) {
@@ -277,7 +277,7 @@ export default function DailyAssessmentModal({
       setEditing(saved);
       setDateExisting(saved);
       setView("saved");
-      onSaved?.();
+      onSaved?.(saved, editing !== null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
