@@ -75,6 +75,14 @@ def explicit_day(text, anchor):
     if len(short) == 1:
         try: return date(anchor.year, *map(int, short[0]))
         except ValueError: return None
+    # "10.20" is how a saved plan writes a relative day (schedule_dates);
+    # amounts such as "1.5小时" are not dates.
+    dotted = re.findall(r'(?<![\d.])(\d{1,2})\.(\d{1,2})(?![\d.]|\s*(?:小时|分|公里|千米|km|倍|个|次))', text)
+    if len(dotted) == 1:
+        try: day = date(anchor.year, *map(int, dotted[0]))
+        except ValueError: return None
+        # Written near a year end, "1.2" means the coming January.
+        return day.replace(year=day.year + 1) if day < anchor - timedelta(days=180) else day
     return None
 
 

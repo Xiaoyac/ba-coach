@@ -218,3 +218,49 @@ def test_worker_available_without_push_configuration(monkeypatch):
     assert pa_chat_reminders.available()
     settings.pa_chat_reminders_enabled = False
     assert not pa_chat_reminders.available()
+
+
+START = AT - timedelta(minutes=75)  # 16:00 Shanghai; AT is one hour after the 15-minute walk.
+
+
+@pytest.mark.asyncio
+async def test_reminds_half_an_hour_before_and_an_hour_after(setup):
+    assert (await tick(setup, at=START-timedelta(minutes=31)))['sent'] == 0
+    assert (await tick(setup, at=START-timedelta(minutes=30)))['sent'] == 1
+    assert (await tick(setup, at=START-timedelta(minutes=29)))['duplicate'] == 1
+    assert (await tick(setup, at=AT))['sent'] == 1
+    before, after = await reminder_rows(setup)
+    assert before.content.startswith('活动前提醒') and '09月18日 16:00开始' in before.content
+    assert after.content.startswith('活动后提醒')
+    async with setup() as db:
+        assert len((await db.execute(select(reminders.c.id))).all()) == 2
+
+
+@pytest.mark.asyncio
+async def test_no_nudge_after_the_start_or_for_a_plan_confirmed_inside_the_lead(setup):
+    assert (await tick(setup, at=START))['sent'] == 0
+    async with setup() as db:
+        await db.execute(update(ConversationMessage).where(ConversationMessage.id.in_([3, 4]))
+                         .values(created_at=START-timedelta(minutes=10)))
+        await db.commit()
+    assert (await tick(setup, at=START-timedelta(minutes=5)))['sent'] == 0
+    assert (await tick(setup, at=AT))['sent'] == 1
+
+
+@pytest.mark.asyncio
+async def test_plan_saved_with_a_dated_day_still_reminds(setup):
+    # 今天下午4点 said on 9-18 is saved as 9.18下午4点 (schedule_dates).
+    async with setup() as db:
+        await db.execute(update(schema.tables['module_two_record']).values(schedule_text='9.18下午4点散步15分钟'))
+        await db.commit()
+    assert (await tick(setup, at=START-timedelta(minutes=30)))['sent'] == 1
+    assert (await tick(setup, at=AT))['sent'] == 1
+
+
+def test_dotted_dates_are_read_but_amounts_are_not():
+    from datetime import date
+    from app.pa_schedule import explicit_day
+    assert explicit_day('10.20晚上8点散步1.5小时', date(2026, 10, 19)) == date(2026, 10, 20)
+    assert explicit_day('10.28（周三）晚上8点', date(2026, 10, 19)) == date(2026, 10, 28)
+    assert explicit_day('1.2早上7点', date(2026, 12, 30)) == date(2027, 1, 2)
+    assert explicit_day('散步1.5小时', date(2026, 10, 19)) is None

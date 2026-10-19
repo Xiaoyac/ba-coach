@@ -19,6 +19,7 @@ from .database_v2_schema import metadata as schema
 from .models import AuthSession, UserAccount, Conversation, ConversationMessage, AssessmentEntry, ActivityLog
 from .pa_schedule import starts, explicit_day, clock, utc, naive_utc, BUFFER, MAX_LATENESS
 from .push_schema import devices, deliveries
+from .schedule_dates import date_relative_days, local_day
 from .v2_repository import now
 
 log = logging.getLogger(__name__)
@@ -118,7 +119,10 @@ async def candidates(db, user_id, at):
             .order_by(ConversationMessage.position.desc()))).scalars().all()
         # An extractor's paraphrase/ISO guess isn't sufficient to trigger contact.
         schedule = (plan['schedule_text'] or '').strip()
-        source = next((m for m in messages if schedule and schedule in m.content), None)
+        # A saved plan writes 明天 as a date (schedule_dates); the user's own
+        # message, dated by the day it was sent, is still the evidence.
+        source = next((m for m in messages if schedule and (schedule in m.content or schedule in
+            date_relative_days(m.content, local_day(m.created_at, plan['timezone'])))), None)
         if not source: continue
         frequency = plan['frequency_rule']
         if not re.search(r'每周|每星期|每天|每日', schedule) and isinstance(frequency, dict):
