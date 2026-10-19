@@ -233,10 +233,13 @@ async def execute_ui_tool(db, conversation, state, user, name, args, *, provider
         for entry in updates:
             if not isinstance(entry, dict) or entry.get('field') not in allowed:
                 reject('invalid_secondary_updates')
-            await source(db, conversation, user, entry)
+            said = await source(db, conversation, user, entry)
             value = entry.get('value')
             if not isinstance(value, str) or not value.strip() or value not in entry['source_quote']:
                 reject('secondary_value_not_in_user_source')
+            if entry['field'] == 'schedule_text':
+                from .schedule_dates import date_relative_days, local_day
+                value = date_relative_days(value, local_day(said.created_at))
             fields[entry['field']] = value
         fields = CardFields.model_validate(fields).model_dump()
         row = await record_card_update(db, row, {'fields': fields, 'phase': 'discussing',

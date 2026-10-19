@@ -273,5 +273,8 @@ async def assemble_knowledge_context(maker, user_id, session_id, *, module=None,
             table = metadata.tables["module_four_record"]
             row = (await db.execute(select(table).where(
                 table.c.cycle_id == cycle_id))).mappings().one_or_none()
+            from .m4_contract import previous_attempt
+            if row and await previous_attempt(db, row, conversation.id):
+                row = None  # an earlier attempt's review, not this one's facts
             fact(table.name, row)
         return result

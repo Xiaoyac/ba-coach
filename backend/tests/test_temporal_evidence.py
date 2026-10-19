@@ -148,15 +148,15 @@ async def test_goal_creation_ignores_model_time_and_derives_from_user(goal_api):
     assert result is not None
     plans = schema.tables["module_two_record"]
     row = (await db.execute(select(plans).where(plans.c.id == result["plan_id"]))).mappings().one()
-    assert row["schedule_text"] == "明天晚上8点"
+    assert row["schedule_text"] == "10.1晚上8点"
     assert row["scheduled_start_at"] == datetime(2026, 10, 1, 20)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("schedule,expected", [
-    ("明天晚上8点", datetime(2026, 10, 1, 20)), ("明天下午", None),
+@pytest.mark.parametrize("schedule,dated,expected", [
+    ("明天晚上8点", "10.1晚上8点", datetime(2026, 10, 1, 20)), ("明天下午", "10.1下午", None),
 ])
-async def test_draft_update_replaces_or_clears_old_time_from_source(goal_api, schedule, expected):
+async def test_draft_update_replaces_or_clears_old_time_from_source(goal_api, schedule, dated, expected):
     _, db, _ = goal_api
     await seed_m2(db)
     plans = schema.tables["module_two_record"]
@@ -174,5 +174,5 @@ async def test_draft_update_replaces_or_clears_old_time_from_source(goal_api, sc
             "target_activity_time": "1999-01-01 01:23:45",
             "_source_session_id": "chat-a", "_source_assistant_message_id": 22})
     row = (await db.execute(select(plans).where(plans.c.id == "m2-draft"))).mappings().one()
-    assert row["schedule_text"] == schedule
+    assert row["schedule_text"] == dated
     assert row["scheduled_start_at"] == expected

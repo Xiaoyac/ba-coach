@@ -233,6 +233,8 @@ async def save_card_fields(db, conversation, state, payload):
     if row["kind"] == "primary" and row["cycle_id"] not in {None, state.get("active_cycle_id")}:
         raise HTTPException(409, "当前计划已变化，请重新查看目标卡")
     fields = payload.fields.model_dump()
+    from .schedule_dates import date_relative_days, local_day
+    fields["schedule_text"] = date_relative_days(fields["schedule_text"], local_day())
     content_revision = (row["content_revision"] + int(content_fields(row["fields"]) != content_fields(fields))) if row["content_revision"] is not None else None
     text = submission_text(row["id"], content_revision, row["kind"], fields)
     # A repeated save of identical content must not invalidate a ready card.

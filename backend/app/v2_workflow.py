@@ -68,6 +68,13 @@ async def load_workflow(maker, session_id):
         if row:
             for n in (2, 3, 4):
                 steps[f"module_{n}"] = row[f"module_{n}_steps"]
+        if steps["module_4"]:
+            from .m4_contract import previous_attempt
+            reviews = schema.tables["module_four_record"]
+            review = (await db.execute(select(reviews).where(
+                reviews.c.cycle_id == state["active_cycle_id"]))).mappings().one_or_none()
+            if review and await previous_attempt(db, review, conversation.id):
+                steps["module_4"] = []
         return steps, state["active_cycle_id"]
 
 
@@ -517,6 +524,9 @@ async def create_goal_from_agent_dialogue(db, *, session_id, user_id, data,
     from .plan_contract import normalize_coping_evidence
     values = normalize_coping_evidence(values, messages)
     values = normalize_plan_time(values, messages, timezone_name="Asia/Shanghai")
+    if "schedule_text" in values:
+        from .schedule_dates import date_schedule_from_messages
+        values["schedule_text"] = date_schedule_from_messages(values["schedule_text"], messages)
     # The extractor may decorate the chosen activity with an assistant's
     # wording. Persist the source-backed user choice, not an expanded activity
     # the user never selected. Schedule/location keep their separate fields.
@@ -748,6 +758,11 @@ async def persist_record(maker, *, module, user_id, data, cycle_id, db_session=N
                 values = _synchronize_duration_text(values, existing)
             values = normalize_plan_time(values, messages, existing=existing,
                 timezone_name=existing["timezone"] if existing else defaults["timezone"])
+            if "schedule_text" in values:
+                # Dated after the timestamp derivation, which needs the user's wording.
+                from .schedule_dates import date_schedule_from_messages
+                values["schedule_text"] = date_schedule_from_messages(values["schedule_text"], messages,
+                    timezone_name=existing["timezone"] if existing else defaults["timezone"])
         # A short affirmative turn confirms the card just displayed. The
         # extractor still runs over the full transcript, but it may rewrite
         # narrative fields or re-parse an already-known date. Preserve the
@@ -824,17 +839,42 @@ async def persist_record(maker, *, module, user_id, data, cycle_id, db_session=N
                 return None
             messages = await cycle_messages(db, messages)
             from .activity_attribution import review_execution_binding
+            from .m4_contract import (contract_for as m4_contract_for, previous_attempt,
+                                      attempt_snapshot, NEW_ATTEMPT_RESET)
+            # One draft per cycle: after a return to planning, or a review of a
+            # different execution, the stored ABC belongs to an earlier attempt.
+            new_attempt = bool(existing) and await previous_attempt(
+                db, existing, source_state["conversation_id"])
             binding = await review_execution_binding(db, user_id=user_id, state=source_state,
-                data=data, existing=existing)
+                data=data, existing=None if new_attempt else existing)
             if not binding["ready"]:
                 # Activity facts were independently captured above; a different
                 # or unresolved occasion cannot rewrite this core review.
                 if db_session is None:
                     await db.commit()
                 return None
+            old_contract = m4_contract_for(existing)
+            old_execution = (old_contract.get("execution_ref") or {}).get("execution_id")
+            if existing and not new_attempt and old_execution and old_execution != binding["execution_id"]:
+                new_attempt = True
+                anchor = await db.get(ConversationMessage, old_contract.get("assistant_message_id")) \
+                    if type(old_contract.get("assistant_message_id")) is int else None
+                if anchor and anchor.conversation_id == source_state["conversation_id"]:
+                    messages = [m for m in messages if m.position > anchor.position]
+            if new_attempt:
+                await db.execute(insert(schema.tables["ai_decision_logs"]), {
+                    "conversation_id": source_state["conversation_id"],
+                    "turn_id": str(data.get("_source_assistant_message_id") or data.get("_source_user_message_id")),
+                    "goal_id": cycle["goal_id"], "cycle_id": cycle_id, "module_name": "module_4",
+                    "decision_type": "m4_attempt_archived", "decision_value": {
+                        "record_id": existing["id"], "execution_id": old_execution,
+                        "next_execution_id": binding["execution_id"], "snapshot": attempt_snapshot(existing)}})
             values = normalize(data, messages, session_id=data["_source_session_id"], cycle_id=cycle_id,
-                assistant_message_id=(data.get("_source_assistant_message_id") or data.get("_source_user_message_id")), existing=existing,
+                assistant_message_id=(data.get("_source_assistant_message_id") or data.get("_source_user_message_id")),
+                existing=None if new_attempt else existing,
                 cycle_status=cycle["status"], tool_closing_summary=tool_closing_summary)
+            if new_attempt:
+                values = {**NEW_ATTEMPT_RESET, **values}
             values["phase_c"]["_m4_contract"]["execution_ref"] = {"execution_id": binding["execution_id"]}
             progress, rt = schema.tables["pa_cycle_progress"], schema.tables["conversation_runtime_states"]
             await db.execute(update(progress).where(progress.c.cycle_id == cycle_id).values(
@@ -1052,9 +1092,13 @@ async def clinical_context(maker, user_id, session_id):
             lines.append("后台记录与当前讨论分别理解：用户最新提出的修改仍是讨论中的意愿，不能因旧名称或旧版本而忽略；"
                          "也不能仅凭对话声称新计划已保存或已确认。未展示草稿不代表用户没有表达。")
             if state["current_module"] == "module_4" and cycle:
-                from .m4_contract import contract_for
+                from .m4_contract import contract_for, previous_attempt
                 reviews = schema.tables["module_four_record"]
                 review = (await db.execute(select(reviews).where(reviews.c.cycle_id == cycle["id"]))).mappings().one_or_none()
+                # An earlier attempt's review is not this attempt's status; it
+                # stays visible to the model only as conversation history.
+                if review and await previous_attempt(db, review, state["conversation_id"]):
+                    review = None
                 if review:
                     contract = contract_for(review)
                     outcomes = contract.get("outcomes") or {}

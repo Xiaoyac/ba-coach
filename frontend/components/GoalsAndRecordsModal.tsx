@@ -3,6 +3,7 @@
 import { useParticipantStyle } from "@/lib/useParticipantStyle";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { GoalCardFields } from "@/lib/goal-card";
+import type { AssessmentRecord } from "@/lib/assessment";
 import GoalOverview from "@/components/GoalOverview";
 import DailyAssessmentModal from "@/components/DailyAssessmentModal";
 
@@ -18,7 +19,7 @@ export default function GoalsAndRecordsModal({ initialTab = "goals", initialReco
   initialGoalKind?: "all" | "primary";
   sessionId: string | null;
   refreshKey: number;
-  onSaved: () => void;
+  onSaved: (record: AssessmentRecord, updated: boolean) => void;
   onClose: () => void;
   onOpenReminders: () => void;
 }) {
