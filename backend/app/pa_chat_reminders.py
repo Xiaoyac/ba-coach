@@ -1,5 +1,8 @@
 """Scheduled chat messages, independent of browser permissions and LLM calls.
 
+Each planned occurrence gets up to two: a nudge LEAD before the start and a
+feedback/record reminder BUFFER after the end.
+
 The receipt, message and transcript revision commit together. The normal chat
 SSE/revision API delivers them to open clients; offline clients read them later.
 Never mutate coaching progress or interleave a reminder with an unfinished turn.
@@ -21,6 +24,9 @@ from .v2_repository import now
 
 log = logging.getLogger(__name__)
 
+LEAD = timedelta(minutes=30)
+KINDS = ('before', 'after')
+
 
 def available():
     settings = get_settings()
@@ -34,13 +40,35 @@ def reminder_text(item):
             '还没做或计划有变化，也可以告诉我。')
 
 
-async def deliver(factory, item, at=None):
+def before_text(item):
+    start = item['start_at'].astimezone(ZoneInfo(item['timezone']))
+    return (f'活动前提醒：按原计划，「{item["activity"]}」将在{start:%m月%d日 %H:%M}开始，'
+            '大约还有半小时。准备好了就可以去做；如果今天不方便或想调整，也可以告诉我。')
+
+
+def window(item, kind):
+    """[due, until) for one reminder of a candidate occurrence."""
+    if kind == 'before':
+        # Never nudge once the activity should already have started.
+        return item['start_at'] - LEAD, item['start_at']
+    return item['due_at'], item['due_at'] + MAX_LATENESS
+
+
+def receipt_id(item, kind):
+    # The after-reminder keeps its original key, so receipts written before
+    # pre-reminders existed still deduplicate.
+    occurrence = f'{item["goal_id"]}|{item["start_at"].isoformat()}' + ('|before' if kind == 'before' else '')
+    return hashlib.sha256(occurrence.encode()).hexdigest()
+
+
+async def deliver(factory, item, at=None, kind='after'):
     """Recheck under the same profile/conversation locks used by plan/chat writes."""
     fixed_time = at is not None
     at = utc(at or now())
-    if not item['due_at'] <= at < item['due_at'] + MAX_LATENESS:
+    due, until = window(item, kind)
+    if not due <= at < until:
         return 'skipped'
-    key = hashlib.sha256(f'{item["goal_id"]}|{item["start_at"].isoformat()}'.encode()).hexdigest()
+    key = receipt_id(item, kind)
     async with factory() as db:
         async with db.begin():
             profiles = schema.tables['user_profile']
@@ -66,7 +94,7 @@ async def deliver(factory, item, at=None):
                                      .with_for_update())).mappings().one_or_none()
             if not fixed_time:
                 at = utc(now())
-            if not item['due_at'] <= at < item['due_at'] + MAX_LATENESS:
+            if not due <= at < until:
                 return 'skipped'
             # Do not insert into a paused session, a sandbox, a different goal,
             # an active review, or a pending confirmation exchange.
@@ -86,16 +114,18 @@ async def deliver(factory, item, at=None):
             if not fresh:
                 return 'skipped'
             plans = schema.tables['module_two_record']
-            confirmed_by_user = await db.scalar(select(ConversationMessage.id).where(
+            confirmed_at = await db.scalar(select(ConversationMessage.created_at).where(
                 ConversationMessage.id == select(plans.c.confirmation_message_id).where(
                     plans.c.id == item['plan_id']).scalar_subquery(),
                 ConversationMessage.conversation_id == conversation,
                 ConversationMessage.role == 'user'))
-            if not confirmed_by_user:
+            # A plan confirmed inside the lead time is nudged by the chat itself.
+            if not confirmed_at or (kind == 'before' and utc(confirmed_at) > due):
                 return 'skipped'
             if not await preference_allows(db, fresh, at, delivery_table=reminders, delivered_states=('sent',)):
                 return 'skipped'
-            suppressed = await feedback_received(db, fresh)
+            # Feedback only answers the after-reminder; nothing precedes a start.
+            suppressed = kind == 'after' and await feedback_received(db, fresh)
             latest = (await db.execute(select(ConversationMessage).where(
                 ConversationMessage.conversation_id == conversation).order_by(
                 ConversationMessage.position.desc(), ConversationMessage.id.desc()).limit(1))).scalar_one_or_none()
@@ -110,7 +140,7 @@ async def deliver(factory, item, at=None):
                     return 'deferred'
             await db.execute(insert(reminders), dict(id=key, user_id=item['user_id'],
                 conversation_id=conversation, goal_id=item['goal_id'], plan_id=item['plan_id'],
-                start_at=naive_utc(item['start_at']), due_at=naive_utc(item['due_at']),
+                start_at=naive_utc(item['start_at']), due_at=naive_utc(due),
                 state='feedback' if suppressed else 'sent', created_at=naive_utc(at)))
             if suppressed:
                 return 'suppressed'
@@ -118,7 +148,7 @@ async def deliver(factory, item, at=None):
             # even user slots and their following odd assistant reply slots.
             position = latest.position + (2 if latest.position % 2 else 3)
             message = ConversationMessage(conversation_id=conversation, position=position, role='assistant',
-                content=reminder_text(fresh), created_at=at, finish_reason='scheduled_reminder')
+                content=reminder_text(fresh) if kind == 'after' else before_text(fresh), created_at=at, finish_reason='scheduled_reminder')
             db.add(message)
             await db.flush()
             await db.execute(update(reminders).where(reminders.c.id == key).values(message_id=message.id))
@@ -142,10 +172,11 @@ async def tick(factory, *, at=None):
             async with factory() as db:
                 items = await candidates(db, uid, at)
             for item in items:
-                if item['due_at'] > at:
-                    continue
-                result = await deliver(factory, item, at if fixed_time else None)
-                counts[result] += 1
+                for kind in KINDS:
+                    if window(item, kind)[0] > at:
+                        continue
+                    result = await deliver(factory, item, at if fixed_time else None, kind)
+                    counts[result] += 1
         except Exception as exc:
             # Isolate an account's failure; logs must not contain chat content.
             log.warning('chat_reminder_account_failed: %s', type(exc).__name__)
