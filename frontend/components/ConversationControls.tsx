@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { ConversationReplyEffort } from "@/lib/conversations";
 
-export function SettingHelp({ id, label, children }: { id: string; label: string; children: ReactNode }) {
+export function SettingHelp({ id, label, children, hover = false, align = "end" }: {
+  id: string; label: string; children: ReactNode; hover?: boolean; align?: "start" | "end";
+}) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -14,13 +16,15 @@ export function SettingHelp({ id, label, children }: { id: string; label: string
     document.addEventListener("keydown", escape);
     return () => { document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", escape); };
   }, [open]);
-  return <div ref={root} className="sm:relative">
+  // Hover opens it for mouse users; click, Escape and outside clicks still work.
+  return <div ref={root} className="sm:relative"
+    onMouseEnter={hover ? () => setOpen(true) : undefined} onMouseLeave={hover ? () => setOpen(false) : undefined}>
     <button type="button" aria-label={label} aria-expanded={open} aria-controls={id}
       onClick={() => setOpen(value => !value)}
       className="grid h-7 w-6 place-items-center rounded-full text-ink-muted hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent">
       <span aria-hidden="true" className="grid h-3.5 w-3.5 place-items-center rounded-full border border-current text-[10px] leading-none">?</span>
     </button>
-    {open && <div id={id} role="note" className="absolute left-2 right-2 top-full z-40 sm:left-auto sm:right-0 sm:w-64 rounded-xl border border-line bg-panel p-3 text-xs leading-6 text-ink shadow-lg">{children}</div>}
+    {open && <div id={id} role="note" className={`absolute left-2 right-2 top-full z-40 ${align === "start" ? "sm:left-0 sm:right-auto" : "sm:left-auto sm:right-0"} sm:w-64 rounded-xl border border-line bg-panel p-3 text-xs leading-6 text-ink shadow-lg`}>{children}</div>}
   </div>;
 }
 
