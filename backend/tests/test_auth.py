@@ -19,7 +19,10 @@ def _register(client: TestClient, **overrides) -> dict:
         "password": "correct-horse-battery",
         "nickname": "南瓜",
         "birth_year": 1998,
+        "phone": "13800138000",
     }
+    from uuid import uuid4
+    payload["research_id"] = f"T{uuid4().hex[:12]}"
     from invitation_helpers import issue_test_invitation
     payload["invitation_code"] = issue_test_invitation(client)
     payload.update(overrides)
@@ -661,3 +664,39 @@ def test_admin_reset_enforces_the_password_floor(
         json={"admin_key": admin_key, "username": "nanan", "new_password": "short"},
     )
     assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# 被试编号
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("value", [None, "", "   ", "P 01", "编号01", "x" * 33])
+def test_register_requires_a_valid_research_id(client: TestClient, value) -> None:
+    response = _register(client, research_id=value)
+    assert response.status_code == 422
+    assert client.post(
+        "/api/auth/login", json={"username": "nanan", "password": "correct-horse-battery"}
+    ).status_code == 401
+
+
+def test_register_saves_research_id_and_rejects_duplicates(
+    client: TestClient, db_sessionmaker
+) -> None:
+    from app.models import ResearchParticipant, UserAccount
+
+    assert _register(client, research_id=" P001 ").status_code == 201
+
+    async def saved():
+        async with db_sessionmaker() as db:
+            return await db.scalar(
+                select(ResearchParticipant.research_id)
+                .join(UserAccount, UserAccount.id == ResearchParticipant.account_id)
+                .where(UserAccount.username == "nanan")
+            )
+
+    assert client.portal.call(saved) == "P001"
+
+    duplicate = _register(client, username="another", research_id="P001")
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"] == "被试编号已被使用"

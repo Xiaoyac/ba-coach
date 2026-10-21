@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timezone
 from typing import Annotated, Literal
 from uuid import UUID
@@ -424,6 +425,19 @@ class BirthYearOnlyModel(BaseModel):
         return value
 
 
+def normalize_phone(value) -> str:
+    """Strip spaces and dashes; accept 1xxxxxxxxxx (optionally +86) or +<6–15 digits>."""
+    raw = re.sub(r"[\s\-()]", "", value) if isinstance(value, str) else ""
+    if not raw:
+        raise ValueError("请填写手机号")
+    mainland = re.fullmatch(r"(?:\+?86)?(1[3-9]\d{9})", raw)
+    if mainland:
+        return mainland.group(1)
+    if re.fullmatch(r"\+\d{6,15}", raw):
+        return raw
+    raise ValueError("请填写有效的手机号（11 位大陆手机号，其他地区请以 + 开头）")
+
+
 class RegisterRequest(BirthYearOnlyModel):
     """POST /api/auth/register.
 
@@ -460,6 +474,28 @@ class RegisterRequest(BirthYearOnlyModel):
     password: str = Field(..., min_length=8, max_length=128)
 
     nickname: str = Field(..., min_length=1, max_length=58)
+    # 被试编号. Stored as the account's `research_participants.research_id`, so
+    # it follows the same rules administrators edit it under.
+    research_id: str
+
+    @field_validator("research_id", mode="before")
+    @classmethod
+    def validate_research_id(cls, value):
+        value = value.strip() if isinstance(value, str) else ""
+        if not value:
+            raise ValueError("请填写被试编号")
+        if len(value) > 32 or not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+            raise ValueError("被试编号只能包含英文字母、数字、- 和 _，最多 32 个字符")
+        return value
+
+    # 手机号, required. Mainland numbers are 11 digits; others need a leading +.
+    phone: str
+
+    @field_validator("phone", mode="before")
+    @classmethod
+    def validate_phone(cls, value):
+        return normalize_phone(value)
+
     # TINYINT UNSIGNED on the column. The upper bound is a typo guard, not a
     # claim about human lifespans.
     birth_year: int
@@ -701,6 +737,7 @@ class AdminAccountItem(BaseModel):
     created_at: datetime
     last_login_at: datetime | None = None
     research_id: str | None = None
+    phone: str | None = None
 
 
 class AdminResearchIdUpdate(BaseModel):

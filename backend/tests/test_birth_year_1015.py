@@ -13,7 +13,7 @@ from invitation_helpers import with_test_invitation
 
 def registration(**extra):
     return {'username':'yearcheck','password':'year-only-test-password','nickname':'Year Test',
-            'email':'yearcheck@example.com',**extra}
+            'email':'yearcheck@example.com','research_id':'P-year','phone':'13800138000',**extra}
 
 
 @pytest.mark.parametrize('extra',[{}, {'age':28},{'birth_year':None},{'birth_year':''},

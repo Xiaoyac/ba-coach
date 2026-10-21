@@ -225,6 +225,9 @@ export default function AdminAccountManagerModal({
                       <p className="mt-1 font-mono text-xs text-ink-muted">
                         登录账号：{account.username}
                       </p>
+                      <p className="mt-1 font-mono text-xs text-ink-muted">
+                        手机号：{account.phone ?? "未填写"}
+                      </p>
                       <p className="mt-1 text-[0.68rem] text-ink-faint">
                         注册：{formatDate(account.created_at)} · 最近登录：{formatDate(account.last_login_at)}
                       </p>

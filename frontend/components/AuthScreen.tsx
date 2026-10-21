@@ -41,6 +41,8 @@ export default function AuthScreen({
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [nickname, setNickname] = useState("");
+  const [researchId, setResearchId] = useState("");
+  const [phone, setPhone] = useState("");
   const [birthYear, setBirthYear] = useState("");
   const [living, setLiving] = useState<string | null>(null);
   const [conditions, setConditions] = useState<string[]>([]);
@@ -67,6 +69,14 @@ export default function AuthScreen({
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (busy) return;
+    if (mode === "register" && !researchId.trim()) {
+      setError("请填写被试编号，不能留空。");
+      return;
+    }
+    if (mode === "register" && !phone.trim()) {
+      setError("请填写手机号，不能留空。");
+      return;
+    }
     if (mode === "register" && !birthYear) {
       setError("请填写出生年份，不能留空。");
       return;
@@ -82,6 +92,8 @@ export default function AuthScreen({
               username,
               password,
               nickname: nickname.trim(),
+              research_id: researchId.trim(),
+              phone: phone.trim(),
               // Only the user's explicit answer is sent, with no fallback.
               birth_year: Number(birthYear),
               living_status: living,
@@ -247,6 +259,34 @@ export default function AuthScreen({
                   onChange={(e) => setNickname(e.target.value)}
                   maxLength={58}
                   placeholder="例如 小河"
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label="被试编号" hint="必填，请填写研究人员提供的编号；仅限英文字母、数字、- 和 _">
+                <input
+                  required
+                  value={researchId}
+                  onChange={(e) => setResearchId(e.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                  maxLength={32}
+                  pattern="\s*[A-Za-z0-9_\-]+\s*"
+                  placeholder="例如 P001"
+                  className={inputClass}
+                />
+              </Field>
+
+              <Field label="手机号" hint="必填，仅研究人员可见，用于研究联络">
+                <input
+                  required
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  autoComplete="tel"
+                  inputMode="tel"
+                  maxLength={20}
+                  placeholder="例如 13800138000"
                   className={inputClass}
                 />
               </Field>

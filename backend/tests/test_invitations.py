@@ -16,7 +16,7 @@ from test_admin_sandbox import sandbox_admin_headers
 
 def payload(code=None, name='inviteuser'):
     result = dict(username=name, password='test-password-123', email=f'{name}@example.com',
-                  nickname=name, tag='54321', birth_year=1998)
+                  nickname=name, tag='54321', birth_year=1998, research_id=f'P-{name}', phone='13800138000')
     if code is not None:
         result['invitation_code'] = code
     return result

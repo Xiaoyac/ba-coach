@@ -38,9 +38,11 @@ from ..account_identity import (
 )
 from ..models import (
     RegistrationInvite,
+    AccountPhone,
     AccountEmail,
     AccountSettings,
     AuthSession,
+    ResearchParticipant,
     UserAccount,
     _utcnow,
 )
@@ -140,6 +142,9 @@ async def register(
 
     if await find_account_by_username(db, username) is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="登录账号已被使用")
+    if await db.scalar(select(ResearchParticipant.account_id).where(
+            ResearchParticipant.research_id == payload.research_id)) is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="被试编号已被使用")
     from .. import v2_profile
     profile = UserProfile(
         nickname=nickname,
@@ -167,6 +172,8 @@ async def register(
         db.add(account)
         await db.flush()
         db.add(AccountSettings(account_id=account.id))
+        db.add(ResearchParticipant(account_id=account.id, research_id=payload.research_id))
+        db.add(AccountPhone(account_id=account.id, phone=payload.phone))
         await db.flush()
         token, session = await _issue_session(db, account)
         await db.execute(update(RegistrationInvite).where(RegistrationInvite.code == payload.invitation_code)
@@ -179,7 +186,7 @@ async def register(
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="登录账号刚刚被其他人使用，请更换后重试",
+            detail="登录账号或被试编号刚刚被其他人使用，请更换后重试",
         ) from None
 
     logger.info(

@@ -316,6 +316,8 @@ def register(client: TestClient):
         requested_age = profile.pop("age", 28)
         birth_year = profile.pop("birth_year", today().year - requested_age)
         from invitation_helpers import issue_test_invitation
+        from uuid import uuid4
+        profile.setdefault("research_id", f"T{uuid4().hex[:12]}")
         if "invitation_code" not in profile:
             profile["invitation_code"] = issue_test_invitation(client)
         response = client.post(
@@ -325,6 +327,7 @@ def register(client: TestClient):
                 "password": password,
                 "email": profile.pop("email", f"{username.lower()}@example.com"),
                 "nickname": profile.pop("nickname", username),
+                "phone": profile.pop("phone", "13800138000"),
                 "birth_year": birth_year,
                 **profile,
             },

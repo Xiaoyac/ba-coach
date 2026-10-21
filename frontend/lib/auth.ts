@@ -42,6 +42,10 @@ export interface RegisterInput {
   username: string;
   password: string;
   nickname: string;
+  /** 被试编号 — saved as the account's research ID. */
+  research_id: string;
+  /** 手机号 — required; shown to administrators only. */
+  phone: string;
   /** Stable enough to ask once — everything else is edited in the profile. */
   birth_year: number;
   living_status?: string | null;
@@ -110,6 +114,12 @@ async function parseAuth(res: Response): Promise<AuthPayload> {
     const detail = typeof body?.detail === "string" ? body.detail : null;
     if (res.status === 422 && Array.isArray(body?.detail) && body.detail.some((issue: { loc?: unknown[] }) => issue.loc?.includes("invitation_code"))) {
       throw new AuthError("请填写管理员提供的完整邀请码。若没有邀请码栏，请刷新网页。", res.status);
+    }
+    if (res.status === 422 && Array.isArray(body?.detail) && body.detail.some((issue: { loc?: unknown[] }) => issue.loc?.includes("research_id"))) {
+      throw new AuthError("请填写有效的被试编号（英文字母、数字、- 和 _，最多 32 位）。若没有被试编号栏，请刷新网页。", res.status);
+    }
+    if (res.status === 422 && Array.isArray(body?.detail) && body.detail.some((issue: { loc?: unknown[] }) => issue.loc?.includes("phone"))) {
+      throw new AuthError("请填写有效的手机号：11 位大陆手机号，其他地区请以 + 开头。若没有手机号栏，请刷新网页。", res.status);
     }
     const birthdayInvalid = res.status === 422 && Array.isArray(body?.detail) &&
       body.detail.some((issue: { loc?: unknown[] }) => issue.loc?.includes("birth_year"));

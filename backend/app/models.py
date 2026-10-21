@@ -232,6 +232,20 @@ class DailyMeasurementRevision(Base):
     __table_args__ = (UniqueConstraint("measurement_id", "revision_no", name="uq_daily_measurement_revision"),)
 
 
+class AccountPhone(Base):
+    """Contact phone number given at registration; visible to administrators only."""
+
+    __tablename__ = "account_phones"
+
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="CASCADE"), primary_key=True
+    )
+    phone: Mapped[str] = mapped_column(String(20), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=_utcnow, onupdate=_utcnow, server_default=func.now()
+    )
+
+
 class ResearchParticipant(Base):
     """Administrator-assigned research ID for one account (e.g. "P001")."""
 

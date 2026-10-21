@@ -9,6 +9,7 @@ export interface AdminAccountItem {
   created_at: string;
   last_login_at: string | null;
   research_id?: string | null;
+  phone?: string | null;
 }
 
 async function detail(res: Response, fallback: string): Promise<string> {

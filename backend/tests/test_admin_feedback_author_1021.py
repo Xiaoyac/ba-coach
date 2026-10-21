@@ -1,11 +1,10 @@
 """Admin reply ratings name the account that left them."""
-from app.models import Conversation, ConversationMessage, ResearchParticipant, UserAccount
-from sqlalchemy import select
+from app.models import Conversation, ConversationMessage
 from test_admin_accounts import admin_headers
 
 
 def test_admin_feedback_shows_the_author(client, admin_headers, register, db_sessionmaker):
-    author = register("feedbackauthor", nickname="小林")
+    author = register("feedbackauthor", nickname="小林", research_id="P042")
     subject = client.get("/api/auth/me", headers=author).json()["profile_uuid"]
 
     async def seed():
@@ -14,8 +13,6 @@ def test_admin_feedback_shows_the_author(client, admin_headers, register, db_ses
             c.messages = [ConversationMessage(position=0, role="user", content="走了十五分钟"),
                           ConversationMessage(position=1, role="assistant", content="那按这次的经历重新理一遍。")]
             db.add(c)
-            account = (await db.execute(select(UserAccount).where(UserAccount.profile_uuid == subject))).scalar_one()
-            db.add(ResearchParticipant(account_id=account.id, research_id="P042"))
             await db.commit()
             return c.messages[1].id
 

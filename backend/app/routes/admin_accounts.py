@@ -26,6 +26,7 @@ from ..models import (
     DailyMeasurement,
     DailyMeasurementRevision,
     ProfileExtension,
+    AccountPhone,
     ResearchParticipant,
     UserAccount,
 )
@@ -49,7 +50,7 @@ router = APIRouter(prefix="/admin/accounts", tags=["admin-accounts"])
 
 
 def _item(row) -> AdminAccountItem:
-    account, settings, nickname, research_id = row
+    account, settings, nickname, research_id, phone = row
     return AdminAccountItem(
         id=account.id,
         username=account.username,
@@ -58,13 +59,15 @@ def _item(row) -> AdminAccountItem:
         created_at=account.created_at,
         last_login_at=account.last_login_at,
         research_id=research_id,
+        phone=phone,
     )
 
 
 def _directory_query():
     return (
-        select(UserAccount, AccountSettings, UserProfile.nickname, ResearchParticipant.research_id)
+        select(UserAccount, AccountSettings, UserProfile.nickname, ResearchParticipant.research_id, AccountPhone.phone)
         .outerjoin(AccountSettings, AccountSettings.account_id == UserAccount.id)
+        .outerjoin(AccountPhone, AccountPhone.account_id == UserAccount.id)
         .outerjoin(ResearchParticipant, ResearchParticipant.account_id == UserAccount.id)
         .outerjoin(UserProfile, UserProfile.uuid == UserAccount.profile_uuid)
     )
@@ -354,6 +357,7 @@ async def delete_admin_account(
     await _purge_account_business_data(db, profile_uuid=target.profile_uuid)
     # Frees the research ID for reuse even where the FK cascade is not enforced.
     await db.execute(delete(ResearchParticipant).where(ResearchParticipant.account_id == target.id))
+    await db.execute(delete(AccountPhone).where(AccountPhone.account_id == target.id))
     await db.delete(target)
     await db.commit()
     for session_id in sessions:

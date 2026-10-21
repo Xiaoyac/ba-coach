@@ -60,7 +60,7 @@ async def test_v2_read_write_and_prompt_ignore_existing_column(monkeypatch):
             await conn.execute(text("ALTER TABLE user_preferences ADD COLUMN communication_style TEXT"))
         async with maker() as db:
             payload = RegisterRequest(username="retiredv2", password="test-password-long", invitation_code="A" * 32,
-                email="retired@example.com", nickname="档案测试", birth_year=1996,
+                email="retired@example.com", nickname="档案测试", birth_year=1996, research_id="P-v2", phone="13800138000",
                 communication_preference="理性分析", physical_condition=["易疲劳"])
             await v2_profile.create(db, "retired-v2", payload)
             assert await db.scalar(text("SELECT communication_style FROM user_preferences")) is None

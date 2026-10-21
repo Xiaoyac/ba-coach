@@ -16,6 +16,8 @@ def issue_test_invitation(client):
 
 def with_test_invitation(client, payload):
     """Legacy auth tests supply an invitation explicitly while testing other fields."""
+    from uuid import uuid4
+    payload = {'research_id': f'T{uuid4().hex[:12]}', 'phone': '13800138000', **payload}
     if 'invitation_code' in payload:
         return payload
     return {**payload, 'invitation_code': issue_test_invitation(client)}
