@@ -76,6 +76,8 @@ def test_one_per_day_owner_only_and_no_future(client, register):
 @pytest.mark.parametrize('change', [
     {'completion': None}, {'completion': 0}, {'overall_mood': 6}, {'energetic': 0}, {'lonely': 6},
     {'light_count': -1}, {'light_minutes': 1441},
+    # Each intensity is capped at 20 occurrences and 480 minutes.
+    {'vigorous_count': 21}, {'light_count': 21, 'light_minutes': 30}, {'moderate_minutes': 481, 'moderate_count': 1},
     {'sleep_hours': None}, {'sleep_hours': -1}, {'sleep_hours': 24.5}, {'sleep_hours': 7.25},
     {'sleep_quality': None}, {'sleep_quality': 0}, {'sleep_quality': 5},
     # Minutes without a single occurrence, and more minutes than the day has.
@@ -86,6 +88,12 @@ def test_every_item_is_required_and_bounded(client, register, change):
     body = {k: v for k, v in {**answers(), **change}.items() if v is not None}
     response = client.post(URL, headers=register('measureinvalid'), json={'answers': body})
     assert response.status_code == 422, response.text
+
+
+def test_activity_caps_are_inclusive(client, register):
+    saved = measure(client, register('measurecap'), vigorous_count=20, vigorous_minutes=480,
+                    moderate_count=20, moderate_minutes=480, light_count=20, light_minutes=480)
+    assert saved['answers']['vigorous_count'] == 20 and saved['answers']['light_minutes'] == 480
 
 
 def test_zero_activity_and_counts_without_minutes_are_valid(client, register):

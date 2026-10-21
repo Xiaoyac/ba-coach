@@ -81,8 +81,10 @@ export const MEASURE_INTENSITIES: { name: string; description: string; examples:
     count: "light_count", minutes: "light_minutes" },
 ];
 
-export const MEASURE_MAX_COUNT = 200;
-export const MEASURE_MAX_MINUTES = 1440;
+// Per intensity: at most 20 occurrences and 480 minutes a day.
+export const MEASURE_MAX_COUNT = 20;
+export const MEASURE_MAX_MINUTES = 480;
+export const MEASURE_DAY_MINUTES = 1440;
 
 export const MEASURE_KEYS: MeasureKey[] = [
   "sleep_hours", "sleep_quality",
@@ -104,10 +106,11 @@ export function measureProblem(draft: MeasureDraft): string | null {
   for (const level of MEASURE_INTENSITIES) {
     const count = draft[level.count], minutes = draft[level.minutes];
     if (count === null || minutes === null) return "请填写三种强度身体活动的次数和累计时长，没有就填 0";
-    if (count > MEASURE_MAX_COUNT || minutes > MEASURE_MAX_MINUTES) return `${level.name}的次数或累计时长超出范围`;
+    if (count > MEASURE_MAX_COUNT) return `${level.name}的次数最多 ${MEASURE_MAX_COUNT} 次`;
+    if (minutes > MEASURE_MAX_MINUTES) return `${level.name}的累计时长最多 ${MEASURE_MAX_MINUTES} 分钟`;
     if (minutes > 0 && count === 0) return `${level.name}填写了累计时长，次数至少为 1`;
   }
   const total = MEASURE_INTENSITIES.reduce((sum, level) => sum + (draft[level.minutes] ?? 0), 0);
-  if (total > MEASURE_MAX_MINUTES) return "三种强度的累计时长合计不能超过 1440 分钟（一天）";
+  if (total > MEASURE_DAY_MINUTES) return "三种强度的累计时长合计不能超过 1440 分钟（一天）";
   return null;
 }

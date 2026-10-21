@@ -9,6 +9,7 @@ import {
   MEASURE_EMOTION_QUESTION,
   MEASURE_EMOTIONS,
   MEASURE_INTENSITIES,
+  MEASURE_DAY_MINUTES,
   MEASURE_MAX_COUNT,
   MEASURE_MAX_MINUTES,
   MEASURE_MAX_SLEEP_HOURS,
@@ -173,7 +174,7 @@ export function MeasureActivity({ value, onChange }: FieldProps) {
           {(value[level.minutes] ?? 0) > 0 && value[level.count] === 0 && <p className="text-xs text-alert-ink">填写了累计时长时，次数至少为 1。</p>}
         </div>
       ))}
-      {total > MEASURE_MAX_MINUTES && <p role="alert" className="text-xs text-alert-ink">三种强度合计 {total} 分钟，超过了一天的 1440 分钟。</p>}
+      {total > MEASURE_DAY_MINUTES && <p role="alert" className="text-xs text-alert-ink">三种强度合计 {total} 分钟，超过了一天的 1440 分钟。</p>}
     </Section>
   );
 }
