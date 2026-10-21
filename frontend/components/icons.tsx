@@ -88,6 +88,16 @@ export function NotebookMark({ className }: IconProps) {
   );
 }
 
+/** A small activity card with a tick: the PA goal card shortcut. */
+export function ActivityCardMark({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true" {...strokeProps}>
+      <rect x="3.5" y="5.5" width="17" height="13" rx="2.3" />
+      <path d="M7 12.2l1.7 1.7 3-3.3M14.5 10.5h3M14.5 13.8h2" />
+    </svg>
+  );
+}
+
 /** The disclosure arrow on the custom time-slot select. */
 export function ChevronDownMark({ className }: IconProps) {
   return (

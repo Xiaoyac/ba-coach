@@ -843,3 +843,6 @@ html.theme-porcelain:where(html:not(.style-simple), html:not(.style-simple) *) {
 :is(.theme-porcelain, .theme-github) .composer-shell:where(html:not(.style-simple), html:not(.style-simple) *) { background: var(--color-panel); border: 1px solid var(--color-line-strong); box-shadow: none; }
 :is(.theme-porcelain, .theme-github) .primary-action:where(html:not(.style-simple), html:not(.style-simple) *) { box-shadow: none; }
 :is(.theme-porcelain, .theme-github) .primary-action:hover:not(:disabled):where(html:not(.style-simple), html:not(.style-simple) *) { filter: brightness(0.94); transform: none; }
+
+/* The composer shell already shows focus; no second box around its textarea. */
+.composer-shell textarea:focus-visible { outline: none; }
