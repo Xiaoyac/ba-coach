@@ -4,7 +4,7 @@ from test_admin_accounts import admin_headers
 
 
 def test_admin_feedback_shows_the_author(client, admin_headers, register, db_sessionmaker):
-    author = register("feedbackauthor", nickname="小林", research_id="P042")
+    author = register("feedbackauthor", nickname="小林", research_id="042")
     subject = client.get("/api/auth/me", headers=author).json()["profile_uuid"]
 
     async def seed():
@@ -22,5 +22,5 @@ def test_admin_feedback_shows_the_author(client, admin_headers, register, db_ses
     assert voted.status_code == 200, voted.text
 
     item = client.get("/api/admin/message-feedback", headers=admin_headers).json()["items"][0]
-    assert (item["username"], item["display_name"], item["research_id"]) == ("feedbackauthor", "小林", "P042")
+    assert (item["username"], item["display_name"], item["research_id"]) == ("feedbackauthor", "小林", "042")
     assert client.get("/api/admin/message-feedback", headers=author).status_code == 403

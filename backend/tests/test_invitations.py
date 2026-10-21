@@ -10,13 +10,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.db import Base
 from app.invitations import claim_invitation
 from app.models import RegistrationInvite, UserAccount
-from invitation_helpers import issue_test_invitation
+from invitation_helpers import issue_test_invitation, next_research_id
 from test_admin_sandbox import sandbox_admin_headers
 
 
 def payload(code=None, name='inviteuser'):
     result = dict(username=name, password='test-password-123', email=f'{name}@example.com',
-                  nickname=name, tag='54321', birth_year=1998, research_id=f'P-{name}', phone='13800138000')
+                  nickname=name, tag='54321', birth_year=1998, research_id=next_research_id(), phone='13800138000')
     if code is not None:
         result['invitation_code'] = code
     return result

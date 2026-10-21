@@ -73,6 +73,10 @@ export default function AuthScreen({
       setError("请填写被试编号，不能留空。");
       return;
     }
+    if (mode === "register" && !/^\d{3}$/.test(researchId.trim())) {
+      setError("被试编号必须是三位数字，例如 007。");
+      return;
+    }
     if (mode === "register" && !phone.trim()) {
       setError("请填写手机号，不能留空。");
       return;
@@ -263,16 +267,17 @@ export default function AuthScreen({
                 />
               </Field>
 
-              <Field label="被试编号" hint="必填，请填写研究人员提供的编号；仅限英文字母、数字、- 和 _">
+              <Field label="被试编号（research_id）" hint="必填，三位数字，请填写研究人员提供的编号">
                 <input
                   required
                   value={researchId}
                   onChange={(e) => setResearchId(e.target.value)}
                   autoComplete="off"
                   spellCheck={false}
-                  maxLength={32}
-                  pattern="\s*[A-Za-z0-9_\-]+\s*"
-                  placeholder="例如 P001"
+                  inputMode="numeric"
+                  maxLength={3}
+                  pattern="\s*\d{3}\s*"
+                  placeholder="例如 007"
                   className={inputClass}
                 />
               </Field>

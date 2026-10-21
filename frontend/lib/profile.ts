@@ -111,6 +111,8 @@ export interface Profile {
 
   /** Read-only — programme state, not something the subject sets. */
   current_module: string | null;
+  /** 被试编号 (three digits) — the account's 研究编号 in 账号管理. */
+  research_id: string | null;
 }
 
 /**

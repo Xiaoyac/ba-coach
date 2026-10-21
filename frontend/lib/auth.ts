@@ -116,7 +116,7 @@ async function parseAuth(res: Response): Promise<AuthPayload> {
       throw new AuthError("请填写管理员提供的完整邀请码。若没有邀请码栏，请刷新网页。", res.status);
     }
     if (res.status === 422 && Array.isArray(body?.detail) && body.detail.some((issue: { loc?: unknown[] }) => issue.loc?.includes("research_id"))) {
-      throw new AuthError("请填写有效的被试编号（英文字母、数字、- 和 _，最多 32 位）。若没有被试编号栏，请刷新网页。", res.status);
+      throw new AuthError("被试编号必须是三位数字，例如 007。若没有被试编号栏，请刷新网页。", res.status);
     }
     if (res.status === 422 && Array.isArray(body?.detail) && body.detail.some((issue: { loc?: unknown[] }) => issue.loc?.includes("phone"))) {
       throw new AuthError("请填写有效的手机号：11 位大陆手机号，其他地区请以 + 开头。若没有手机号栏，请刷新网页。", res.status);

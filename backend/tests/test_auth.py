@@ -21,9 +21,8 @@ def _register(client: TestClient, **overrides) -> dict:
         "birth_year": 1998,
         "phone": "13800138000",
     }
-    from uuid import uuid4
-    payload["research_id"] = f"T{uuid4().hex[:12]}"
-    from invitation_helpers import issue_test_invitation
+    from invitation_helpers import issue_test_invitation, next_research_id
+    payload["research_id"] = next_research_id()
     payload["invitation_code"] = issue_test_invitation(client)
     payload.update(overrides)
     payload.setdefault("email", f"{payload['username'].lower()}@example.com")
@@ -671,7 +670,7 @@ def test_admin_reset_enforces_the_password_floor(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("value", [None, "", "   ", "P 01", "编号01", "x" * 33])
+@pytest.mark.parametrize("value", [None, "", "   ", "P001", "01", "0001", "1 2", "１２３"])
 def test_register_requires_a_valid_research_id(client: TestClient, value) -> None:
     response = _register(client, research_id=value)
     assert response.status_code == 422
@@ -685,7 +684,7 @@ def test_register_saves_research_id_and_rejects_duplicates(
 ) -> None:
     from app.models import ResearchParticipant, UserAccount
 
-    assert _register(client, research_id=" P001 ").status_code == 201
+    assert _register(client, research_id=" 007 ").status_code == 201
 
     async def saved():
         async with db_sessionmaker() as db:
@@ -695,8 +694,8 @@ def test_register_saves_research_id_and_rejects_duplicates(
                 .where(UserAccount.username == "nanan")
             )
 
-    assert client.portal.call(saved) == "P001"
+    assert client.portal.call(saved) == "007"
 
-    duplicate = _register(client, username="another", research_id="P001")
+    duplicate = _register(client, username="another", research_id="007")
     assert duplicate.status_code == 409
     assert duplicate.json()["detail"] == "被试编号已被使用"

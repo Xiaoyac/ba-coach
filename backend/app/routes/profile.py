@@ -38,7 +38,7 @@ from ..clinical_store import set_values
 from ..birth_years import age_from_year
 from ..db import get_db
 from ..identity import CallerIdentity, require_caller
-from ..models import AccountSettings, ProfileExtension, UserAccount
+from ..models import AccountSettings, ProfileExtension, ResearchParticipant, UserAccount
 from ..models_business import UserProfile
 from ..providers import configured_providers
 from ..schemas import ProfileOut, ProfileUpdate, ReminderWindow, Supporter
@@ -213,7 +213,23 @@ async def _account_id(db: AsyncSession, subject_id: str) -> int:
     return account_id
 
 
-def _visible_profile(result: ProfileOut, caller: CallerIdentity) -> Response:
+async def _set_own_research_id(db: AsyncSession, account_id: int, research_id: str) -> None:
+    """Save the caller's 被试编号 — the same row admins edit as 研究编号."""
+    taken = await db.scalar(select(ResearchParticipant.account_id).where(
+        ResearchParticipant.research_id == research_id, ResearchParticipant.account_id != account_id))
+    if taken is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="被试编号已被使用")
+    current = await db.get(ResearchParticipant, account_id)
+    if current is None:
+        db.add(ResearchParticipant(account_id=account_id, research_id=research_id))
+    else:
+        current.research_id = research_id
+    await db.flush()
+
+
+async def _visible_profile(db: AsyncSession, result: ProfileOut, caller: CallerIdentity) -> Response:
+    result.research_id = await db.scalar(select(ResearchParticipant.research_id).where(
+        ResearchParticipant.account_id == caller.account.id))
     result.can_manage_models = bool(caller.account.settings and caller.account.settings.role == "admin")
     excluded = set() if result.can_manage_models else {"preferred_provider", "available_providers"}
     return JSONResponse(result.model_dump(mode="json", exclude=excluded), headers={"Cache-Control": "no-store"})
@@ -232,7 +248,7 @@ async def read_profile(
     response.headers["Cache-Control"] = "no-store"
     from .. import v2_profile
     if v2_profile.enabled():
-        return _visible_profile(await v2_profile.read(db, subject_id), caller)
+        return await _visible_profile(db, await v2_profile.read(db, subject_id), caller)
     profile = await _own_profile(db, subject_id)
     result = _to_out(
         profile,
@@ -240,7 +256,7 @@ async def read_profile(
         await _load_account_settings(db, subject_id),
     )
     result.current_module = await derived_current_module(db, subject_id=subject_id)
-    return _visible_profile(result, caller)
+    return await _visible_profile(db, result, caller)
 
 
 @router.patch("", response_model=ProfileOut)
@@ -254,10 +270,22 @@ async def update_profile(
         caller.account.settings and caller.account.settings.role == "admin"
     ):
         raise HTTPException(403, "只有管理员可以修改模型偏好")
+    if "research_id" in payload.model_fields_set:
+        try:
+            await _set_own_research_id(db, caller.account.id, payload.research_id)
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(409, "被试编号已被使用") from None
+        # The profile tables never see it; an edit of only this field is done.
+        payload = payload.model_copy()
+        payload.model_fields_set.discard("research_id")
+        if not payload.model_fields_set:
+            await db.commit()
+            return await read_profile(Response(), caller, db)
     from .. import v2_profile
     if v2_profile.enabled():
         try:
-            return _visible_profile(await v2_profile.patch(db, subject_id, payload), caller)
+            return await _visible_profile(db, await v2_profile.patch(db, subject_id, payload), caller)
         except IntegrityError:
             await db.rollback()
             raise HTTPException(409, "档案保存冲突，请刷新后重试") from None
@@ -374,4 +402,4 @@ async def update_profile(
     )
     result = _to_out(profile, extension, account_settings)
     result.current_module = await derived_current_module(db, subject_id=subject_id)
-    return _visible_profile(result, caller)
+    return await _visible_profile(db, result, caller)

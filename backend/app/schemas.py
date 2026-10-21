@@ -438,6 +438,16 @@ def normalize_phone(value) -> str:
     raise ValueError("请填写有效的手机号（11 位大陆手机号，其他地区请以 + 开头）")
 
 
+def normalize_research_id(value) -> str:
+    """被试编号 a participant types themselves: exactly three digits, e.g. "007"."""
+    value = value.strip() if isinstance(value, str) else ""
+    if not value:
+        raise ValueError("请填写被试编号")
+    if not re.fullmatch(r"[0-9]{3}", value):
+        raise ValueError("被试编号必须是三位数字，例如 007")
+    return value
+
+
 class RegisterRequest(BirthYearOnlyModel):
     """POST /api/auth/register.
 
@@ -474,19 +484,14 @@ class RegisterRequest(BirthYearOnlyModel):
     password: str = Field(..., min_length=8, max_length=128)
 
     nickname: str = Field(..., min_length=1, max_length=58)
-    # 被试编号. Stored as the account's `research_participants.research_id`, so
-    # it follows the same rules administrators edit it under.
+    # 被试编号, three digits. Stored as the account's
+    # `research_participants.research_id` — the 研究编号 admins see.
     research_id: str
 
     @field_validator("research_id", mode="before")
     @classmethod
     def validate_research_id(cls, value):
-        value = value.strip() if isinstance(value, str) else ""
-        if not value:
-            raise ValueError("请填写被试编号")
-        if len(value) > 32 or not re.fullmatch(r"[A-Za-z0-9_-]+", value):
-            raise ValueError("被试编号只能包含英文字母、数字、- 和 _，最多 32 个字符")
-        return value
+        return normalize_research_id(value)
 
     # 手机号, required. Mainland numbers are 11 digits; others need a leading +.
     phone: str
@@ -603,6 +608,9 @@ class ProfileOut(BaseModel):
     # does not accept them.
     current_module: str | None = None
 
+    # 被试编号, from `research_participants` (not the profile tables).
+    research_id: str | None = None
+
 
 class ProfileUpdate(BirthYearOnlyModel):
     """PATCH /api/profile. Omitted fields are left alone; null clears one.
@@ -663,6 +671,15 @@ class ProfileUpdate(BirthYearOnlyModel):
     supporters: list[Supporter] | None = Field(default=None, max_length=10)
     reminder_window: ReminderWindow | None = None
     preferred_provider: ModelProvider | None = None
+
+    # 被试编号. Written to `research_participants`, not the profile tables, and
+    # cannot be cleared here (only an administrator can).
+    research_id: str | None = None
+
+    @field_validator("research_id", mode="before")
+    @classmethod
+    def validate_research_id(cls, value):
+        return normalize_research_id(value)
 
 
 class LoginRequest(BaseModel):

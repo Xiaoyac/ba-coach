@@ -157,6 +157,10 @@ export default function ProfileModal({
       setError("昵称不能为空");
       return;
     }
+    if ("research_id" in draft && !/^\d{3}$/.test(draft.research_id?.trim() ?? "")) {
+      setError("被试编号必须是三位数字，例如 007。");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -230,6 +234,21 @@ export default function ProfileModal({
                       value={(value("nickname") as string) ?? ""}
                       onChange={(e) => set("nickname", e.target.value || null)}
                       maxLength={58}
+                      className="mt-1 w-full min-w-0 bg-transparent text-[0.92rem] text-ink outline-none placeholder:text-ink-faint"
+                    />
+                  </label>
+                  <label className="rounded-xl border border-line bg-raised px-3 py-2.5 transition-colors duration-300 focus-within:border-accent-edge focus-within:bg-panel">
+                    <span className="block text-[0.61rem] font-medium tracking-[0.12em] text-ink-faint">
+                      被试编号（research_id）· 三位数字
+                    </span>
+                    <input
+                      aria-label="被试编号"
+                      value={(value("research_id") as string) ?? ""}
+                      onChange={(e) => set("research_id", e.target.value.trim())}
+                      inputMode="numeric"
+                      autoComplete="off"
+                      maxLength={3}
+                      placeholder="例如 007"
                       className="mt-1 w-full min-w-0 bg-transparent text-[0.92rem] text-ink outline-none placeholder:text-ink-faint"
                     />
                   </label>
