@@ -14,6 +14,7 @@ import { restoreFailedText, type FailedChatSend } from "@/lib/chatRecovery";
 import GoalFormulationPanel from "@/components/GoalFormulationPanel";
 import SettingsLink from "@/components/SettingsLink";
 import {
+  ActivityCardMark,
   ArrowUpMark,
   ChevronDownMark,
   MenuMark,
@@ -255,9 +256,10 @@ export default function Chat({
   const displayedModule = nextModule ?? replyModule;
   const compactHeader = Boolean(displayedModule && displayedModule !== "module_1");
   const goalShortcut = <button type="button" onClick={() => setGoalCardOpen(true)} disabled={loading}
-    aria-label="查看 PA 目标卡" title="PA 目标卡" aria-haspopup="dialog"
-    className="inline-flex size-11 shrink-0 items-center justify-center rounded-full text-ink-muted transition-colors hover:bg-raised hover:text-accent-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50">
-    <span aria-hidden="true" className="text-xs font-semibold tracking-wide">PA</span>
+    title="查看 PA 目标卡" aria-haspopup="dialog"
+    className="inline-flex min-h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-xs text-ink-muted transition-colors hover:bg-raised hover:text-accent-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50">
+    <ActivityCardMark className="h-4 w-4 shrink-0" />
+    PA 目标卡
   </button>;
   useEffect(() => { setHeaderExpanded(false); setAccountMenuOpen(false); setGoalCardOpen(false); }, [displayedModule]);
   const showDailyRecords = !loading && displayedModule === "module_3";
