@@ -16,7 +16,7 @@ from .schedule_dates import local_day
 
 DAYS = 7
 _ACTIVITY_SCORES = ("emotion", "achievement", "connection", "enjoyment", "importance")
-_DAY_SCORES = ("completion_rate", "activity_level", "overall_mood", "social_connection", "approach_vs_avoidance")
+_DAY_SCORES = ("social_connection", "approach_vs_avoidance")
 
 
 def _clip(text, limit):

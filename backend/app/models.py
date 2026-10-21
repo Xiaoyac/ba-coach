@@ -80,13 +80,11 @@ class AssessmentEntry(Base):
 
     revision_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
-    # Version 1 retains historical 0–10 scores; version 2 writes 0–5.
+    # Version 1 retains two historical 0–10 scores; version 2 has no day scores
+    # (completion, activity and mood moved to 每日测量).
     scale_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
-    completion_rate: Mapped[int | None] = mapped_column(Integer)
-    activity_level: Mapped[int | None] = mapped_column(Integer)
     social_connection: Mapped[int | None] = mapped_column(Integer)
     approach_vs_avoidance: Mapped[int | None] = mapped_column(Integer)
-    overall_mood: Mapped[int | None] = mapped_column(Integer)
 
     reflection_note: Mapped[str | None] = mapped_column(Text)
 
@@ -121,11 +119,8 @@ class AssessmentEntry(Base):
         *[
             CheckConstraint(f"{col} IS NULL OR ({col} BETWEEN 0 AND 10)", name=f"ck_entry_{col}")
             for col in (
-                "completion_rate",
-                "activity_level",
                 "social_connection",
                 "approach_vs_avoidance",
-                "overall_mood",
             )
         ],
     )

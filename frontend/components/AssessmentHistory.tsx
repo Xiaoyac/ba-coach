@@ -1,27 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import AssessmentTrends from "@/components/AssessmentTrends";
 import DailyTermHelp, { DAILY_TERM_HELP } from "@/components/DailyTermHelp";
 import { ChevronDownMark, HistoryMark } from "@/components/icons";
 import type { AssessmentRecord, StoredActivityLog } from "@/lib/assessment";
 
-const SUMMARY_LABELS: {
-  key: keyof Pick<
-    AssessmentRecord,
-    | "completion_rate"
-    | "activity_level"
-    | "social_connection"
-    | "approach_vs_avoidance"
-    | "overall_mood"
-  >;
+// Only old (0–10) records carry day scores.
+const LEGACY_LABELS: {
+  key: keyof Pick<AssessmentRecord, "social_connection" | "approach_vs_avoidance">;
   label: string;
 }[] = [
-  { key: "completion_rate", label: "完成度" },
-  { key: "activity_level", label: "活动量" },
   { key: "social_connection", label: "联结" },
   { key: "approach_vs_avoidance", label: "面对" },
-  { key: "overall_mood", label: "心情" },
 ];
 
 const ACTIVITY_LABELS: {
@@ -61,7 +51,6 @@ export default function AssessmentHistory({
   onLoadMore,
   onRetry,
   onEdit,
-  showTrends = false,
 }: {
   records: AssessmentRecord[];
   loading: boolean;
@@ -71,7 +60,6 @@ export default function AssessmentHistory({
   onLoadMore: () => void;
   onRetry: () => void;
   onEdit?: (record: AssessmentRecord) => void;
-  showTrends?: boolean;
 }) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const choseInitial = useRef(false);
@@ -93,7 +81,7 @@ export default function AssessmentHistory({
         </span>
         <h3 className="mt-4 text-[0.95rem] font-medium text-ink">还没有历史记录</h3>
         <p className="mt-1.5 max-w-xs text-[0.8rem] leading-relaxed text-ink-faint">
-          保存后可以在这里查看当天回顾；积累多次新版记录后，还能查看心情、身体活动和完成程度的变化。
+          保存后可以在这里回看每一天的记录。
         </p>
       </div>
     );
@@ -114,13 +102,9 @@ export default function AssessmentHistory({
         </div>
       )}
 
-      {showTrends && <AssessmentTrends records={records} hasMore={hasMore} />}
-
       {records.map((record) => {
         const expanded = expandedId === record.id;
         const modern = record.scale_version === 2;
-        const maximum = modern ? 5 : 10;
-        const labels = modern ? SUMMARY_LABELS.filter(s => ["completion_rate", "activity_level", "overall_mood"].includes(s.key)) : SUMMARY_LABELS;
         return (
           <article
             key={record.id}
@@ -147,7 +131,7 @@ export default function AssessmentHistory({
                   {formatLocalDate(record.local_date)}
                 </span>
                 <span className="mt-1 block text-[0.75rem] text-ink-faint">
-                  {record.activities.length} 项活动 · 整体心情 {record.overall_mood ?? "—"}/{maximum}{!modern && " · 旧版量表"}
+                  {record.activities.length} 项活动{!modern && " · 旧版量表"}
                 </span>
               </span>
               <ChevronDownMark
@@ -160,20 +144,20 @@ export default function AssessmentHistory({
             {expanded && (
               <div className="border-t border-line px-4 pb-5 pt-4 sm:px-5">
                 {onEdit && <button type="button" onClick={() => onEdit(record)} className="mb-4 min-h-11 rounded-full border border-accent-edge px-4 text-sm text-accent-ink">修改这份记录</button>}
-                <div className={`grid ${modern ? "grid-cols-3" : "grid-cols-5"} gap-1.5`}>
-                  {labels.map(({ key, label }) => (
+                {!modern && <div className="grid grid-cols-2 gap-1.5">
+                  {LEGACY_LABELS.map(({ key, label }) => (
                     <div
                       key={key}
                       className="rounded-xl border border-line bg-canvas/35 px-1.5 py-2 text-center"
                     >
-                      <div className="flex flex-wrap items-center justify-center text-xs text-ink-muted"><span>{label}</span><DailyTermHelp label={label} explanation={modern ? DAILY_TERM_HELP[key] : DAILY_TERM_HELP[key].replace(/5 表示/g, "10 表示")} /></div>
+                      <div className="flex flex-wrap items-center justify-center text-xs text-ink-muted"><span>{label}</span><DailyTermHelp label={label} explanation={DAILY_TERM_HELP[key]} /></div>
                       <p className="mt-0.5 text-[0.82rem] font-medium tabular-nums text-ink">
-                        {key === "completion_rate" && record.completion_not_applicable ? "不适用" : <>{record[key] ?? "—"}
-                        <span className="ml-0.5 text-[0.58rem] font-normal text-ink-faint">/{maximum}</span></>}
+                        {record[key] ?? "—"}
+                        <span className="ml-0.5 text-[0.58rem] font-normal text-ink-faint">/10</span>
                       </p>
                     </div>
                   ))}
-                </div>
+                </div>}
 
                 <div className="mt-4 space-y-2.5">
                   {record.activities.map((activity) => (
