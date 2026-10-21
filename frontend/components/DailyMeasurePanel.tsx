@@ -133,7 +133,7 @@ export default function DailyMeasurePanel({ onDraftStateChange }: {
     }
   }
 
-  const title = view === "history" ? "每日测量历史" : view === "saved" ? "每日测量已提交" : editing ? "修改每日测量" : "每日测量";
+  const title = view === "history" ? "每日测量历史" : view === "saved" ? "每日测量已提交" : editing ? "修改每日测量" : "每日测量(必填)";
   return (
     <form onSubmit={submit} aria-labelledby={titleId} aria-busy={busy} className="flex h-full min-h-0 flex-col">
       <header className="flex shrink-0 flex-wrap items-center gap-3 px-5 pb-4 pt-5 sm:px-7">

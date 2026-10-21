@@ -9,7 +9,7 @@ import DailyMeasurePanel from "@/components/DailyMeasurePanel";
 
 type Tab = "goals" | "record" | "measure";
 type Draft = { dirty: boolean; busy: boolean };
-const TABS = [['goals', '目标'], ['record', '每日记录'], ['measure', '每日测量']] as const;
+const TABS = [['goals', '目标'], ['record', '每日记录'], ['measure', '每日测量(必填)']] as const;
 const FORM_NAMES = { record: '每日记录', measure: '每日测量' } as const;
 
 /** One modal owns focus; every visited panel stays mounted while changing tabs
