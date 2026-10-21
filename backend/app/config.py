@@ -138,8 +138,8 @@ class Settings(BaseSettings):
     reply_lead_model: str | None = "deepseek-v4.1-flash"
     reply_lead_timeout_seconds: float = Field(default=12.0, ge=1, le=20)
     reply_lead_max_tokens: int = Field(default=2048, ge=128, le=8192)
-    # Server push pace; the frontend paces what is shown (admins down to 100ms).
-    reply_lead_character_seconds: float = Field(default=0.05, ge=0.01, le=0.5)
+    # Server push pace; the frontend paces what is shown (admins down to 0ms).
+    reply_lead_character_seconds: float = Field(default=0.02, ge=0.01, le=0.5)
     # Low effort is opt-in: the live probe can exhaust its output budget without
     # producing routing JSON. Keep production behaviour until separately qualified.
     module_router_reasoning_effort: Literal["disabled", "low", "medium", "high", "provider_default"] = "provider_default"

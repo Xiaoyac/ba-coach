@@ -14,6 +14,11 @@ Role = Literal["user", "assistant"]
 # place — the 0–5 per-activity scores and the 0–10 daily summary are easy to
 # transpose by accident, and a swapped bound would silently truncate answers.
 Score5 = Annotated[int, Field(ge=0, le=5)]
+Agree5 = Annotated[int, Field(ge=1, le=5)]
+ActivityCount = Annotated[int, Field(ge=0, le=200)]
+ActivityMinutes = Annotated[int, Field(ge=0, le=1440)]
+SleepHours = Annotated[float, Field(ge=0, le=24)]
+SleepQuality = Annotated[int, Field(ge=1, le=4)]
 Score10 = Annotated[int, Field(ge=0, le=10)]
 
 
@@ -158,6 +163,89 @@ class DailySummaryIn(BaseModel):
         if (self.completion_rate is None) != self.completion_not_applicable:
             raise ValueError("请选择计划完成程度，或明确选择今天没有预定计划／不适用")
         return self
+
+
+class DailyMeasurementAnswers(BaseModel):
+    """每日测量 answers, all required. Sleep is last night; the rest is the
+    chosen day. Activity counts and minutes may be 0."""
+
+    sleep_hours: SleepHours
+    sleep_quality: SleepQuality  # 1 很好, 2 较好, 3 较差, 4 很差
+
+    completion: Agree5  # 1 完全没有完成 … 5 全部完成
+    activity_level: Agree5  # 1 几乎没有身体活动 … 5 身体活动非常多
+    overall_mood: Agree5  # 1 非常糟糕 … 5 非常愉悦
+
+    energetic: Agree5  # 1 完全不符合 … 5 非常符合
+    peaceful: Agree5
+    secure: Agree5
+    low_mood: Agree5
+    worthless: Agree5
+    irritable: Agree5
+    tired: Agree5
+    stressed: Agree5
+    lonely: Agree5
+
+    vigorous_count: ActivityCount
+    vigorous_minutes: ActivityMinutes
+    moderate_count: ActivityCount
+    moderate_minutes: ActivityMinutes
+    light_count: ActivityCount
+    light_minutes: ActivityMinutes
+
+    @field_validator("sleep_hours")
+    @classmethod
+    def check_sleep_hours(cls, value: float) -> float:
+        if round(value, 1) != value:
+            raise ValueError("睡眠小时数最多保留 1 位小数")
+        return value
+
+    @model_validator(mode="after")
+    def check_activity(self):
+        for level, name in (("vigorous", "剧烈运动"), ("moderate", "中等强度运动"), ("light", "轻度运动")):
+            if getattr(self, f"{level}_minutes") > 0 and getattr(self, f"{level}_count") == 0:
+                raise ValueError(f"{name}填写了累计时长，次数至少为 1")
+        if self.light_minutes + self.moderate_minutes + self.vigorous_minutes > 1440:
+            raise ValueError("三种强度的累计时长合计不能超过一天的 1440 分钟")
+        return self
+
+
+class DailyMeasurementIn(BaseModel):
+    """POST /api/daily-measurements — one day's 每日测量."""
+
+    timezone: str | None = Field(default=None, max_length=64)
+    local_date: date | None = None
+    answers: DailyMeasurementAnswers
+
+
+class DailyMeasurementUpdate(BaseModel):
+    """PUT /api/daily-measurements/{id} — a correction, guarded by revision."""
+
+    local_date: date
+    expected_revision: int = Field(ge=1)
+    answers: DailyMeasurementAnswers
+
+
+class DailyMeasurementOut(BaseModel):
+    id: int
+    local_date: date
+    timezone: str
+    questionnaire_version: str
+    revision_no: int
+    submitted_at: datetime
+    updated_at: datetime
+    answers: DailyMeasurementAnswers
+
+
+class DailyMeasurementPage(BaseModel):
+    items: list[DailyMeasurementOut]
+    has_more: bool
+
+
+class DailyMeasurementRevisionOut(BaseModel):
+    revision_no: int
+    saved_at: datetime
+    measurement: DailyMeasurementOut
 
 
 class AssessmentSubmission(BaseModel):
@@ -625,6 +713,12 @@ class AdminAccountItem(BaseModel):
     role: Literal["user", "admin"]
     created_at: datetime
     last_login_at: datetime | None = None
+    research_id: str | None = None
+
+
+class AdminResearchIdUpdate(BaseModel):
+    # Letters, digits, "-" and "_" only, so the ID is safe in CSV and file names.
+    research_id: str | None = Field(default=None, max_length=32, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class AdminAccountList(BaseModel):

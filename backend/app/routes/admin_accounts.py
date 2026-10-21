@@ -6,6 +6,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import delete, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..account_identity import audit_identity
@@ -22,7 +23,10 @@ from ..models import (
     ConversationModuleProgress,
     ConversationRuntimeState,
     ConversationReplyEffort,
+    DailyMeasurement,
+    DailyMeasurementRevision,
     ProfileExtension,
+    ResearchParticipant,
     UserAccount,
 )
 from ..database_v2_schema import metadata as v2_schema
@@ -38,14 +42,14 @@ from ..models_business import (
     UserProfile,
 )
 from ..push_schema import metadata as push_schema
-from ..schemas import AdminAccountItem, AdminAccountList, AdminRoleGrant
+from ..schemas import AdminAccountItem, AdminAccountList, AdminResearchIdUpdate, AdminRoleGrant
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/accounts", tags=["admin-accounts"])
 
 
 def _item(row) -> AdminAccountItem:
-    account, settings, nickname = row
+    account, settings, nickname, research_id = row
     return AdminAccountItem(
         id=account.id,
         username=account.username,
@@ -53,13 +57,15 @@ def _item(row) -> AdminAccountItem:
         role=settings.role if settings else "user",
         created_at=account.created_at,
         last_login_at=account.last_login_at,
+        research_id=research_id,
     )
 
 
 def _directory_query():
     return (
-        select(UserAccount, AccountSettings, UserProfile.nickname)
+        select(UserAccount, AccountSettings, UserProfile.nickname, ResearchParticipant.research_id)
         .outerjoin(AccountSettings, AccountSettings.account_id == UserAccount.id)
+        .outerjoin(ResearchParticipant, ResearchParticipant.account_id == UserAccount.id)
         .outerjoin(UserProfile, UserProfile.uuid == UserAccount.profile_uuid)
     )
 
@@ -118,6 +124,46 @@ async def grant_admin_role(
     return _item(row)
 
 
+@router.put("/{account_id}/research-id", response_model=AdminAccountItem)
+async def set_research_id(
+    account_id: int,
+    payload: AdminResearchIdUpdate,
+    caller: CallerIdentity = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminAccountItem:
+    """Assign, change or clear (null) one account's research ID."""
+    if await db.get(UserAccount, account_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到该账号")
+    current = await db.get(ResearchParticipant, account_id)
+    research_id = payload.research_id
+    if research_id is None:
+        if current is not None:
+            await db.delete(current)
+    else:
+        taken = await db.scalar(select(ResearchParticipant.account_id).where(
+            ResearchParticipant.research_id == research_id, ResearchParticipant.account_id != account_id))
+        if taken is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"研究编号 {research_id} 已分配给其他账号")
+        if current is None:
+            db.add(ResearchParticipant(account_id=account_id, research_id=research_id))
+        else:
+            current.research_id = research_id
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"研究编号 {research_id} 已分配给其他账号") from None
+    logger.info("administrator %s set research id for account %s", caller.account.id, account_id)
+    row = (await db.execute(_directory_query().where(UserAccount.id == account_id))).one()
+    return _item(row)
+
+
+async def _purge_measurements(db: AsyncSession, profile_uuid: str) -> None:
+    ids = select(DailyMeasurement.id).where(DailyMeasurement.subject_id == profile_uuid)
+    await db.execute(delete(DailyMeasurementRevision).where(DailyMeasurementRevision.measurement_id.in_(ids)))
+    await db.execute(delete(DailyMeasurement).where(DailyMeasurement.subject_id == profile_uuid))
+
+
 async def _purge_account_business_data(db: AsyncSession, *, profile_uuid: str) -> None:
     """Delete all subject-scoped V2/business rows before the login account.
 
@@ -157,6 +203,7 @@ async def _purge_account_business_data(db: AsyncSession, *, profile_uuid: str) -
         if entry_ids:
             await db.execute(delete(ActivityLog).where(ActivityLog.entry_id.in_(entry_ids)))
         await db.execute(delete(AssessmentEntry).where(AssessmentEntry.subject_id == profile_uuid))
+        await _purge_measurements(db, profile_uuid)
         await db.execute(delete(ProfileExtension).where(ProfileExtension.profile_uuid == profile_uuid))
         await db.execute(delete(UserProfile).where(UserProfile.uuid == profile_uuid))
         return
@@ -272,6 +319,7 @@ async def _purge_account_business_data(db: AsyncSession, *, profile_uuid: str) -
     if entry_ids:
         await db.execute(delete(ActivityLog).where(ActivityLog.entry_id.in_(entry_ids)))
     await db.execute(delete(AssessmentEntry).where(AssessmentEntry.subject_id == profile_uuid))
+    await _purge_measurements(db, profile_uuid)
     await db.execute(delete(ProfileExtension).where(ProfileExtension.profile_uuid == profile_uuid))
     # user_profile is owned by the legacy business schema, but this account is
     # its sole identity owner. Remove the profile after all subject rows.
@@ -304,6 +352,8 @@ async def delete_admin_account(
     actor_name = await audit_identity(db, caller.account)
     target_name = await audit_identity(db, target)
     await _purge_account_business_data(db, profile_uuid=target.profile_uuid)
+    # Frees the research ID for reuse even where the FK cascade is not enforced.
+    await db.execute(delete(ResearchParticipant).where(ResearchParticipant.account_id == target.id))
     await db.delete(target)
     await db.commit()
     for session_id in sessions:

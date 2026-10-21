@@ -463,7 +463,10 @@ export default function DailyAssessmentModal({
           )}
 
           {view === "saved" ? (
-            <button type="button" onClick={handleDismiss} className="ml-auto flex min-h-11 items-center rounded-full bg-accent px-5 py-2 text-sm font-medium text-on-accent">完成，返回对话</button>
+            <div className="flex items-center justify-end gap-2">
+              <button type="button" onClick={() => savedRecord && editRecord(savedRecord)} className="flex min-h-11 items-center rounded-full border border-line px-5 py-2 text-sm text-ink-muted transition-colors hover:border-accent-edge hover:text-accent-ink">修改这份记录</button>
+              <button type="button" onClick={handleDismiss} className="flex min-h-11 items-center rounded-full bg-accent px-5 py-2 text-sm font-medium text-on-accent">完成，返回对话</button>
+            </div>
           ) : view === "history" ? (
             <button
               type="button"
@@ -531,7 +534,7 @@ function SavedAssessment({ record, onHistory }: { record: AssessmentRecord; onHi
   return <section aria-label="本次记录回顾" className="space-y-5">
     <div className="rounded-2xl border border-accent-edge bg-accent-wash p-5">
       <p role="status" className="text-base font-semibold">{record.local_date} 的记录已保存</p>
-      <p className="mt-2 text-sm leading-6 text-ink-muted">已保存整天的感受{record.activities.length > 0 ? `和 ${record.activities.length} 项活动` : "，没有填写活动明细"}。以后可以从每日记录入口回看、补充或修改。</p>
+      <p className="mt-2 text-sm leading-6 text-ink-muted">已保存整天的感受{record.activities.length > 0 ? `和 ${record.activities.length} 项活动` : "，没有填写活动明细"}。如果填错了，可以点下方“修改这份记录”立即更正；以后也可以从每日记录入口回看、补充或修改。</p>
     </div>
     <div className="grid grid-cols-3 gap-2">
       {SUMMARY_SCALES.map(s => <div key={s.key} className="rounded-xl bg-raised p-3 text-center">

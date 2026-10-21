@@ -7,7 +7,7 @@ import { CloseMark, NotebookMark } from './icons';
 import {
   exportAdminRecords, fetchAdminRecords,
   fetchAdminRecordUsers, fetchAdminRecordDates, fetchAdminRecordDay,
-  type AdminRecord, type AdminRecordPage, type RecordFilters,
+  type AdminRecord, type AdminRecordPage, type RecordFilters, type ExportKind,
   type AdminRecordUser, type AdminRecordUserPage, type AdminRecordDates, type AdminRecordDay,
 } from '@/lib/adminAssessments';
 
@@ -214,7 +214,7 @@ function ExportPanel() {
     if (draft.start && draft.end && draft.start > draft.end) { setError('开始日期不能晚于结束日期'); return; }
     setFilters({ ...draft });
   }
-  async function download(kind: 'daily' | 'activities') {
+  async function download(kind: ExportKind) {
     if (exporting || !data || loading || dirty) return;
     const control = new AbortController(); exportControl.current = control; setExporting(true); setError(''); setNotice('');
     try { await exportAdminRecords(filters, kind, control.signal); if (!control.signal.aborted) setNotice('已生成下载文件，请妥善保存用户资料。'); }
@@ -232,7 +232,7 @@ function ExportPanel() {
     </form>
     <div className="flex flex-wrap items-center justify-between gap-3 py-4">
       <p role="status" className="text-sm text-ink-muted">{loading ? '正在读取导出统计…' : data ? <>{data.total} 份记录 · {data.users} 位用户 <span className="ml-2 text-xs">新版 {data.versions['2'] ?? 0} · 旧版 {data.versions['1'] ?? 0}</span></> : '暂未载入'}<span className="mt-1 block text-xs">{dirty ? '筛选条件已修改，请点击查询后导出。' : '日期按用户填写的记录日期计算。'}</span></p>
-      <div className="flex flex-wrap gap-2"><button disabled={exporting || loading} className={buttonStyle} onClick={() => setRefresh(value => value + 1)}>刷新导出统计</button><button disabled={exporting || loading || dirty || !data?.total} className={buttonStyle} onClick={() => void download('daily')}>{exporting ? '正在导出…' : '导出每日汇总'}</button><button disabled={exporting || loading || dirty || !data?.total} className={buttonStyle} onClick={() => void download('activities')}>导出活动明细</button></div>
+      <div className="flex flex-wrap gap-2"><button disabled={exporting || loading} className={buttonStyle} onClick={() => setRefresh(value => value + 1)}>刷新导出统计</button><button disabled={exporting || loading || dirty || !data?.total} className={buttonStyle} onClick={() => void download('daily')}>{exporting ? '正在导出…' : '导出每日汇总'}</button><button disabled={exporting || loading || dirty || !data?.total} className={buttonStyle} onClick={() => void download('activities')}>导出活动明细</button><button disabled={exporting || loading || dirty} title="按上方用户与日期筛选；每日测量没有量表版本" className={buttonStyle} onClick={() => void download('measurements')}>导出每日测量</button></div>
     </div>
     {error && <p role="alert" className="mb-3 rounded-xl bg-alert-wash p-3 text-sm text-alert-ink">{error}</p>}
     {notice && <p role="status" className="mb-3 rounded-xl bg-accent-wash p-3 text-sm text-accent-ink">{notice}</p>}

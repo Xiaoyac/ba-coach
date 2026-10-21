@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import {
   fetchAdminAccounts,
   grantAdminRole,
   deleteAdminAccount,
+  setResearchId,
   type AdminAccountItem,
 } from "@/lib/adminAccounts";
 import { CloseMark, UsersMark } from "@/components/icons";
@@ -227,6 +228,7 @@ export default function AdminAccountManagerModal({
                       <p className="mt-1 text-[0.68rem] text-ink-faint">
                         注册：{formatDate(account.created_at)} · 最近登录：{formatDate(account.last_login_at)}
                       </p>
+                      <ResearchIdField account={account} onSaved={(updated) => setAccounts((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))} />
                     </div>
                     {!isCurrent && (
                       <div className="flex shrink-0 flex-wrap gap-2">
@@ -288,5 +290,48 @@ export default function AdminAccountManagerModal({
         }}
       />
     </div>
+  );
+}
+
+/** Study identifier exported as research_id; kept apart from the login name. */
+function ResearchIdField({ account, onSaved }: { account: AdminAccountItem; onSaved: (account: AdminAccountItem) => void }) {
+  const id = useId();
+  const saved = account.research_id ?? "";
+  const [value, setValue] = useState(saved);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null);
+  useEffect(() => setValue(saved), [saved]);
+  const trimmed = value.trim();
+  const invalid = trimmed !== "" && !/^[A-Za-z0-9_-]{1,32}$/.test(trimmed);
+
+  async function save() {
+    if (busy || invalid || trimmed === saved) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      onSaved(await setResearchId(account.id, trimmed || null));
+      setMessage({ error: false, text: trimmed ? "已保存" : "已清除" });
+    } catch (err) {
+      setMessage({ error: true, text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="mt-2 flex flex-wrap items-center gap-2" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+      <label htmlFor={id} className="text-xs text-ink-muted">研究编号</label>
+      <input id={id} value={value} maxLength={32} autoComplete="off" spellCheck={false} placeholder="未设置"
+        aria-invalid={invalid} aria-describedby={`${id}-status`}
+        onChange={(event) => { setValue(event.target.value); setMessage(null); }}
+        className={`min-h-9 w-36 rounded-lg border bg-canvas/45 px-2.5 font-mono text-xs text-ink outline-none placeholder:text-ink-faint focus:border-accent-edge ${invalid ? "border-alert-edge" : "border-line"}`} />
+      <button type="submit" disabled={busy || invalid || trimmed === saved}
+        className="min-h-9 rounded-lg border border-line px-3 text-xs text-ink-muted transition-colors hover:border-accent-edge hover:text-accent-ink disabled:opacity-40">
+        {busy ? "保存中…" : "保存"}
+      </button>
+      <span id={`${id}-status`} role="status" className={`text-[0.68rem] ${invalid || message?.error ? "text-alert-ink" : "text-ink-faint"}`}>
+        {invalid ? "只能使用字母、数字、- 和 _" : message?.text ?? ""}
+      </span>
+    </form>
   );
 }

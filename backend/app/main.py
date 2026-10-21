@@ -26,6 +26,7 @@ from .routes import (
     admin_evaluations_router,
     assessment_router,
     admin_assessments_router,
+    daily_measurement_router,
     auth_router,
     chat_router,
     conversation_router,
@@ -126,6 +127,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_router, prefix=settings.api_prefix)
     app.include_router(assessment_router, prefix=settings.api_prefix)
     app.include_router(admin_assessments_router, prefix=settings.api_prefix)
+    app.include_router(daily_measurement_router, prefix=settings.api_prefix)
     app.include_router(conversation_router, prefix=settings.api_prefix)
     from .routes.shares import router as shares_router
     app.include_router(shares_router, prefix=settings.api_prefix)

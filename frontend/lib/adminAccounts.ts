@@ -8,6 +8,7 @@ export interface AdminAccountItem {
   role: "user" | "admin";
   created_at: string;
   last_login_at: string | null;
+  research_id?: string | null;
 }
 
 async function detail(res: Response, fallback: string): Promise<string> {
@@ -47,4 +48,14 @@ export async function deleteAdminAccount(accountId: number): Promise<void> {
     headers: apiHeaders(),
   });
   if (!res.ok) throw new Error(await detail(res, "删除账号失败"));
+}
+
+export async function setResearchId(accountId: number, researchId: string | null): Promise<AdminAccountItem> {
+  const res = await fetch(`${API_BASE}/api/admin/accounts/${accountId}/research-id`, {
+    method: "PUT",
+    headers: apiHeaders({ json: true }),
+    body: JSON.stringify({ research_id: researchId }),
+  });
+  if (!res.ok) throw new Error(await detail(res, res.status === 409 ? "这个研究编号已被其他账号使用" : "保存研究编号失败"));
+  return res.json() as Promise<AdminAccountItem>;
 }

@@ -74,9 +74,11 @@ export function useStreamingText(text: string, streaming: boolean,
       const left = remaining.length - index;
       if (!left) return;
       const leadAge = now - (leadStarted.current ?? now);
+      const fixedInterval = getLeadInterval();
       // Hold only the lead's first character; incoming chunks share this clock.
       // A body/terminal event bypasses the delay and follows the normal handoff.
-      if (leadWaiting && leadAge < LEAD_START_DELAY_MS) {
+      // An admin's 0ms setting shows the lead as it arrives, without the hold.
+      if (leadWaiting && fixedInterval !== 0 && leadAge < LEAD_START_DELAY_MS) {
         frame = requestAnimationFrame(tick);
         return;
       }
@@ -86,10 +88,10 @@ export function useStreamingText(text: string, streaming: boolean,
       const catchingLead = phase === "body" && displayed.current.length < leadLength;
       const elapsed = Math.max(0, leadAge - LEAD_START_DELAY_MS);
       // An admin's fixed interval replaces the default adaptive lead pacing.
-      const interval = leadWaiting ? (getLeadInterval() ?? Math.min(LEAD_MAX_INTERVAL_MS, 280 + elapsed * .035))
+      const interval = leadWaiting ? (fixedInterval ?? Math.min(LEAD_MAX_INTERVAL_MS, 280 + elapsed * .035))
         : catchingLead ? 12 : left > 60 ? 12 : 24;
       if (!displayed.current || now - lastAdvance.current >= interval) {
-        let count = 1;
+        let count = leadWaiting && fixedInterval === 0 ? Math.max(1, left - 1) : 1;
         if (catchingLead) {
           const leadLeft = textCharacters(text.slice(displayed.current.length, leadLength)).length;
           count = Math.max(1, Math.ceil(leadLeft / Math.max(1, (catchupUntil.current - now) / 16)));

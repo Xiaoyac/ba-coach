@@ -18,11 +18,11 @@ export default function LeadSpeedSetting() {
       <div className="flex items-center gap-2">
         <label htmlFor="lead-speed-slider" className="text-sm text-ink">每字间隔</label>
         <SettingHelp hover align="start" id="lead-speed-slider-details" label="每字间隔说明">
-          <p>拖动设置快速接话开头每个字出现的间隔：100ms 最快（约每秒 10 字），1000ms 最慢（每秒 1 字）。</p>
+          <p>拖动设置快速接话开头每个字出现的间隔：0ms 即时显示（不再逐字），1000ms 最慢（每秒 1 字）。</p>
           <p className="mt-2">设置后按固定间隔逐字显示。正文一开始输出，开头剩余的字会立即补完。</p>
         </SettingHelp>
         <span className="ml-auto text-sm font-medium tabular-nums text-ink" aria-live="polite">
-          {isDefault ? "默认（自适应）" : `${value} ms`}
+          {isDefault ? "默认（自适应）" : value === 0 ? "0 ms · 即时" : `${value} ms`}
         </span>
       </div>
       <input id="lead-speed-slider" type="range" min={LEAD_INTERVAL_MIN_MS} max={LEAD_INTERVAL_MAX_MS} step={10}

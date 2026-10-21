@@ -13,7 +13,10 @@ from sqlalchemy.orm import selectinload
 
 from ..db import get_db
 from ..identity import CallerIdentity, require_admin
-from ..models import AccountSettings, ActivityLog, AssessmentEntry, STATUS_COMPLETED, UserAccount
+from ..models import (
+    MEASURE_FIELDS, AccountSettings, ActivityLog, AssessmentEntry, DailyMeasurement, ResearchParticipant,
+    STATUS_COMPLETED, UserAccount,
+)
 from ..models_business import UserProfile
 from .assessment import _to_out, revision_history
 
@@ -63,17 +66,21 @@ def filters(query: str = Query('', max_length=64), start: date | None = None,
 
 
 def joined(statement):
-    return statement.select_from(AssessmentEntry).outerjoin(UserAccount, UserAccount.profile_uuid == AssessmentEntry.subject_id).outerjoin(UserProfile, UserProfile.uuid == UserAccount.profile_uuid)
+    return (statement.select_from(AssessmentEntry)
+            .outerjoin(UserAccount, UserAccount.profile_uuid == AssessmentEntry.subject_id)
+            .outerjoin(UserProfile, UserProfile.uuid == UserAccount.profile_uuid)
+            .outerjoin(ResearchParticipant, ResearchParticipant.account_id == UserAccount.id))
 
 
 def records(clauses):
-    return joined(select(AssessmentEntry, UserAccount.username, UserProfile.nickname)).where(*clauses).options(selectinload(AssessmentEntry.activities)).order_by(AssessmentEntry.recorded_on.desc(), AssessmentEntry.id.desc())
+    return joined(select(AssessmentEntry, UserAccount.username, UserProfile.nickname,
+                         ResearchParticipant.research_id)).where(*clauses).options(selectinload(AssessmentEntry.activities)).order_by(AssessmentEntry.recorded_on.desc(), AssessmentEntry.id.desc())
 
 
 def item(row):
-    entry, username, nickname = row
+    entry, username, nickname, research_id = row
     return {'subject_id': entry.subject_id, 'username': username,
-            'nickname': nickname,
+            'nickname': nickname, 'research_id': research_id,
             'record': _to_out(entry)}
 
 
@@ -202,7 +209,11 @@ async def export_records(kind: Literal['daily', 'activities'] = 'daily', clauses
             for activity in record.activities:
                 writer.writerow([safe_cell(v) for v in values + [activity.position, activity.time_slot, activity.activity, activity.emotion,
                     activity.achievement, activity.connection, activity.enjoyment, activity.importance, activity.note, 5]])
-    logger.info('admin_daily_export actor=%s kind=%s records=%s', caller.account.id, kind, len(rows))
+    return _csv_response(output, kind, caller, len(rows))
+
+
+def _csv_response(output, kind, caller, count):
+    logger.info('admin_daily_export actor=%s kind=%s records=%s', caller.account.id, kind, count)
     return Response('\ufeff' + output.getvalue(), media_type='text/csv; charset=utf-8', headers={
         'Content-Disposition': f'attachment; filename="daily-records-{kind}.csv"', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
 
@@ -213,3 +224,57 @@ async def assessment_revision_history(entry_id: int, response: Response, db: Asy
         raise HTTPException(404, '记录不存在。')
     response.headers["Cache-Control"] = "private, no-store"
     return await revision_history(db, entry_id)
+
+
+# 每日测量 research export: one row per saved day, items in form order. Every
+# item is required, so there are no blank or "not applicable" codes. Column
+# names carry both the item code and its meaning.
+MEASURE_ITEMS = [
+    'Q05_sleep_hours', 'Q06_sleep_quality',
+    'D01_completion', 'D02_activity_level', 'D03_overall_mood',
+    'D04_energetic', 'D05_peaceful', 'D06_secure', 'D07_low_mood', 'D08_worthless',
+    'D09_irritable', 'D10_tired', 'D11_stressed', 'D12_lonely',
+    'D13_vigorous_count', 'D14_vigorous_minutes', 'D15_moderate_count', 'D16_moderate_minutes',
+    'D17_light_count', 'D18_light_minutes',
+]
+assert [name.split('_', 1)[1] for name in MEASURE_ITEMS] == list(MEASURE_FIELDS)
+MEASURE_HEADER = ['research_id', 'subject_id', 'measurement_id', 'record_date', 'timezone', 'submitted_at',
+                  'updated_at', 'revision_no', 'revision_count', 'questionnaire_version', *MEASURE_ITEMS]
+
+
+@router.get('/measurements.csv')
+async def export_measurements(query: str = Query('', max_length=64), start: date | None = None,
+                              end: date | None = None, caller: CallerIdentity = Depends(require_admin),
+                              db: AsyncSession = Depends(get_db)):
+    if start and end and start > end:
+        raise HTTPException(422, '开始日期不能晚于结束日期')
+    clauses = []
+    if query.strip():
+        needle = query.strip()
+        clauses.append(or_(UserAccount.username.contains(needle, autoescape=True),
+            UserProfile.nickname.contains(needle, autoescape=True),
+            ResearchParticipant.research_id.contains(needle, autoescape=True),
+            DailyMeasurement.subject_id.contains(needle, autoescape=True)))
+    if start:
+        clauses.append(DailyMeasurement.recorded_on >= start)
+    if end:
+        clauses.append(DailyMeasurement.recorded_on <= end)
+    statement = (select(DailyMeasurement, ResearchParticipant.research_id).select_from(DailyMeasurement)
+                 .outerjoin(UserAccount, UserAccount.profile_uuid == DailyMeasurement.subject_id)
+                 .outerjoin(UserProfile, UserProfile.uuid == UserAccount.profile_uuid)
+                 .outerjoin(ResearchParticipant, ResearchParticipant.account_id == UserAccount.id)
+                 .where(*clauses)
+                 .order_by(DailyMeasurement.recorded_on.desc(), DailyMeasurement.id.desc())
+                 .limit(EXPORT_LIMIT + 1))
+    rows = (await db.execute(statement)).all()
+    if len(rows) > EXPORT_LIMIT:
+        raise HTTPException(422, f'单次最多导出 {EXPORT_LIMIT} 份每日测量，请缩小日期或用户范围')
+    output = io.StringIO(newline='')
+    writer = csv.writer(output)
+    writer.writerow(MEASURE_HEADER)
+    for row, research_id in rows:
+        values = [research_id, row.subject_id, row.id, row.recorded_on, row.timezone, row.submitted_at,
+                  row.updated_at, row.revision_no, row.revision_no - 1, row.questionnaire_version,
+                  *[getattr(row, name) for name in MEASURE_FIELDS]]
+        writer.writerow([safe_cell(v) for v in values])
+    return _csv_response(output, 'measurements', caller, len(rows))

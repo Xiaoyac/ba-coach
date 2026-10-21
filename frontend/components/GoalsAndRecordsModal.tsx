@@ -1,15 +1,20 @@
 "use client";
 
 import { useParticipantStyle } from "@/lib/useParticipantStyle";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GoalCardFields } from "@/lib/goal-card";
 import GoalOverview from "@/components/GoalOverview";
 import DailyAssessmentModal from "@/components/DailyAssessmentModal";
+import DailyMeasurePanel from "@/components/DailyMeasurePanel";
 
-type Tab = "goals" | "record";
+type Tab = "goals" | "record" | "measure";
+type Draft = { dirty: boolean; busy: boolean };
+const TABS = [['goals', '目标'], ['record', '每日记录'], ['measure', '每日测量']] as const;
+const FORM_NAMES = { record: '每日记录', measure: '每日测量' } as const;
 
-/** One modal owns focus; both panels stay mounted while changing tabs so a
- * partially filled daily record and the archive position remain intact. */
+/** One modal owns focus; every visited panel stays mounted while changing tabs
+ * so a partially filled daily record or measurement and the archive position
+ * remain intact. 每日记录 and 每日测量 are separate forms with separate drafts. */
 export default function GoalsAndRecordsModal({ initialTab = "goals", initialRecordView = "record", initialGoalKind = "all", sessionId, refreshKey, onSaved, onClose, onOpenReminders, onReuse, busy }: {
   onReuse?: (fields: GoalCardFields) => void;
   busy?: boolean;
@@ -25,10 +30,15 @@ export default function GoalsAndRecordsModal({ initialTab = "goals", initialReco
   const participant = useParticipantStyle();
   const dialog = useRef<HTMLDialogElement>(null);
   const [tab, setTab] = useState<Tab>(initialTab);
-  const [recordVisited, setRecordVisited] = useState(initialTab === "record");
-  const [draft, setDraft] = useState({ dirty: false, busy: false });
+  const [visited, setVisited] = useState<Record<Tab, boolean>>({ goals: true, record: initialTab === "record", measure: initialTab === "measure" });
+  const [drafts, setDrafts] = useState<Record<keyof typeof FORM_NAMES, Draft>>({ record: { dirty: false, busy: false }, measure: { dirty: false, busy: false } });
   const [pendingClose, setPendingClose] = useState<(() => void) | null>(null);
-  const reportDraft = useCallback((state: { dirty: boolean; busy: boolean }) => setDraft(previous => previous.dirty === state.dirty && previous.busy === state.busy ? previous : state), []);
+  const reportFor = useCallback((form: keyof typeof FORM_NAMES) => (state: Draft) => setDrafts(previous =>
+    previous[form].dirty === state.dirty && previous[form].busy === state.busy ? previous : { ...previous, [form]: state }), []);
+  const reportRecord = useMemo(() => reportFor("record"), [reportFor]);
+  const reportMeasure = useMemo(() => reportFor("measure"), [reportFor]);
+  const dirtyForms = (Object.keys(FORM_NAMES) as (keyof typeof FORM_NAMES)[]).filter(form => drafts[form].dirty);
+  const draft = { dirty: dirtyForms.length > 0, busy: drafts.record.busy || drafts.measure.busy };
   useEffect(() => { dialog.current?.showModal(); }, []);
   useEffect(() => {
     if (!draft.dirty) return;
@@ -37,7 +47,7 @@ export default function GoalsAndRecordsModal({ initialTab = "goals", initialReco
     return () => window.removeEventListener("beforeunload", protect);
   }, [draft.dirty]);
   function selectTab(next: Tab) {
-    if (next === "record") setRecordVisited(true);
+    setVisited(previous => previous[next] ? previous : { ...previous, [next]: true });
     setTab(next);
   }
   function requestClose(action = onClose) {
@@ -55,17 +65,19 @@ export default function GoalsAndRecordsModal({ initialTab = "goals", initialReco
           <button type="button" disabled={draft.busy} onClick={() => requestClose()} aria-label="关闭目标与记录" className="grid size-11 place-items-center rounded-full text-xl text-ink-muted hover:bg-raised disabled:opacity-40">×</button>
         </div>
         <div role="tablist" aria-label="目标与记录导航" className="default-style:mt-1 default-style:flex default-style:gap-2 simple:mt-1 simple:flex simple:gap-4">
-          {([['goals', '目标'], ['record', '每日记录']] as const).map(([id, label]) => <button key={id} id={`workspace-${id}-tab`} type="button" role="tab" aria-selected={tab === id} aria-controls={`workspace-${id}-panel`} tabIndex={tab === id ? 0 : -1}
+          {TABS.map(([id, label], index) => <button key={id} id={`workspace-${id}-tab`} type="button" role="tab" aria-selected={tab === id} aria-controls={`workspace-${id}-panel`} tabIndex={tab === id ? 0 : -1}
             onClick={() => selectTab(id)} onKeyDown={event => {
               if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-              event.preventDefault(); const next = event.key === 'Home' ? 'goals' : event.key === 'End' ? 'record' : tab === 'goals' ? 'record' : 'goals';
+              event.preventDefault();
+              const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+              const next = event.key === 'Home' ? TABS[0][0] : event.key === 'End' ? TABS[TABS.length - 1][0] : TABS[(index + step + TABS.length) % TABS.length][0];
               selectTab(next); document.getElementById(`workspace-${next}-tab`)?.focus();
-            }} className={`default-style:min-h-11 default-style:rounded-xl default-style:px-5 default-style:text-sm simple:min-h-11 simple:rounded-lg simple:px-3 simple:text-sm ${tab === id ? 'default-style:bg-accent-wash default-style:font-medium default-style:text-accent-ink simple:bg-accent-wash simple:font-medium simple:text-accent-ink' : 'default-style:text-ink-muted default-style:hover:bg-raised simple:text-ink-muted simple:hover:bg-raised simple:hover:text-ink'}`}>{label}{id === 'record' && draft.dirty && <span className="ml-2 text-xs font-normal">未保存</span>}</button>)}
+            }} className={`default-style:min-h-11 default-style:rounded-xl default-style:px-5 default-style:text-sm simple:min-h-11 simple:rounded-lg simple:px-3 simple:text-sm ${tab === id ? 'default-style:bg-accent-wash default-style:font-medium default-style:text-accent-ink simple:bg-accent-wash simple:font-medium simple:text-accent-ink' : 'default-style:text-ink-muted default-style:hover:bg-raised simple:text-ink-muted simple:hover:bg-raised simple:hover:text-ink'}`}>{label}{id !== 'goals' && drafts[id].dirty && <span className="ml-2 text-xs font-normal">未保存</span>}</button>)}
         </div>
       </header>
       {pendingClose && <div role="alert" className="shrink-0 border-b border-accent-edge bg-accent-wash px-5 py-3 text-sm sm:px-7">
-        <p>每日记录还有未保存的内容，离开后将丢失。</p>
-        <div className="mt-2 flex flex-wrap gap-2"><button type="button" onClick={() => { setPendingClose(null); selectTab('record'); }} className="min-h-11 rounded-xl bg-accent px-4 text-on-accent">继续填写</button><button type="button" onClick={() => { const action = pendingClose; setPendingClose(null); action(); }} className="min-h-11 rounded-xl px-4 text-ink-muted hover:bg-raised">放弃填写并离开</button></div>
+        <p>{dirtyForms.map(form => FORM_NAMES[form]).join('和')}还有未保存的内容，离开后将丢失。</p>
+        <div className="mt-2 flex flex-wrap gap-2"><button type="button" onClick={() => { setPendingClose(null); selectTab(dirtyForms[0] ?? 'record'); }} className="min-h-11 rounded-xl bg-accent px-4 text-on-accent">继续填写</button><button type="button" onClick={() => { const action = pendingClose; setPendingClose(null); action(); }} className="min-h-11 rounded-xl px-4 text-ink-muted hover:bg-raised">放弃填写并离开</button></div>
       </div>}
       <section id="workspace-goals-panel" role="tabpanel" aria-labelledby="workspace-goals-tab" hidden={tab !== 'goals'} className="min-h-0 flex-1">
         <div className="flex h-full min-h-0 flex-col">
@@ -74,7 +86,10 @@ export default function GoalsAndRecordsModal({ initialTab = "goals", initialReco
         </div>
       </section>
       <section id="workspace-record-panel" role="tabpanel" aria-labelledby="workspace-record-tab" hidden={tab !== 'record'} className="min-h-0 flex-1">
-        {recordVisited && <DailyAssessmentModal embedded initialView={initialRecordView} sessionId={sessionId} onSaved={onSaved} onClose={() => requestClose()} onDraftStateChange={reportDraft} />}
+        {visited.record && <DailyAssessmentModal embedded initialView={initialRecordView} sessionId={sessionId} onSaved={onSaved} onClose={() => requestClose()} onDraftStateChange={reportRecord} />}
+      </section>
+      <section id="workspace-measure-panel" role="tabpanel" aria-labelledby="workspace-measure-tab" hidden={tab !== 'measure'} className="min-h-0 flex-1">
+        {visited.measure && <DailyMeasurePanel onDraftStateChange={reportMeasure} />}
       </section>
     </div>
   </dialog>;

@@ -1,5 +1,5 @@
 /** Admin-only pacing for the fast opening, saved per admin in this browser. */
-export const LEAD_INTERVAL_MIN_MS = 100;
+export const LEAD_INTERVAL_MIN_MS = 0;
 export const LEAD_INTERVAL_MAX_MS = 1000;
 export const LEAD_INTERVAL_KEY_PREFIX = "bacoach-lead-interval:";
 

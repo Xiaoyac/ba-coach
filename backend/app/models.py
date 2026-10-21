@@ -137,6 +137,119 @@ class AssessmentEntry(Base):
         )
 
 
+# 每日测量: the study's daily questionnaire (the "Poc每日测量" form), kept
+# apart from the daily record (AssessmentEntry) so the two never share answers
+# or validation. One row per subject per local date, edited in place with
+# full snapshots in daily_measurement_revisions.
+MEASURE_VERSION = "M1"
+MEASURE_SLEEP_FIELDS = ("sleep_hours", "sleep_quality")  # 1 很好 … 4 很差
+MEASURE_OVERALL_FIELDS = ("completion", "activity_level", "overall_mood")  # 1–5
+MEASURE_EMOTION_FIELDS = (
+    "energetic", "peaceful", "secure",
+    "low_mood", "worthless", "irritable", "tired",
+    "stressed", "lonely",
+)  # 1 完全不符合 … 5 非常符合
+MEASURE_ACTIVITY_FIELDS = (
+    "vigorous_count", "vigorous_minutes",
+    "moderate_count", "moderate_minutes",
+    "light_count", "light_minutes",
+)
+MEASURE_FIELDS = MEASURE_SLEEP_FIELDS + MEASURE_OVERALL_FIELDS + MEASURE_EMOTION_FIELDS + MEASURE_ACTIVITY_FIELDS
+MEASURE_MAX_SLEEP_HOURS = 24
+MEASURE_MAX_COUNT = 200
+MEASURE_MAX_MINUTES = 1440
+
+
+class DailyMeasurement(Base):
+    """One day's 每日测量 answers."""
+
+    __tablename__ = "daily_measurements"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    subject_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    recorded_on: Mapped[date] = mapped_column(Date, nullable=False)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
+    questionnaire_version: Mapped[str] = mapped_column(String(16), nullable=False, default=MEASURE_VERSION)
+    revision_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+
+    # Hours to one decimal place, e.g. 6.5.
+    sleep_hours: Mapped[float] = mapped_column(Numeric(3, 1, asdecimal=False), nullable=False)
+    sleep_quality: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    completion: Mapped[int] = mapped_column(Integer, nullable=False)
+    activity_level: Mapped[int] = mapped_column(Integer, nullable=False)
+    overall_mood: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    energetic: Mapped[int] = mapped_column(Integer, nullable=False)
+    peaceful: Mapped[int] = mapped_column(Integer, nullable=False)
+    secure: Mapped[int] = mapped_column(Integer, nullable=False)
+    low_mood: Mapped[int] = mapped_column(Integer, nullable=False)
+    worthless: Mapped[int] = mapped_column(Integer, nullable=False)
+    irritable: Mapped[int] = mapped_column(Integer, nullable=False)
+    tired: Mapped[int] = mapped_column(Integer, nullable=False)
+    stressed: Mapped[int] = mapped_column(Integer, nullable=False)
+    lonely: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    vigorous_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    vigorous_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    moderate_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    moderate_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    light_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    light_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    submitted_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=_utcnow, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=_utcnow, onupdate=_utcnow, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("subject_id", "recorded_on", name="uq_daily_measurement_subject_day"),
+        CheckConstraint(f"sleep_hours BETWEEN 0 AND {MEASURE_MAX_SLEEP_HOURS}", name="ck_measure_sleep_hours"),
+        CheckConstraint("sleep_quality BETWEEN 1 AND 4", name="ck_measure_sleep_quality"),
+        *[
+            CheckConstraint(f"{col} BETWEEN 1 AND 5", name=f"ck_measure_{col}")
+            for col in MEASURE_OVERALL_FIELDS + MEASURE_EMOTION_FIELDS
+        ],
+        *[
+            CheckConstraint(
+                f"{col} BETWEEN 0 AND {MEASURE_MAX_MINUTES if col.endswith('_minutes') else MEASURE_MAX_COUNT}",
+                name=f"ck_measure_{col}",
+            )
+            for col in MEASURE_ACTIVITY_FIELDS
+        ],
+    )
+
+
+class DailyMeasurementRevision(Base):
+    """Immutable snapshot of every saved version of one day's 每日测量."""
+
+    __tablename__ = "daily_measurement_revisions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    measurement_id: Mapped[int] = mapped_column(
+        ForeignKey("daily_measurements.id", ondelete="CASCADE"), nullable=False
+    )
+    revision_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
+    saved_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False, default=_utcnow, server_default=func.now())
+    __table_args__ = (UniqueConstraint("measurement_id", "revision_no", name="uq_daily_measurement_revision"),)
+
+
+class ResearchParticipant(Base):
+    """Administrator-assigned research ID for one account (e.g. "P001")."""
+
+    __tablename__ = "research_participants"
+
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="CASCADE"), primary_key=True
+    )
+    research_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=_utcnow, onupdate=_utcnow, server_default=func.now()
+    )
+
+
 class AssessmentRevision(Base):
     """Immutable full snapshots, separate from the current daily record."""
 

@@ -3,7 +3,7 @@ import { apiHeaders, checkAuthentication } from './http';
 import type { AssessmentRecord } from './assessment';
 
 export type RecordFilters = { query: string; start: string; end: string; scale_version: string };
-export type AdminRecord = { subject_id: string; username: string | null; nickname: string | null; record: AssessmentRecord };
+export type AdminRecord = { subject_id: string; username: string | null; nickname: string | null; research_id?: string | null; record: AssessmentRecord };
 export type AdminRecordPage = { items: AdminRecord[]; total: number; users: number; versions: Record<string, number>; has_more: boolean };
 export type AdminRecordUser = {
   subject_id: string;
@@ -63,12 +63,16 @@ export async function fetchAdminRecordDay(subjectId: string, localDate: string, 
   }));
   return response.json();
 }
-export async function exportAdminRecords(filters: RecordFilters, kind: 'daily' | 'activities', signal: AbortSignal) {
-  const query=params(filters); query.set('kind',kind);
-  const response=await checked(await fetch(`${API_BASE}/api/admin/assessments/export.csv?${query}`,{headers:apiHeaders(),signal,cache:'no-store'}));
+export type ExportKind = 'daily' | 'activities' | 'measurements';
+export async function exportAdminRecords(filters: RecordFilters, kind: ExportKind, signal: AbortSignal) {
+  const query=params(filters);
+  // 每日测量 is its own questionnaire with its own endpoint; it has no scale versions.
+  if (kind === 'measurements') query.delete('scale_version'); else query.set('kind',kind);
+  const path = kind === 'measurements' ? 'measurements.csv' : 'export.csv';
+  const response=await checked(await fetch(`${API_BASE}/api/admin/assessments/${path}?${query}`,{headers:apiHeaders(),signal,cache:'no-store'}));
   const blob=await response.blob();
   if(signal.aborted) return;
   const url=URL.createObjectURL(blob), a=document.createElement('a');
-  a.href=url; a.download=`daily-records-${kind}.csv`; document.body.appendChild(a); a.click(); a.remove();
+  a.href=url; a.download=kind === 'measurements' ? 'daily-measurements.csv' : `daily-records-${kind}.csv`; document.body.appendChild(a); a.click(); a.remove();
   window.setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
