@@ -1,38 +1,153 @@
 /* "claude trying": admin-only experiment layered over the simple base.
- * Goal: drop the stock "generated UI" tells — glass, glow, uniform soft
- * radii, gold on every hover, avatar tiles, breathing dots — and let the
- * conversation read like written text on a plain page. Palettes are untouched;
- * only shape, depth, type and accent usage change. */
+ *
+ * Direction — a notebook, not a dashboard. Paper surfaces, hairline rules
+ * instead of floating cards, a serif reading voice for the coach and for
+ * titles, and one ink accent per palette used only where something is
+ * selected, focused or primary. Every rule is scoped to html.style-claude, so
+ * the default, simple and participant styles are untouched.
+ *
+ * This file is imported unlayered, so it wins over Tailwind's utility layer
+ * without !important; keep selectors narrow for that reason. */
 
+/* ------------------------------------------------------------------ *
+ * Type and shape
+ * ------------------------------------------------------------------ */
 html.style-claude {
-  --font-claude-serif: "Iowan Old Style", Georgia, "Songti SC", "Noto Serif SC",
-    "Source Han Serif SC", "Noto Serif CJK SC", STSong, serif;
+  --font-claude-serif: "Iowan Old Style", "Palatino Linotype", Georgia, "Songti SC",
+    "Noto Serif SC", "Source Han Serif SC", "Noto Serif CJK SC", STSong, serif;
+  --font-sans: -apple-system, system-ui, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", sans-serif;
 
-  /* Two working radii instead of 16px pills on everything. Tailwind's
-     rounded-* utilities read these variables, so this reshapes every card. */
+  /* Crisp corners: two small working radii instead of soft pills. Tailwind's
+     rounded-* utilities read these, so every card and control follows. */
+  --radius-md: 5px;
   --radius-lg: 6px;
   --radius-xl: 8px;
   --radius-2xl: 10px;
   --radius-3xl: 12px;
+  --claude-radius-card: 12px;
 
-  /* Gold is kept for primary actions, links and focus; hover and selected
-     states use a neutral tint instead. */
-  --color-accent-wash: color-mix(in srgb, var(--color-ink) 7%, transparent);
-  --color-accent-edge: var(--color-line-strong);
-
-  /* Short, close shadows that sit on the page instead of floating over it. */
-  --shadow-panel: 0 0 0 1px var(--color-line), 0 8px 24px -12px rgb(0 0 0 / 0.45);
-  --shadow-float: 0 0 0 1px var(--color-line), 0 4px 12px -6px rgb(0 0 0 / 0.4);
+  /* Depth is a hairline plus a short shadow that sits on the page. */
+  --shadow-panel: 0 0 0 1px var(--color-line), 0 18px 40px -24px rgb(31 28 24 / 0.28);
+  --shadow-float: 0 0 0 1px var(--color-line), 0 8px 20px -10px rgb(31 28 24 / 0.22);
   --shadow-bubble: none;
-  --shadow-composer: none;
+  --shadow-composer: 0 1px 2px rgb(31 28 24 / 0.04), 0 10px 28px -18px rgb(31 28 24 / 0.22);
 }
 
-html.style-claude:is(.theme-warm, .theme-porcelain) {
-  --shadow-panel: 0 0 0 1px var(--color-line), 0 8px 24px -12px rgb(40 32 20 / 0.14);
-  --shadow-float: 0 0 0 1px var(--color-line), 0 4px 12px -6px rgb(40 32 20 / 0.16);
+html.style-claude:is(.theme-dark, .theme-github) {
+  --shadow-panel: 0 0 0 1px var(--color-line), 0 22px 48px -24px rgb(0 0 0 / 0.7);
+  --shadow-float: 0 0 0 1px var(--color-line), 0 10px 24px -10px rgb(0 0 0 / 0.6);
+  --shadow-composer: 0 0 0 1px transparent, 0 12px 30px -18px rgb(0 0 0 / 0.7);
 }
 
-/* No frosted glass and no ambient glow anywhere. */
+/* ------------------------------------------------------------------ *
+ * Palettes — each theme keeps its family, retuned for paper and ink.
+ * Text tokens hold at least 4.5:1 on canvas, panel and raised.
+ * ------------------------------------------------------------------ */
+
+/* 温暖浅色 → paper and clay. */
+html.style-claude.theme-warm {
+  --color-canvas: #f6f4ef;
+  --color-panel: #fbfaf7;
+  --color-sheet: #fbfaf7;
+  --color-raised: #eeebe4;
+  --color-agent-bubble: transparent;
+  --color-line: #e3ded4;
+  --color-line-strong: #c8bfae;
+  --color-ink: #1f1c18;
+  --color-ink-muted: #4d4840;
+  --color-ink-faint: #6b6458;
+  --color-accent: #b0512e;
+  --color-accent-ink: #8f3f20;
+  --color-on-accent: #fffaf5;
+  --color-accent-wash: #f3e5dc;
+  --color-accent-edge: #d39a80;
+  --color-mine: #ebe7de;
+  --color-mine-edge: #d3cbbd;
+  --color-mine-ink: #1f1c18;
+  --color-alert-ink: #9a3b33;
+  --color-alert-wash: #b0402f12;
+  --color-alert-edge: #b0402f40;
+}
+
+/* 青花瓷 → cool paper and blue-black ink. */
+html.style-claude.theme-porcelain {
+  --color-canvas: #f3f5f6;
+  --color-panel: #fbfcfc;
+  --color-sheet: #fbfcfc;
+  --color-raised: #e9edef;
+  --color-agent-bubble: transparent;
+  --color-line: #dce2e5;
+  --color-line-strong: #b3bfc5;
+  --color-ink: #17222b;
+  --color-ink-muted: #40505c;
+  --color-ink-faint: #5a6873;
+  --color-accent: #285b7c;
+  --color-accent-ink: #1f4a66;
+  --color-on-accent: #fbfcfc;
+  --color-accent-wash: #e0ebf1;
+  --color-accent-edge: #8aabc0;
+  --color-mine: #e5eaed;
+  --color-mine-edge: #c3cdd3;
+  --color-mine-ink: #17222b;
+  --color-alert-ink: #963f43;
+  --color-alert-wash: #963f4312;
+  --color-alert-edge: #963f4340;
+}
+
+/* 黑金夜色 → warm ink-black and brass. */
+html.style-claude.theme-dark {
+  --color-canvas: #131210;
+  --color-panel: #191816;
+  --color-sheet: #1c1b18;
+  --color-raised: #24221f;
+  --color-agent-bubble: transparent;
+  --color-line: #2f2c28;
+  --color-line-strong: #4b463e;
+  --color-ink: #ece6da;
+  --color-ink-muted: #bdb5a6;
+  --color-ink-faint: #9a917f;
+  --color-accent: #d3a35c;
+  --color-accent-ink: #e5bf83;
+  --color-on-accent: #17140f;
+  --color-accent-wash: #2d2519;
+  --color-accent-edge: #87693c;
+  --color-mine: #262420;
+  --color-mine-edge: #3d3933;
+  --color-mine-ink: #ece6da;
+  --color-alert-ink: #f0aaa0;
+  --color-alert-wash: #f0aaa012;
+  --color-alert-edge: #f0aaa03d;
+}
+
+/* Dark → graphite and periwinkle. */
+html.style-claude.theme-github {
+  --color-canvas: #1a1b1e;
+  --color-panel: #202125;
+  --color-sheet: #232428;
+  --color-raised: #2a2c31;
+  --color-agent-bubble: transparent;
+  --color-line: #33353b;
+  --color-line-strong: #50535b;
+  --color-ink: #eceef2;
+  --color-ink-muted: #b9bdc6;
+  --color-ink-faint: #969ba6;
+  --color-accent: #8f97ff;
+  --color-accent-ink: #b7bcff;
+  --color-on-accent: #14152b;
+  --color-accent-wash: #2b2e4a;
+  --color-accent-edge: #666dd0;
+  --color-mine: #2b2d33;
+  --color-mine-edge: #43464e;
+  --color-mine-ink: #eceef2;
+  --color-alert-ink: #f0a9a9;
+  --color-alert-wash: #f0a9a912;
+  --color-alert-edge: #f0a9a93d;
+}
+
+/* ------------------------------------------------------------------ *
+ * Page
+ * ------------------------------------------------------------------ */
 .style-claude *,
 .style-claude *::before,
 .style-claude *::after {
@@ -43,12 +158,31 @@ html.style-claude:is(.theme-warm, .theme-porcelain) {
 .style-claude .app-canvas::before,
 .style-claude .app-canvas::after { content: none; }
 
-/* Headings get a typeface with a voice; controls stay in the system sans. */
-.style-claude :is(.display-title, .workspace-card-header h1, [role="dialog"] h2, [aria-label="设置页面"] h2) {
+.style-claude body { font-feature-settings: "kern", "palt" 0; }
+.style-claude ::selection { background: color-mix(in srgb, var(--color-accent) 24%, transparent); }
+
+.style-claude :where(button, a, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.style-claude .zen-scroll { scrollbar-color: var(--color-line-strong) transparent; }
+.style-claude .zen-scroll::-webkit-scrollbar { width: 8px; }
+.style-claude .zen-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  background-color: var(--color-line-strong);
+}
+.style-claude .zen-scroll::-webkit-scrollbar-thumb:hover { background-color: var(--color-ink-faint); }
+
+/* Titles carry the serif voice; controls stay in the system sans. */
+.style-claude :is(.display-title, .workspace-card-header h1, dialog h2, [role="dialog"] h2,
+  .settings-titlebar h2, [aria-label="设置页面"] h2) {
   font-family: var(--font-claude-serif);
   font-weight: 600;
   letter-spacing: 0;
 }
+.style-claude :is(dialog h2, [role="dialog"] h2) { font-size: 1.2rem; }
 .style-claude .eyebrow {
   font-size: 0.75rem;
   font-weight: 500;
@@ -56,49 +190,335 @@ html.style-claude:is(.theme-warm, .theme-porcelain) {
   text-transform: none;
   color: var(--color-ink-faint);
 }
+.style-claude .number-chip {
+  border: 1px solid var(--color-line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-ink);
+  font-family: var(--font-claude-serif);
+  font-size: 0.8rem;
+}
 
-/* Conversation: the coach's reply is unboxed text, like a letter; the
-   person's own turns are a quiet tinted block. No icon tiles beside turns. */
+/* ------------------------------------------------------------------ *
+ * Sidebar: a slightly darker margin of the same paper.
+ * ------------------------------------------------------------------ */
+.style-claude .workspace-rail {
+  border-right: 1px solid var(--color-line);
+  background: color-mix(in srgb, var(--color-raised) 55%, var(--color-canvas));
+}
+.style-claude .workspace-rail > div:first-child > div:first-child > span {
+  background: transparent;
+  color: var(--color-accent);
+}
+.style-claude .workspace-rail > div:first-child > div:first-child p:first-child {
+  font-family: var(--font-claude-serif);
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.style-claude .workspace-rail .surface-button {
+  border-color: transparent;
+  border-radius: 8px;
+}
+.style-claude .workspace-rail .surface-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-ink) 6%, transparent);
+  color: var(--color-ink);
+}
+/* "开启新对话" is the one filled control in the rail. */
+.style-claude .workspace-rail .surface-button.bg-accent-wash {
+  border: 1px solid var(--color-line-strong);
+  background: var(--color-panel);
+  color: var(--color-ink);
+}
+.style-claude .workspace-rail .surface-button.bg-accent-wash svg { color: var(--color-accent); }
+.style-claude .workspace-rail .surface-button.bg-accent-wash:hover:not(:disabled) {
+  border-color: var(--color-ink-faint);
+  background: var(--color-panel);
+}
+.style-claude .conversation-row-active {
+  background: color-mix(in srgb, var(--color-ink) 8%, transparent);
+  color: var(--color-ink);
+}
+
+/* ------------------------------------------------------------------ *
+ * Conversation
+ * ------------------------------------------------------------------ */
+.style-claude .workspace-card,
+.style-claude .workspace-card-header { background: var(--color-canvas); }
+.style-claude .workspace-card-header { border-bottom: 1px solid var(--color-line); }
+.style-claude .workspace-card-header h1 { font-size: 1.05rem; }
+.style-claude [data-testid="conversation-controls"] { background: var(--color-canvas); }
+
 .style-claude .message-avatar { display: none; }
+
+/* The coach writes like a letter: unboxed serif at reading size. */
 .style-claude [data-message-bubble="assistant"] {
+  max-width: 40rem;
   padding-inline: 0;
   background: transparent;
   box-shadow: none;
-  font-family: var(--font-claude-serif);
-  font-size: 1.02rem;
-  letter-spacing: 0;
-}
-.style-claude [data-message-bubble="user"] {
-  border-radius: 10px;
-  background: var(--color-raised);
   color: var(--color-ink);
+  font-family: var(--font-claude-serif);
+  font-size: 1.0625rem;
+  line-height: 1.9;
+  letter-spacing: 0.005em;
+}
+.style-claude [data-message-bubble="assistant"] [role="heading"] {
+  margin-top: 1rem;
+  font-size: 1.08em;
+  font-weight: 600;
+}
+.style-claude [data-message-bubble="assistant"] :is(ul, ol) li::marker { color: var(--color-ink-faint); }
+.style-claude [data-message-bubble="assistant"] blockquote {
+  border-left-color: var(--color-accent-edge);
+  font-style: normal;
+}
+.style-claude [data-message-bubble="assistant"] a {
+  color: var(--color-accent-ink);
+  text-decoration-color: var(--color-accent-edge);
+  text-underline-offset: 3px;
+}
+.style-claude [data-message-bubble="assistant"] :is(code, pre) {
+  font-size: 0.86em;
+  background: var(--color-raised);
+}
+
+/* The person's own turns: a quiet paper slip, one corner tucked in. */
+.style-claude [data-message-bubble="user"] {
+  border: 1px solid var(--color-line);
+  border-radius: 14px 14px 4px 14px;
+  background: var(--color-mine);
+  color: var(--color-mine-ink);
   box-shadow: none;
+  font-size: 0.95rem;
   letter-spacing: 0;
 }
 
 /* Waiting state is a sentence, not three pulsing dots. */
 .style-claude [data-generation-status] > span[aria-hidden="true"] { display: none; }
 
+.style-claude .reply-vote-button {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--color-ink-faint);
+}
+.style-claude .reply-vote-button:hover,
+.style-claude .reply-vote-button.is-selected {
+  background: color-mix(in srgb, var(--color-ink) 6%, transparent);
+  color: var(--color-ink);
+}
+.style-claude .reply-vote-button.is-selected { color: var(--color-accent); }
+@media (pointer: coarse) {
+  .style-claude .reply-vote-button { width: 44px; height: 44px; }
+}
+.style-claude .reply-feedback-panel {
+  border-radius: 10px;
+  background: var(--color-panel);
+}
+.style-claude .reply-feedback-reason { border-radius: 999px; }
+.style-claude .reply-feedback-reason:hover,
+.style-claude .reply-feedback-reason.is-selected {
+  border-color: var(--color-ink-faint);
+  background: transparent;
+  color: var(--color-ink);
+}
+
+/* Composer: a sheet of paper resting on the page. */
 .style-claude .composer-shell {
+  border: 1px solid var(--color-line-strong);
+  border-radius: 16px;
+  background: var(--color-panel);
+  box-shadow: var(--shadow-composer);
+}
+.style-claude .composer-shell:focus-within {
+  border-color: var(--color-ink-faint);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 12%, transparent), var(--shadow-composer);
+}
+.style-claude .composer-shell textarea { font-size: 0.98rem; line-height: 1.7; }
+
+/* ------------------------------------------------------------------ *
+ * Dialogs, menus and panels
+ * ------------------------------------------------------------------ */
+.style-claude :is(dialog, [role="dialog"][aria-modal="true"]):not(.settings-window) {
+  border: 1px solid var(--color-line);
+  box-shadow: var(--shadow-panel);
+}
+/* ::backdrop does not reliably inherit custom properties, so no var() here. */
+html.style-claude dialog::backdrop { background: rgb(31 28 24 / 0.32); }
+html.style-claude:is(.theme-dark, .theme-github) dialog::backdrop { background: rgb(0 0 0 / 0.55); }
+
+.style-claude [role="menu"] {
+  border-radius: 10px;
+  box-shadow: var(--shadow-float);
+}
+.style-claude [role="menu"] [role="menuitem"]:hover {
+  background: color-mix(in srgb, var(--color-ink) 6%, transparent);
+  color: var(--color-ink);
+}
+
+/* Tabs are underlined words, not filled pills. */
+.style-claude [role="tablist"] { gap: 1.25rem; }
+.style-claude [role="tab"] {
+  padding-inline: 0.125rem;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: inset 0 -2px 0 transparent;
+  color: var(--color-ink-muted);
+  font-weight: 400;
+}
+.style-claude [role="tab"]:hover {
+  background: transparent;
+  color: var(--color-ink);
+  box-shadow: inset 0 -2px 0 var(--color-line-strong);
+}
+.style-claude [role="tab"][aria-selected="true"] {
+  background: transparent;
+  color: var(--color-ink);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+.style-claude [role="tablist"]:has([role="tab"]) { border-bottom: 1px solid var(--color-line); }
+
+/* Primary actions: solid accent, flat, no glow or lift. */
+.style-claude :is(button, a).bg-accent,
+.style-claude .primary-action {
+  border-radius: 8px;
+  box-shadow: none;
+  font-weight: 500;
+  transform: none;
+}
+.style-claude :is(button, a).bg-accent:hover:not(:disabled),
+.style-claude .primary-action:hover:not(:disabled) {
+  filter: none;
+  background: color-mix(in srgb, var(--color-accent) 88%, var(--color-ink));
+  transform: none;
+}
+/* The send button stays round. */
+.style-claude .composer-shell :is(button).bg-accent { border-radius: 999px; }
+
+/* Secondary surfaces read as outlined paper, not tinted gold. */
+.style-claude .surface-button {
+  box-shadow: none;
+  transform: none;
+}
+.style-claude .surface-button:hover:not(:disabled) {
+  border-color: var(--color-line-strong);
+  background: color-mix(in srgb, var(--color-ink) 5%, transparent);
+  color: var(--color-ink);
+  transform: none;
+}
+
+/* Fields: white paper with a ruled edge. The composer keeps its own shell. */
+.style-claude :is(input:not([type="radio"], [type="checkbox"], [type="range"], [type="hidden"], [type="file"]), textarea, select):not(.composer-shell *) {
+  border: 1px solid var(--color-line-strong);
+  border-radius: 8px;
+  background-color: var(--color-panel);
+  color: var(--color-ink);
+}
+.style-claude :is(input, textarea, select):not(.composer-shell *):focus-visible {
+  border-color: var(--color-accent);
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
+  outline-offset: 0;
+}
+.style-claude :is(input, textarea)::placeholder { color: var(--color-ink-faint); opacity: 0.85; }
+.style-claude .archive-input { background: var(--color-panel); }
+.style-claude .archive-action {
+  border: 1px solid var(--color-line-strong);
+  background: transparent;
+  color: var(--color-ink);
+}
+.style-claude .archive-action:hover:not(:disabled) { background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
+
+/* Choice groups (每日记录 / 每日测量): selected answers are inked, not washed. */
+.style-claude [role="radio"][aria-checked="true"] {
+  border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
+/* Timeline: a hairline with hollow clay rings. */
+.style-claude .goal-timeline-entry::before { width: 1px; background: var(--color-line-strong); }
+.style-claude .goal-timeline-dot { border-width: 1.5px; background: var(--color-canvas); }
+.style-claude .goal-timeline-date { font-family: var(--font-claude-serif); }
+.style-claude .goal-archive-card {
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: var(--color-panel);
+  box-shadow: none;
+}
+
+/* Tables (admin data): ruled ledger. */
+.style-claude table { border-collapse: collapse; }
+.style-claude thead th {
+  border-bottom: 1px solid var(--color-line-strong);
+  color: var(--color-ink-muted);
+  font-weight: 500;
+}
+.style-claude tbody td { border-bottom: 1px solid var(--color-line); }
+.style-claude tbody tr:hover td { background: color-mix(in srgb, var(--color-ink) 3%, transparent); }
+
+/* ------------------------------------------------------------------ *
+ * Settings window
+ * ------------------------------------------------------------------ */
+.style-claude .settings-window {
+  border: 1px solid var(--color-line);
+  border-radius: var(--claude-radius-card);
+  background: var(--color-canvas);
+  box-shadow: var(--shadow-panel);
+}
+.style-claude .settings-rail {
+  border-right: 1px solid var(--color-line);
+  background: color-mix(in srgb, var(--color-raised) 55%, var(--color-canvas));
+}
+.style-claude .settings-avatar {
+  border: 1px solid var(--color-line-strong);
+  border-radius: 999px;
+  background: var(--color-panel);
+  color: var(--color-accent);
+  font-family: var(--font-claude-serif);
+}
+.style-claude .settings-nav-item {
+  position: relative;
+  border-radius: 8px;
+}
+.style-claude .settings-nav-item:hover:not([aria-current="page"]) {
+  background: color-mix(in srgb, var(--color-ink) 6%, transparent);
+  color: var(--color-ink);
+}
+.style-claude .settings-nav-item[aria-current="page"] {
+  background: var(--color-panel);
+  color: var(--color-ink);
+  box-shadow: 0 0 0 1px var(--color-line);
+}
+.style-claude .settings-nav-item[aria-current="page"] svg { color: var(--color-accent); }
+.style-claude .settings-pane,
+.style-claude .settings-titlebar { background: var(--color-canvas); }
+.style-claude .settings-titlebar { border-bottom: 1px solid var(--color-line); }
+.style-claude .overall-style-option,
+.style-claude .theme-option {
   border: 1px solid var(--color-line);
   border-radius: 10px;
   background: var(--color-panel);
 }
-.style-claude .composer-shell:focus-within { border-color: var(--color-line-strong); }
-
-.style-claude .reply-vote-button { border-radius: 6px; }
-.style-claude .reply-vote-button:hover,
-.style-claude .reply-vote-button.is-selected,
-.style-claude .reply-feedback-reason:hover,
-.style-claude .reply-feedback-reason.is-selected {
+.style-claude .overall-style-option[data-selected="true"],
+.style-claude .theme-option[aria-checked="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-panel);
   color: var(--color-ink);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
 }
-.style-claude .reply-feedback-panel,
-.style-claude .reply-feedback-reason { border-radius: 8px; }
+.style-claude .overall-style-option:hover:not([data-selected="true"]),
+.style-claude .theme-option:hover:not([aria-checked="true"]) { border-color: var(--color-line-strong); }
 
-/* Calmer motion: a short fade instead of rising, scaling turns and buttons. */
+/* ------------------------------------------------------------------ *
+ * Motion: short fades only — nothing rises, scales or bounces.
+ * ------------------------------------------------------------------ */
 @media (prefers-reduced-motion: no-preference) {
   .style-claude :is(.zen-message-user, .zen-message-agent, .zen-page-enter) {
+    animation: claude-fade 180ms ease-out both;
+  }
+  .style-claude :is(dialog, [role="dialog"], [role="alertdialog"]) {
     animation: claude-fade 160ms ease-out both;
   }
   .style-claude button:not(:disabled):active { transform: none; }

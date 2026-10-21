@@ -7,7 +7,7 @@ const options = [
   { id: "default", name: "默认", description: "保留原有界面样式。" },
   { id: "simple", name: "简约", description: "用留白和浅底色区分内容，减少边框与装饰。" },
   { id: "participant-1", name: "被试建议1", description: "精简说明、分组设置、抽屉目标卡与清晰表格。" },
-  { id: "claude", name: "claude trying", description: "试验：去掉玻璃与光晕，实色表面、小圆角、衬线正文，减少金色强调。" },
+  { id: "claude", name: "claude trying", description: "试验：笔记本式排版——纸面配色、细线分隔、衬线阅读字体，强调色只用于选中和主要操作。" },
 ] as const;
 
 export default function OverallStyleSelector() {
