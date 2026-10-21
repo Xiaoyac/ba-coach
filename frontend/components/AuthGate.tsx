@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { bindOverallStyleAccount } from "@/lib/overallStyle";
+import { bindLeadPacingAccount } from "@/lib/leadPacing";
 import { usePathname } from "next/navigation";
 import SettingsPage from "@/components/SettingsPage";
 import AuthScreen from "@/components/AuthScreen";
@@ -113,6 +114,8 @@ export default function AuthGate() {
   const styleAccountId = state.checking ? undefined : state.account?.profile_uuid;
   const styleAccountRole = state.checking ? undefined : state.account?.role;
   useLayoutEffect(() => bindOverallStyleAccount(styleAccountId && styleAccountRole
+    ? { profile_uuid: styleAccountId, role: styleAccountRole } : null), [styleAccountId, styleAccountRole]);
+  useLayoutEffect(() => bindLeadPacingAccount(styleAccountId && styleAccountRole
     ? { profile_uuid: styleAccountId, role: styleAccountRole } : null), [styleAccountId, styleAccountRole]);
 
   if (state.checking) {

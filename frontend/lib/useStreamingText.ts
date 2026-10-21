@@ -2,6 +2,7 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { textCharacters } from "@/lib/textCharacters";
+import { getLeadInterval } from "@/lib/leadPacing";
 
 const LEAD_START_DELAY_MS = 1000;
 const LEAD_MAX_INTERVAL_MS = 500;
@@ -84,7 +85,8 @@ export function useStreamingText(text: string, streaming: boolean,
       if (leadWaiting && left <= 1 && displayed.current.length > 0) return;
       const catchingLead = phase === "body" && displayed.current.length < leadLength;
       const elapsed = Math.max(0, leadAge - LEAD_START_DELAY_MS);
-      const interval = leadWaiting ? Math.min(LEAD_MAX_INTERVAL_MS, 280 + elapsed * .035)
+      // An admin's fixed interval replaces the default adaptive lead pacing.
+      const interval = leadWaiting ? (getLeadInterval() ?? Math.min(LEAD_MAX_INTERVAL_MS, 280 + elapsed * .035))
         : catchingLead ? 12 : left > 60 ? 12 : 24;
       if (!displayed.current || now - lastAdvance.current >= interval) {
         let count = 1;
