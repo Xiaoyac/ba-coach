@@ -193,15 +193,14 @@ async def export_records(kind: Literal['daily', 'activities'] = 'daily', clauses
     output = io.StringIO(newline='')
     writer = csv.writer(output)
     common = ['record_id', 'subject_id', 'username', 'nickname', 'local_date', 'timezone', 'scale_version', 'summary_scale_max',
-              'completion_rate', 'completion_not_applicable', 'activity_level', 'overall_mood', 'social_connection_legacy', 'approach_vs_avoidance_legacy', 'reflection_note']
+              'social_connection_legacy', 'approach_vs_avoidance_legacy', 'reflection_note']
     extra = ['activity_position', 'time_slot', 'activity', 'emotion', 'achievement', 'connection', 'enjoyment', 'importance', 'activity_note', 'activity_scale_max']
     writer.writerow(common + (extra if kind == 'activities' else ['activity_count']))
     for row in rows:
         data = item(row)
         record = data['record']
         values = [record.id, data['subject_id'], data['username'], data['nickname'], record.local_date, record.timezone,
-                  record.scale_version, 5 if record.scale_version == 2 else 10, record.completion_rate,
-                  record.completion_not_applicable, record.activity_level, record.overall_mood,
+                  record.scale_version, 5 if record.scale_version == 2 else 10,
                   record.social_connection, record.approach_vs_avoidance, record.reflection_note]
         if kind == 'daily':
             writer.writerow([safe_cell(v) for v in values + [len(record.activities)]])

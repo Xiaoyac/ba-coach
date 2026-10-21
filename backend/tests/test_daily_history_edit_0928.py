@@ -17,7 +17,6 @@ def create(client, headers, on='2020-01-02'):
 def edit_body(record):
     return {'local_date': record['local_date'], 'expected_revision': record['revision_no'],
             'activities': record['activities'], 'summary': {key: record[key] for key in (
-                'completion_rate', 'completion_not_applicable', 'activity_level', 'overall_mood',
                 'social_connection', 'approach_vs_avoidance', 'reflection_note')}}
 
 
@@ -27,7 +26,7 @@ def test_backfill_edit_date_and_keep_every_snapshot(client, register, admin_head
     body = edit_body(first)
     body['local_date'] = '2020-01-01'
     body['activities'][0]['activity'] = '更正为慢走'
-    body['summary']['overall_mood'] = 5
+    body['summary']['reflection_note'] = '补记'
     # Keep the original expected snapshot untouched by Python references.
     original = client.get('/api/assessment/history', headers=headers).json()['items'][0]
     response = client.put(f"/api/assessment/{first['id']}", headers=headers, json=body)
@@ -36,7 +35,7 @@ def test_backfill_edit_date_and_keep_every_snapshot(client, register, admin_head
     assert saved['id'] == first['id'] and saved['revision_no'] == 2
     assert saved['local_date'] == '2020-01-01'
     assert saved['activities'][0]['activity'] == '更正为慢走'
-    assert saved['overall_mood'] == 5
+    assert saved['reflection_note'] == '补记'
     audit = client.get(f"/api/assessment/{first['id']}/revisions", headers=headers).json()
     assert [x['revision_no'] for x in audit] == [2, 1]
     assert audit[1]['record'] == original and audit[0]['record'] == saved
@@ -64,10 +63,10 @@ def test_conflict_stale_and_cross_account_never_overwrite(client, register):
     assert client.put(path, json=body).status_code == 401
     body['local_date'] = first['local_date']
     assert client.put(path, headers=headers, json=body).status_code == 200
-    body['summary']['overall_mood'] = 4
+    body['summary']['reflection_note'] = '过期的修改'
     assert client.put(path, headers=headers, json=body).status_code == 409
     audit = client.get(path + '/revisions', headers=headers).json()
-    assert len(audit) == 2 and audit[0]['record']['overall_mood'] == first['overall_mood']
+    assert len(audit) == 2 and audit[0]['record']['reflection_note'] == first['reflection_note']
 
 
 def test_future_dates_rejected_and_summary_only_edit(client, register):
@@ -78,12 +77,10 @@ def test_future_dates_rejected_and_summary_only_edit(client, register):
     body = edit_body(first); body['local_date'] = tomorrow
     assert client.put(f"/api/assessment/{first['id']}", headers=headers, json=body).status_code == 422
     body['local_date'] = first['local_date']; body['activities'] = []
-    body['summary'].update(completion_rate=None, completion_not_applicable=True)
+    body['summary']['reflection_note'] = '只留下感受'
     response = client.put(f"/api/assessment/{first['id']}", headers=headers, json=body)
     assert response.status_code == 200, response.text
-    assert response.json()['activities'] == [] and response.json()['completion_not_applicable']
-    body = edit_body(response.json()); body['summary']['overall_mood'] = 9
-    assert client.put(f"/api/assessment/{first['id']}", headers=headers, json=body).status_code == 422
+    assert response.json()['activities'] == [] and response.json()['reflection_note'] == '只留下感受'
 
 
 def test_legacy_first_edit_preserves_scale_and_baseline(client, register, db_sessionmaker):
@@ -92,7 +89,7 @@ def test_legacy_first_edit_preserves_scale_and_baseline(client, register, db_ses
     async def seed():
         async with db_sessionmaker() as db:
             row = AssessmentEntry(subject_id=owner, recorded_on=date(2019, 1, 1), timezone='UTC',
-                scale_version=1, completion_rate=9, activity_level=8, overall_mood=None,
+                scale_version=1,
                 social_connection=7, approach_vs_avoidance=6, activities=[])
             db.add(row); await db.commit()
     asyncio.run(seed())
@@ -101,6 +98,6 @@ def test_legacy_first_edit_preserves_scale_and_baseline(client, register, db_ses
     response = client.put(f"/api/assessment/{first['id']}", headers=headers, json=body)
     assert response.status_code == 200, response.text
     assert response.json()['scale_version'] == 1
-    for field in ['completion_rate','activity_level','overall_mood','social_connection','approach_vs_avoidance']:
+    for field in ['social_connection','approach_vs_avoidance']:
         assert response.json()[field] == first[field]
     assert client.get(f"/api/assessment/{first['id']}/revisions", headers=headers).json()[1]['record'] == first

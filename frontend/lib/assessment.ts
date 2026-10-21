@@ -43,10 +43,6 @@ export async function fetchActivityCandidates(sessionId: string, date: string, s
 export interface DailySummary {
   social_connection?: Score | null;
   approach_vs_avoidance?: Score | null;
-  completion_rate: Score | null;
-  completion_not_applicable: boolean;
-  activity_level: Score | null;
-  overall_mood: Score | null;
   reflection_note: string | null;
 }
 
@@ -57,16 +53,12 @@ export interface StoredActivityLog extends ActivityLog {
 export interface AssessmentRecord {
   scale_version?: number;
   revision_no?: number;
-  completion_not_applicable?: boolean;
   id: number;
   local_date: string;
   timezone: string;
   status: "completed" | "skipped";
-  completion_rate: Score | null;
-  activity_level: Score | null;
   social_connection: Score | null;
   approach_vs_avoidance: Score | null;
-  overall_mood: Score | null;
   reflection_note: string | null;
   activities: StoredActivityLog[];
 }

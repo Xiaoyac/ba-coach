@@ -36,11 +36,8 @@ def _completed(subject_id: str, on: date, activity: str) -> AssessmentEntry:
         recorded_on=on,
         timezone="Asia/Shanghai",
         status=STATUS_COMPLETED,
-        completion_rate=7,
-        activity_level=6,
         social_connection=5,
         approach_vs_avoidance=8,
-        overall_mood=7,
         reflection_note=f"{activity}之后感觉不错",
     )
     # Insert out of display order to prove the relationship's position order
@@ -99,9 +96,8 @@ def test_history_is_newest_first_and_includes_ordered_activities(
     assert body["has_more"] is False
     assert body["next_offset"] is None
     assert body["items"][0]["scale_version"] == 1
-    assert body["items"][0]["completion_rate"] == 7
-    assert body["items"][0]["activity_level"] == 6
-    assert body["items"][0]["completion_not_applicable"] is False
+    assert body["items"][0]["social_connection"] == 5
+    assert "overall_mood" not in body["items"][0]
 
 
 def test_history_is_account_scoped_and_omits_skipped_days(

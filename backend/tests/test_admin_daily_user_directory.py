@@ -34,7 +34,7 @@ def subject(client, headers):
 
 def completed(subject_id, on, count=0):
     entry = AssessmentEntry(subject_id=subject_id, recorded_on=on, timezone='Asia/Shanghai',
-        status='completed', scale_version=2, activity_level=0, overall_mood=5,
+        status='completed', scale_version=2,
         reflection_note='今天记录的完整反思')
     # Insert reversed to cover activity ordering as well as complete hydration.
     entry.activities = [ActivityLog(position=i, time_slot=f'{i:02}:00', activity=f'活动 {i}',
@@ -138,8 +138,7 @@ def test_all_dates_and_full_day_activities_are_returned_without_twenty_item_limi
     assert day['total'] == 1 and day['local_date'] == TODAY.isoformat()
     assert {row['subject_id'] for row in day['items']} == {owner_id}
     record = day['items'][0]['record']
-    assert record['scale_version'] == 2 and record['overall_mood'] == 5
-    assert record['completion_not_applicable'] is True and record['activity_level'] == 0
+    assert record['scale_version'] == 2 and 'overall_mood' not in record
     assert record['reflection_note'] == '今天记录的完整反思'
     assert len(record['activities']) == 25
     assert [row['position'] for row in record['activities']] == list(range(25))

@@ -5,9 +5,6 @@ import { CloseMark } from "@/components/icons";
 
 /** Explanations describe the existing scales; they do not change the questions. */
 export const DAILY_TERM_HELP: Record<string, string> = {
-  completion_rate: "回想这一天你想做的事情，按实际完成的程度评分。这里不只指运动，也包括生活、学习或工作中的事情。0 表示几乎没完成，5 表示都完成了。",
-  activity_level: "身体活动不只包括专门运动，也包括走路、做家务等让身体动起来的活动。按这一天的整体情况评分：0 表示几乎没有活动，5 表示活动很多。没有运动，也可以如实记录这一天。",
-  overall_mood: "回顾一整天的总体心情，不只看某一次活动或此刻的感受。0 表示很低落，5 表示很愉快；选最接近你感受的分数即可。",
   emotion: "做这件事时，你的心情如何？（0=非常糟糕，5=非常愉悦）",
   achievement: "做这件事让你觉得自己有成就感吗？",
   connection: "做这件事让你感觉与他人有连接吗？",

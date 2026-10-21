@@ -40,20 +40,9 @@ const ACTIVITY_SCALES: { key: ActivityField; label: string; hint: string }[] = [
   { key: "importance", label: "重视感", hint: "你觉得它是一件重要、值得做的事吗？" },
 ];
 
-type SummaryField = "completion_rate" | "activity_level" | "overall_mood" | "social_connection" | "approach_vs_avoidance";
-
-const SUMMARY_SCALES: {
-  key: SummaryField;
-  label: string;
-  low: string;
-  high: string;
-}[] = [
-  { key: "completion_rate", label: "想做的事情完成程度", low: "几乎没完成", high: "都完成了" },
-  { key: "activity_level", label: "这一天总体身体活动程度", low: "几乎没有活动", high: "活动很多" },
-  { key: "overall_mood", label: "这一天整体心情如何？", low: "很低落", high: "很愉快" },
-];
-
-const LEGACY_SCALES = [...SUMMARY_SCALES,
+// Completion, activity and mood are asked in 每日测量; only old records keep
+// these two 0–10 day scores.
+const LEGACY_SCALES = [
   { key: "social_connection" as const, label: "社会联结", low: "较少", high: "较多" },
   { key: "approach_vs_avoidance" as const, label: "面对与回避", low: "较多回避", high: "较多面对" },
 ];
@@ -74,10 +63,6 @@ const emptyActivity = (): ActivityLog => ({
 });
 
 const defaultSummary = (): DailySummary => ({
-  completion_rate: null,
-  completion_not_applicable: false,
-  activity_level: null,
-  overall_mood: null,
   reflection_note: "",
 });
 
@@ -144,9 +129,7 @@ export default function DailyAssessmentModal({
     setActivitiesOpen(true);
     setRecordDate(record.local_date);
     setActivities(record.activities.length ? record.activities.map(a => ({ ...a })) : [emptyActivity()]);
-    setSummary({ completion_rate: record.completion_rate, activity_level: record.activity_level,
-      overall_mood: record.overall_mood, completion_not_applicable: record.completion_not_applicable ?? false,
-      social_connection: record.social_connection, approach_vs_avoidance: record.approach_vs_avoidance,
+    setSummary({ social_connection: record.social_connection, approach_vs_avoidance: record.approach_vs_avoidance,
       reflection_note: record.reflection_note });
     setError(null);
     setView("record");
@@ -180,8 +163,8 @@ export default function DailyAssessmentModal({
   const missingTimeSlot = filled.some((a) => legacy ? !a.time_slot.trim() : !validTimeRange(a.time_slot));
   const missingRequired = filled.some(a => !a.activity.trim() || a.emotion === null);
   const unconfirmedActivityDate = filled.some(a => a.prefill && a.prefill.date !== recordDate);
-  const missingSummary = !legacy && (summary.activity_level === null || summary.overall_mood === null || (summary.completion_rate === null && !summary.completion_not_applicable));
-  const canSubmit = !missingTimeSlot && !missingRequired && !unconfirmedActivityDate && !missingSummary && !!recordDate && recordDate <= localToday() && !dateLoading && !dateError && !dateConflict;
+  const missingContent = !legacy && filled.length === 0 && !summary.reflection_note?.trim();
+  const canSubmit = !missingTimeSlot && !missingRequired && !unconfirmedActivityDate && !missingContent && !!recordDate && recordDate <= localToday() && !dateLoading && !dateError && !dateConflict;
 
   function addCandidate(candidate: ActivityCandidate) {
     draftTouched.current = true;
@@ -263,7 +246,6 @@ export default function DailyAssessmentModal({
         })),
         summary: {
           ...summary,
-          completion_not_applicable: summary.completion_not_applicable,
           reflection_note: summary.reflection_note?.trim()
             ? summary.reflection_note.trim()
             : null,
@@ -310,7 +292,7 @@ export default function DailyAssessmentModal({
                 id={titleId}
                 className="truncate text-[1.05rem] font-medium tracking-wide text-ink"
               >
-                {view === "history" ? "趋势与历史记录" : view === "saved" ? "记录已保存" : editing ? "修改行为记录" : "每日行为记录"}
+                {view === "history" ? "历史记录" : view === "saved" ? "记录已保存" : editing ? "修改行为记录" : "每日行为记录"}
               </h2>
               <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">
                 {view === "history"
@@ -341,7 +323,6 @@ export default function DailyAssessmentModal({
           {view === "history" ? (
             <AssessmentHistory
               records={history}
-              showTrends
               loading={historyLoading}
               loadingMore={historyLoadingMore}
               error={historyError}
@@ -359,8 +340,8 @@ export default function DailyAssessmentModal({
           ) : (
             <fieldset disabled={busy} className="min-w-0 space-y-5">
             <div className="rounded-2xl border border-accent-edge bg-accent-wash px-4 py-3 text-sm leading-6 text-ink-muted">
-              <p className="font-medium text-ink">先填三项整体评分，活动明细可选</p>
-              <p>保存后可看当天回顾与趋势，之后也能补充或修改。</p>
+              <p className="font-medium text-ink">记下这一天的活动或感受</p>
+              <p>完成程度、身体活动和整体心情请在「每日测量」中填写。保存后可以回看，之后也能补充或修改。</p>
             </div>
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-3">
@@ -379,21 +360,16 @@ export default function DailyAssessmentModal({
               </div>}
             </div>
             <section aria-labelledby={`${titleId}-summary`} className="min-w-0 space-y-3">
-              <div className="flex items-baseline justify-between gap-3"><h3 id={`${titleId}-summary`} className="text-base font-semibold">回看这一天</h3><span className="text-xs text-ink-muted">{legacy ? "旧版总体评分 · 0–10 分" : "3 项评分 · 0–5 分"}</span></div>
+              <div className="flex items-baseline justify-between gap-3"><h3 id={`${titleId}-summary`} className="text-base font-semibold">回看这一天</h3>{legacy && <span className="text-xs text-ink-muted">旧版总体评分 · 0–10 分</span>}</div>
               <div data-daily-summary-panel className="space-y-4 rounded-2xl bg-raised p-4 sm:p-5">
-              {(legacy ? LEGACY_SCALES : SUMMARY_SCALES).map((s) => (
+              {legacy && LEGACY_SCALES.map((s) => (
                 <div key={s.key}>
                   <SegmentedScore
-                    label={s.label} helpKey={s.key} hint={`0 · ${s.low}　—　${legacy ? 10 : 5} · ${s.high}`} value={summary[s.key] ?? null} required={!legacy} maximum={legacy ? 10 : 5}
-                    onChange={v => patchSummary(prev => ({ ...prev, [s.key]: v, ...(s.key === "completion_rate" ? { completion_not_applicable: false } : {}) }))}
+                    label={s.label} helpKey={s.key} hint={`0 · ${s.low}　—　10 · ${s.high}`} value={summary[s.key] ?? null} maximum={10}
+                    onChange={v => patchSummary(prev => ({ ...prev, [s.key]: v }))}
                   />
                 </div>
               ))}
-
-              {editing && !legacy && <label className="flex min-h-11 items-center gap-2 text-sm text-ink-muted">
-                <input type="checkbox" checked={summary.completion_not_applicable} onChange={e => patchSummary(prev => ({ ...prev, completion_not_applicable: e.target.checked, completion_rate: null }))} />
-                这一天没有预定计划／完成程度不适用
-              </label>}
               <label className="block">
                 <span className="mb-2 block text-[0.85rem] text-ink-muted">
                   想再写一点（可留空）
@@ -485,14 +461,14 @@ export default function DailyAssessmentModal({
               className="flex shrink-0 items-center gap-2 rounded-full px-2 py-2 text-[0.8rem] text-ink-faint transition-colors duration-300 hover:bg-accent-wash hover:text-accent-ink disabled:opacity-40 sm:px-3"
             >
               <HistoryMark className="h-4 w-4" />
-              趋势与历史
+              历史记录
             </button>
 
             <div id={`${titleId}-validation`} className="order-first basis-full text-xs leading-relaxed text-ink-muted sm:order-none sm:max-w-[45%] sm:basis-auto">
               {unconfirmedActivityDate ? <button type="button" className="text-left underline underline-offset-2" onClick={() => setActivitiesOpen(true)}>请核对从对话带入的活动日期</button> : missingRequired || missingTimeSlot ? <button type="button" className="text-left underline underline-offset-2" onClick={() => {
                 setActivitiesOpen(true);
                 requestAnimationFrame(() => scrollRef.current?.querySelector('details')?.scrollIntoView({ block: "start", behavior: "smooth" }));
-              }}>请补全已填写活动的时间、内容和心情，或删除该活动</button> : missingSummary ? "请完成这一天的三项总体评分" : filled.length === 0 ? "可仅保存这一天的整体总结" : `已填写 ${filled.length} 项活动`}
+              }}>请补全已填写活动的时间、内容和心情，或删除该活动</button> : missingContent ? "请至少填写一项活动，或写一点这一天的感受" : filled.length === 0 ? "可仅保存这一天的感受" : `已填写 ${filled.length} 项活动`}
             </div>
               <button
                 type="submit"
@@ -530,22 +506,15 @@ export default function DailyAssessmentModal({
 }
 
 function SavedAssessment({ record, onHistory }: { record: AssessmentRecord; onHistory: () => void }) {
-  const maximum = record.scale_version === 2 ? 5 : 10;
   return <section aria-label="本次记录回顾" className="space-y-5">
     <div className="rounded-2xl border border-accent-edge bg-accent-wash p-5">
       <p role="status" className="text-base font-semibold">{record.local_date} 的记录已保存</p>
       <p className="mt-2 text-sm leading-6 text-ink-muted">已保存整天的感受{record.activities.length > 0 ? `和 ${record.activities.length} 项活动` : "，没有填写活动明细"}。如果填错了，可以点下方“修改这份记录”立即更正；以后也可以从每日记录入口回看、补充或修改。</p>
     </div>
-    <div className="grid grid-cols-3 gap-2">
-      {SUMMARY_SCALES.map(s => <div key={s.key} className="rounded-xl bg-raised p-3 text-center">
-        <p className="text-xs leading-5 text-ink-muted">{s.key === "completion_rate" ? "完成程度" : s.key === "activity_level" ? "身体活动" : "整体心情"}</p>
-        <p className="mt-2 text-lg font-semibold tabular-nums">{s.key === "completion_rate" && record.completion_not_applicable ? "不适用" : record[s.key] === null ? "未填写" : <>{record[s.key]}<span className="text-xs font-normal text-ink-muted"> / {maximum}</span></>}</p>
-      </div>)}
-    </div>
     <div className="rounded-2xl border border-line p-5">
       <h3 className="font-semibold">记录之后，可以看到什么？</h3>
-      <p className="mt-2 text-sm leading-7 text-ink-muted">当天的回顾和历史明细会保留下来。积累多次记录后，可以对照心情、身体活动和完成程度的变化；只有一次记录时，会先显示这一次的分数。</p>
-      <button type="button" onClick={onHistory} className="mt-4 min-h-11 rounded-xl border border-accent-edge bg-accent-wash px-4 py-2 text-sm font-medium text-accent-ink">查看我的趋势与历史</button>
+      <p className="mt-2 text-sm leading-7 text-ink-muted">当天的回顾和历史明细会保留下来，之后可以随时回看、补充或修改。</p>
+      <button type="button" onClick={onHistory} className="mt-4 min-h-11 rounded-xl border border-accent-edge bg-accent-wash px-4 py-2 text-sm font-medium text-accent-ink">查看我的历史记录</button>
     </div>
   </section>;
 }

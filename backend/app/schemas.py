@@ -149,20 +149,9 @@ class ActivityLogOut(ActivityLogIn):
 
 
 class DailySummaryIn(BaseModel):
-    """Three explicit 0–5 ratings. No plan is not a zero completion score."""
-
-    completion_rate: Score5 | None = Field(...)
-    completion_not_applicable: bool = False
-    activity_level: Score5
-    overall_mood: Score5
+    """The day's free-text note. Day scores live in 每日测量."""
 
     reflection_note: str | None = Field(default=None, max_length=4000)
-
-    @model_validator(mode="after")
-    def check_completion(self):
-        if (self.completion_rate is None) != self.completion_not_applicable:
-            raise ValueError("请选择计划完成程度，或明确选择今天没有预定计划／不适用")
-        return self
 
 
 class DailyMeasurementAnswers(BaseModel):
@@ -257,20 +246,22 @@ class AssessmentSubmission(BaseModel):
     # IANA name, e.g. "Asia/Shanghai". Unknown values fall back to UTC.
     timezone: str | None = Field(default=None, max_length=64)
 
-    # The daily summary is an independent record. Activity cards are optional,
-    # but every supplied card still has to satisfy ActivityLogIn validation.
+    # A record needs an activity or a note; every supplied card still has to
+    # satisfy ActivityLogIn validation.
     activities: list[ActivityLogIn] = Field(..., max_length=50)
     summary: DailySummaryIn
 
+    @model_validator(mode="after")
+    def check_content(self):
+        if not self.activities and not (self.summary.reflection_note or "").strip():
+            raise ValueError("请至少填写一项活动，或写一点这一天的感受")
+        return self
+
 
 class AssessmentEditSummary(BaseModel):
-    # Legacy daily summaries used 0–10; the route enforces the stored scale.
-    completion_rate: int | None = Field(..., ge=0, le=10)
-    activity_level: int | None = Field(..., ge=0, le=10)
-    overall_mood: int | None = Field(..., ge=0, le=10)
+    # Only legacy (version 1) records still carry these 0–10 scores.
     social_connection: int | None = Field(default=None, ge=0, le=10)
     approach_vs_avoidance: int | None = Field(default=None, ge=0, le=10)
-    completion_not_applicable: bool = False
     reflection_note: str | None = Field(default=None, max_length=4000)
 
 
@@ -312,13 +303,9 @@ class AssessmentOut(BaseModel):
     timezone: str
     status: Literal["completed", "skipped"]
     scale_version: int = 1
-    completion_not_applicable: bool = False
 
-    completion_rate: int | None = None
-    activity_level: int | None = None
     social_connection: int | None = None
     approach_vs_avoidance: int | None = None
-    overall_mood: int | None = None
     reflection_note: str | None = None
 
     activities: list[ActivityLogOut] = Field(default_factory=list)
