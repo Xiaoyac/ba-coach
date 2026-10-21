@@ -13,6 +13,7 @@ export type MessageFeedback = {
 };
 export type AdminMessageFeedback = MessageFeedback & {
   session_id: string; title: string; content: string; model: string | null; request_id: string | null;
+  username: string | null; display_name: string | null; research_id: string | null;
 };
 
 async function read<T>(response: Response): Promise<T> {

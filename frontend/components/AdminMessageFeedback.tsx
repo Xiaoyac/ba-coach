@@ -42,6 +42,9 @@ export default function AdminMessageFeedback() {
       {items.map(item => <article key={item.message_id} className="py-4 first:pt-0">
         <div className="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
           <span className="flex items-center gap-1.5 text-accent-ink"><ThumbMark down={item.rating === "down"} />{item.rating === "up" ? "有帮助" : "需要改进"}</span>
+          <span className="font-medium text-ink">{item.username
+            ? <>{item.display_name ?? item.username}{item.research_id && ` · ${item.research_id}`} · 登录账号 {item.username}</>
+            : "未关联账号"}</span>
           <span>回复 #{item.message_id} · {item.title}</span>
           <time className="ml-auto">{new Date(item.updated_at).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })} · 北京时间</time>
         </div>

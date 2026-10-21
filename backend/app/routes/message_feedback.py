@@ -9,7 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..identity import CallerIdentity, require_admin, require_caller
-from ..models import Conversation, ConversationMessage, MessageFeedback, _utcnow
+from ..models import (
+    Conversation, ConversationMessage, MessageFeedback, ResearchParticipant, UserAccount, _utcnow,
+)
+from ..models_business import UserProfile
 
 router = APIRouter(tags=["message-feedback"])
 Reason = Literal["off_topic", "repetitive", "incomplete", "incorrect", "uncomfortable", "other"]
@@ -91,9 +94,16 @@ async def list_admin_feedback(
     limit: int = Query(default=30, ge=1, le=100),
     _caller: CallerIdentity = Depends(require_admin), db: AsyncSession = Depends(get_db),
 ):
-    statement = select(MessageFeedback, ConversationMessage, Conversation).join(
+    # The rating is always the conversation owner's; name them for the reviewer.
+    statement = select(
+        MessageFeedback, ConversationMessage, Conversation,
+        UserAccount.username, UserProfile.nickname, ResearchParticipant.research_id,
+    ).join(
         ConversationMessage, ConversationMessage.id == MessageFeedback.message_id,
-    ).join(Conversation, Conversation.id == ConversationMessage.conversation_id)
+    ).join(Conversation, Conversation.id == ConversationMessage.conversation_id) \
+        .outerjoin(UserAccount, UserAccount.profile_uuid == Conversation.subject_id) \
+        .outerjoin(UserProfile, UserProfile.uuid == UserAccount.profile_uuid) \
+        .outerjoin(ResearchParticipant, ResearchParticipant.account_id == UserAccount.id)
     if rating:
         statement = statement.where(MessageFeedback.rating == rating)
     if before:
@@ -105,5 +115,6 @@ async def list_admin_feedback(
         session_id=conversation.session_id, title=conversation.title,
         content=message.content, model=message.model_name,
         request_id=message.provider_request_id,
-    ) for feedback, message, conversation in rows[:limit]],
+        username=username, display_name=nickname, research_id=research_id,
+    ) for feedback, message, conversation, username, nickname, research_id in rows[:limit]],
         "next_cursor": rows[limit - 1][0].message_id if len(rows) > limit else None}
