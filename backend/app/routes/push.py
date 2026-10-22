@@ -10,7 +10,7 @@ from ..identity import require_caller, CallerIdentity
 from ..config import get_settings
 from ..push_schema import devices, deliveries, checks
 from ..pa_push_checks import public_check, schedule_check, record_receipt
-from ..pa_push import available, validate_subscription, candidates, active_devices, preference_block
+from ..pa_push import KINDS, available, validate_subscription, candidates, active_devices, preference_block, window
 from ..pa_schedule import BUFFER, utc
 from ..v2_repository import now
 
@@ -57,8 +57,9 @@ async def status(caller: CallerIdentity = Depends(require_caller), db=Depends(ge
         'buffer_minutes': int(BUFFER.total_seconds() // 60),
         'preference_blocked': await preference_block(db, caller.subject_id),
         'devices': [{'id': d['id'], 'this_session': d['session_id'] == caller.session.id} for d in rows],
-        'upcoming': [{'goal_id': c['goal_id'], 'start_at': c['start_at'].isoformat(), 'due_at': c['due_at'].isoformat()}
-            for c in upcoming if c['due_at'] > utc(current)][:20]}
+        'upcoming': sorted(({'goal_id': c['goal_id'], 'kind': kind, 'start_at': c['start_at'].isoformat(),
+            'due_at': window(c, kind)[0].isoformat()} for c in upcoming for kind in KINDS
+            if window(c, kind)[0] > utc(current) and (kind == 'after' or c['confirmed_at'] <= window(c, kind)[0])), key=lambda item: item['due_at'])[:20]}
 
 
 @router.post('/subscriptions', status_code=201)

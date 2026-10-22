@@ -34,8 +34,9 @@ self.addEventListener('push', event => {
     if(isCheck) {
       try {hadOpenWindow=(await self.clients.matchAll({type:'window',includeUncontrolled:true})).length>0;} catch {}
     }
-    await self.registration.showNotification(isCheck?'BA Coach · 通知接收测试':'BA Coach · 活动后提醒', {
-      body:isCheck?'这是一条接收测试通知。你可以点击它，返回查看测试结果。':'如果方便，回来聊聊今天的活动吧。做了、没做或有变化，都可以。',
+    const isBefore=data.kind==='before';
+    await self.registration.showNotification(isCheck?'BA Coach · 通知接收测试':isBefore?'BA Coach · 活动前提醒':'BA Coach · 活动后提醒', {
+      body:isCheck?'这是一条接收测试通知。你可以点击它，返回查看测试结果。':isBefore?'计划的活动大约半小时后开始。准备好了就去做；想调整，也可以回来聊聊。':'如果方便，回来聊聊今天的活动吧。做了、没做或有变化，都可以。',
       icon:'/manifest-icon/192', tag:String(data.tag).slice(0,64), renotify:false,
       data:{is_check:isCheck, subscription_id:consent.id},
     });

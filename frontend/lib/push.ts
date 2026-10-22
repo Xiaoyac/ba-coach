@@ -2,7 +2,7 @@ import { API_BASE } from '@/lib/api';
 import { apiHeaders, checkAuthentication } from '@/lib/http';
 const BINDING_KEY = 'bacoach-push-device';
 export type PushStatus = {available:boolean; public_key?:string; preference_blocked?:boolean; devices:{id:string;this_session:boolean}[];
-  upcoming:{goal_id:string;start_at:string;due_at:string}[]};
+  upcoming:{goal_id:string;kind:'before'|'after';start_at:string;due_at:string}[]};
 
 async function request(path:string, method='GET', body?:unknown) {
   const response = await fetch(`${API_BASE}/api/push/${path}`, {method, headers:apiHeaders({json:body!==undefined}),

@@ -371,7 +371,7 @@ export default function Chat({
                     登录账号：{accountUsername}
                   </p>
                 </div>
-                {onOpenPushSettings && <button type="button" role="menuitem" onClick={()=>{setAccountMenuOpen(false);onOpenPushSettings();}} className="flex min-h-11 w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-ink-muted hover:bg-raised hover:text-ink"><NotebookMark className="h-3.5 w-3.5" />活动后提醒</button>}
+                {onOpenPushSettings && <button type="button" role="menuitem" onClick={()=>{setAccountMenuOpen(false);onOpenPushSettings();}} className="flex min-h-11 w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-ink-muted hover:bg-raised hover:text-ink"><NotebookMark className="h-3.5 w-3.5" />活动前后提醒</button>}
                 {accountRole !== "admin" && onReportIssue && (
                   <button type="button" role="menuitem" disabled={reportPreparing} onClick={() => { setAccountMenuOpen(false); onReportIssue(); }} data-screenshot-exclude="true" className="flex min-h-11 w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-ink-muted hover:bg-raised hover:text-ink disabled:opacity-50">
                     <ReportMark className="h-3.5 w-3.5" />{reportPreparing ? "正在准备截图…" : "帮助与反馈"}

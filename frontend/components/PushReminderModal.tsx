@@ -42,14 +42,14 @@ export default function PushReminderModal({onClose}:{onClose:()=>void}) {
     setBusy(true);setError('');setNotice('');
     try {
       if(action==='enable') await enablePush(status!.public_key!);else await disablePush(action==='all');
-      await load();setNotice(action==='enable'?'已开启。仅对时间明确、尚未反馈的活动发送一次提醒。':'已关闭提醒。不会影响目标或历史记录。');
+      await load();setNotice(action==='enable'?'已开启。时间明确的活动会在开始前和结束后各提醒一次，已反馈的不再提醒。':'已关闭提醒。不会影响目标或历史记录。');
     } catch(e) {setError(e instanceof Error?e.message:'操作失败，请重试。');setSupport(pushSupport());}
     finally {setBusy(false);}
   }
   return <dialog ref={dialog} onClose={onClose} aria-labelledby="pa-push-title" className="default-style:m-auto default-style:w-[min(520px,calc(100vw-24px))] default-style:max-h-[calc(100dvh-32px)] default-style:overflow-y-auto default-style:rounded-3xl default-style:border-0 default-style:bg-sheet default-style:p-6 default-style:text-ink default-style:shadow-2xl default-style:backdrop:bg-black/40 default-style:sm:p-8 simple:m-auto simple:w-[min(520px,calc(100vw-24px))] simple:max-h-[calc(100dvh-32px)] simple:overflow-y-auto simple:rounded-2xl simple:border-0 simple:bg-sheet simple:p-6 simple:text-ink simple:depth-panel simple:backdrop:bg-black/40 simple:sm:p-8">
-    <header className="flex items-start justify-between gap-4"><div><p className="text-xs text-accent-ink">PA · 轻一点的提醒</p><h2 id="pa-push-title" className="mt-2 text-2xl font-semibold">活动后提醒</h2></div><button onClick={onClose} aria-label="关闭提醒设置" className="surface-button min-h-11 min-w-11 rounded-full text-xl">×</button></header>
-    <p className="mt-5 text-sm leading-7 text-ink-muted">预计活动结束 <strong className="font-medium text-ink">约 1 小时后</strong>，如果还没有收到反馈，轻轻提醒一次。做了、没做或有变化，都可以回来聊聊。</p>
-    <div className="mt-5 rounded-2xl bg-raised/70 p-4 text-sm leading-6"><p className="font-medium">只有时间明确，才会安排</p><p className="mt-1 text-ink-muted">没有明确日期、开始时间或时长的计划不会提醒。已反馈、取消、暂停或改期后，会重新检查，不连续催促。</p></div>
+    <header className="flex items-start justify-between gap-4"><div><p className="text-xs text-accent-ink">PA · 轻一点的提醒</p><h2 id="pa-push-title" className="mt-2 text-2xl font-semibold">活动前后提醒</h2></div><button onClick={onClose} aria-label="关闭提醒设置" className="surface-button min-h-11 min-w-11 rounded-full text-xl">×</button></header>
+    <p className="mt-5 text-sm leading-7 text-ink-muted">活动开始前 <strong className="font-medium text-ink">约半小时</strong> 提醒一次；预计活动结束 <strong className="font-medium text-ink">约 1 小时后</strong>，如果还没有收到反馈，再轻轻提醒一次。做了、没做或有变化，都可以回来聊聊。聊天里也会在同样的时间留言提醒。</p>
+    <div className="mt-5 rounded-2xl bg-raised/70 p-4 text-sm leading-6"><p className="font-medium">只有时间明确，才会安排</p><p className="mt-1 text-ink-muted">没有明确日期、开始时间或时长的计划不会提醒；开始前不到半小时才确认的计划，不再发活动前提醒。已反馈、取消、暂停或改期后，会重新检查，不连续催促。</p></div>
     {loading?<p role="status" className="mt-5 text-sm">正在读取设置…</p>:<>
       {!status?.available&&<p className="mt-5 text-sm text-ink-muted">推送服务尚未启用，当前不会发送通知。</p>}
       {support&&<p className="mt-5 text-sm leading-6 text-ink-muted">{support}</p>}
@@ -75,7 +75,7 @@ export default function PushReminderModal({onClose}:{onClose:()=>void}) {
         {latestCheck&&<p role="status" className="mt-3 text-ink-muted">{pushCheckMessage(latestCheck)}</p>}
         <p className="mt-2 text-xs text-ink-muted">显示确认不代表你已经看到通知。关闭网页不等于强制结束浏览器；电脑可能需允许浏览器后台运行，手机需允许通知并避免强行停止应用。</p>
       </section>}
-      {enabled&&<div className="mt-5 text-sm"><p className="font-medium">已识别的近期提醒时间</p>{status?.upcoming?.length?<ul className="mt-2 space-y-2 text-ink-muted">{status.upcoming.slice(0,5).map((item,i)=><li key={`${item.goal_id}-${i}`}>{new Date(item.due_at).toLocaleString('zh-CN')} · 发送前仍会检查反馈</li>)}</ul>:<p className="mt-2 text-ink-muted">暂时没有可确定时间的安排。可在目标对话中明确日期、开始时间和时长，无需另外填表。</p>}</div>}
+      {enabled&&<div className="mt-5 text-sm"><p className="font-medium">已识别的近期提醒时间</p>{status?.upcoming?.length?<ul className="mt-2 space-y-2 text-ink-muted">{status.upcoming.slice(0,5).map((item,i)=><li key={`${item.goal_id}-${i}`}>{new Date(item.due_at).toLocaleString('zh-CN')} · {item.kind==='before'?'活动前提醒':'活动后提醒，发送前仍会检查反馈'}</li>)}</ul>:<p className="mt-2 text-ink-muted">暂时没有可确定时间的安排。可在目标对话中明确日期、开始时间和时长，无需另外填表。</p>}</div>}
     </>}
     {error&&<div role="alert" className="mt-4 text-sm text-alert-ink"><p>{error}</p><button disabled={busy} onClick={()=>void load()} className="mt-2 min-h-11 underline">重新读取设置</button></div>}
     {notice&&<p role="status" className="mt-4 text-sm text-accent-ink">{notice}</p>}

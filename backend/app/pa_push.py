@@ -17,12 +17,31 @@ from sqlalchemy.exc import IntegrityError
 from .config import get_settings
 from .database_v2_schema import metadata as schema
 from .models import AuthSession, UserAccount, Conversation, ConversationMessage, AssessmentEntry, ActivityLog
-from .pa_schedule import starts, explicit_day, clock, utc, naive_utc, BUFFER, MAX_LATENESS
+from .pa_schedule import starts, explicit_day, clock, utc, naive_utc, BUFFER, LEAD, MAX_LATENESS
 from .push_schema import devices, deliveries
 from .schedule_dates import date_relative_days, local_day
 from .v2_repository import now
 
 log = logging.getLogger(__name__)
+
+# Each planned occurrence gets a nudge LEAD before the start and a feedback
+# reminder BUFFER after the end, by push and in chat alike.
+KINDS = ('before', 'after')
+# Fixed lock-screen text; never activity names or chat content.
+PAYLOADS = {
+    'before': {'title': 'BA Coach · 活动前提醒',
+        'body': '计划的活动大约半小时后开始。准备好了就去做；想调整，也可以回来聊聊。'},
+    'after': {'title': 'BA Coach · 活动后提醒',
+        'body': '如果方便，回来聊聊今天的活动吧。做了、没做或有变化，都可以。'},
+}
+
+
+def window(item, kind):
+    """[due, until) for one reminder of a candidate occurrence."""
+    if kind == 'before':
+        # Never nudge once the activity should already have started.
+        return item['start_at'] - LEAD, item['start_at']
+    return item['due_at'], item['due_at'] + MAX_LATENESS
 
 
 def available():
@@ -136,7 +155,7 @@ async def candidates(db, user_id, at):
             result.append({'goal_id': plan['goal_id'], 'plan_id': plan['id'], 'cycle_id': cycle['id'],
                 'user_id': user_id, 'start_at': start, 'due_at': due, 'timezone': plan['timezone'],
                 'activity': plan['activity_content'], 'conversation_id': confirmation.conversation_id,
-                'confirmation_position': confirmation.position})
+                'confirmation_position': confirmation.position, 'confirmed_at': utc(confirmation.created_at)})
     return result
 
 
@@ -225,6 +244,73 @@ def send_push(device, payload, ttl):
             return exc.response.status_code if exc.response is not None else None
 
 
+async def send_one(sessionmaker, uid, item, kind, user_devices, at, fixed_time, sender, counts):
+    due, until = window(item, kind)
+    if due > at: return
+    # A plan confirmed inside the lead time is nudged by the chat itself.
+    if kind == 'before' and item['confirmed_at'] > due: return
+    for device in user_devices:
+        send_at = at if fixed_time else utc(now())
+        if send_at >= until: continue
+        # Enabling notifications late doesn't replay a past activity.
+        if utc(device['enabled_at']) > item['start_at']: continue
+        # The after-reminder keeps its original key, so deliveries written
+        # before pre-reminders existed still deduplicate.
+        key = hashlib.sha256((f"{item['goal_id']}|{item['start_at'].isoformat()}|{device['id']}"
+            + ('|before' if kind == 'before' else '')).encode()).hexdigest()
+        async with sessionmaker() as db:
+            # Serialize opt-in frequency checks per account on MySQL.
+            # Lock before the first consistent read in this transaction.
+            owner = await db.scalar(select(UserAccount.id).where(UserAccount.profile_uuid == uid).with_for_update())
+            if owner is None: continue
+            if await db.scalar(select(deliveries.c.id).where(deliveries.c.id == key)):
+                counts['duplicate'] += 1; continue
+            # Fresh state immediately before contact: edits/deletion/logout
+            # between enumeration and send cannot revive a stale snapshot.
+            fresh_devices = await active_devices(db, send_at, uid)
+            fresh = next((c for c in await candidates(db, uid, send_at)
+                if c['goal_id'] == item['goal_id'] and c['plan_id'] == item['plan_id']
+                and c['start_at'] == item['start_at'] and c['due_at'] == item['due_at']), None)
+            if not fresh or not any(d['id'] == device['id'] for d in fresh_devices): continue
+            if not await preference_allows(db, item, send_at): continue
+            # Feedback only answers the after-reminder; nothing precedes a start.
+            suppressed = kind == 'after' and await feedback_received(db, item)
+            if not suppressed:
+                # Let the existing background extractor finish a new
+                # user turn; don't race its feedback/plan update.
+                pending = await db.scalar(select(ConversationMessage.id).where(
+                    ConversationMessage.conversation_id == item['conversation_id'],
+                    ConversationMessage.role == 'user',
+                    ConversationMessage.position > item['confirmation_position'],
+                    ConversationMessage.created_at > send_at - timedelta(minutes=2)).limit(1))
+                if pending: continue
+            try:
+                await db.execute(insert(deliveries), {'id': key, 'user_id': uid, 'device_id': device['id'],
+                    'goal_id': item['goal_id'], 'plan_id': item['plan_id'],
+                    'start_at': naive_utc(item['start_at']), 'due_at': naive_utc(due),
+                    'state': 'feedback' if suppressed else 'attempting', 'created_at': naive_utc(send_at), 'updated_at': naive_utc(send_at)})
+                await db.commit()
+            except IntegrityError:
+                await db.rollback(); counts['duplicate'] += 1; continue
+        if suppressed: counts['suppressed'] += 1; continue
+        payload = {**PAYLOADS[kind], 'kind': kind,
+            'subscription_id': device['id'], 'tag': key, 'url': '/?pa_reminder=1',
+            'expires_at': int(until.timestamp() * 1000)}
+        try:
+            code = await asyncio.to_thread(sender, device, payload,
+                max(1, int((until - send_at).total_seconds())))
+        except Exception:
+            code = None  # Never log endpoint tokens, keys, payloads or transport exception text.
+        state = 'accepted' if code is not None and 200 <= code < 300 else 'unknown' if code is None else 'failed'
+        async with sessionmaker() as db:
+            await db.execute(update(deliveries).where(deliveries.c.id == key).values(
+                state=state, http_status=code, updated_at=now()))
+            if code in {404, 410}:
+                await db.execute(delete(devices).where(devices.c.id == device['id']))
+            await db.commit()
+        counts['accepted' if state == 'accepted' else 'failed'] += 1
+
+
 async def tick(sessionmaker, *, at=None, sender=send_push):
     """One worker iteration; DB unique claim also protects overlapping workers."""
     fixed_time = at is not None  # Deterministic test clock; real sends recheck wall time.
@@ -237,64 +323,8 @@ async def tick(sessionmaker, *, at=None, sender=send_push):
         async with sessionmaker() as db:
             items = await candidates(db, uid, at)
         for item in items:
-            if item['due_at'] > at: continue
-            for device in user_devices:
-                send_at = at if fixed_time else utc(now())
-                if send_at >= item['due_at'] + MAX_LATENESS: continue
-                # Enabling notifications late doesn't replay a past activity.
-                if utc(device['enabled_at']) > item['start_at']: continue
-                key = hashlib.sha256(f"{item['goal_id']}|{item['start_at'].isoformat()}|{device['id']}".encode()).hexdigest()
-                async with sessionmaker() as db:
-                    # Serialize opt-in frequency checks per account on MySQL.
-                    # Lock before the first consistent read in this transaction.
-                    owner = await db.scalar(select(UserAccount.id).where(UserAccount.profile_uuid == uid).with_for_update())
-                    if owner is None: continue
-                    if await db.scalar(select(deliveries.c.id).where(deliveries.c.id == key)):
-                        counts['duplicate'] += 1; continue
-                    # Fresh state immediately before contact: edits/deletion/logout
-                    # between enumeration and send cannot revive a stale snapshot.
-                    fresh_devices = await active_devices(db, send_at, uid)
-                    fresh = next((c for c in await candidates(db, uid, send_at)
-                        if c['goal_id'] == item['goal_id'] and c['plan_id'] == item['plan_id']
-                        and c['start_at'] == item['start_at'] and c['due_at'] == item['due_at']), None)
-                    if not fresh or not any(d['id'] == device['id'] for d in fresh_devices): continue
-                    if not await preference_allows(db, item, send_at): continue
-                    suppressed = await feedback_received(db, item)
-                    if not suppressed:
-                        # Let the existing background extractor finish a new
-                        # user turn; don't race its feedback/plan update.
-                        pending = await db.scalar(select(ConversationMessage.id).where(
-                            ConversationMessage.conversation_id == item['conversation_id'],
-                            ConversationMessage.role == 'user',
-                            ConversationMessage.position > item['confirmation_position'],
-                            ConversationMessage.created_at > send_at - timedelta(minutes=2)).limit(1))
-                        if pending: continue
-                    try:
-                        await db.execute(insert(deliveries), {'id': key, 'user_id': uid, 'device_id': device['id'],
-                            'goal_id': item['goal_id'], 'plan_id': item['plan_id'],
-                            'start_at': naive_utc(item['start_at']), 'due_at': naive_utc(item['due_at']),
-                            'state': 'feedback' if suppressed else 'attempting', 'created_at': naive_utc(send_at), 'updated_at': naive_utc(send_at)})
-                        await db.commit()
-                    except IntegrityError:
-                        await db.rollback(); counts['duplicate'] += 1; continue
-                if suppressed: counts['suppressed'] += 1; continue
-                payload = {'title': 'BA Coach · 活动后提醒',
-                    'body': '如果方便，回来聊聊今天的活动吧。做了、没做或有变化，都可以。',
-                    'subscription_id': device['id'], 'tag': key, 'url': '/?pa_reminder=1',
-                    'expires_at': int((item['due_at'] + MAX_LATENESS).timestamp() * 1000)}
-                try:
-                    code = await asyncio.to_thread(sender, device, payload,
-                        max(1, int((item['due_at'] + MAX_LATENESS - send_at).total_seconds())))
-                except Exception:
-                    code = None  # Never log endpoint tokens, keys, payloads or transport exception text.
-                state = 'accepted' if code is not None and 200 <= code < 300 else 'unknown' if code is None else 'failed'
-                async with sessionmaker() as db:
-                    await db.execute(update(deliveries).where(deliveries.c.id == key).values(
-                        state=state, http_status=code, updated_at=now()))
-                    if code in {404, 410}:
-                        await db.execute(delete(devices).where(devices.c.id == device['id']))
-                    await db.commit()
-                counts['accepted' if state == 'accepted' else 'failed'] += 1
+            for kind in KINDS:
+                await send_one(sessionmaker, uid, item, kind, user_devices, at, fixed_time, sender, counts)
     # Tokens have no reason to survive logout/expiry; delivery metadata has a
     # 30-day retention and contains no activity/chat/endpoint content.
     async with sessionmaker() as db:

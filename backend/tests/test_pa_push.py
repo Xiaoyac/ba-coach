@@ -308,3 +308,67 @@ async def test_profile_frequency_cross_day_limit(setup):
     calls=[]
     for days in (0,1,2):await tick(setup,at=AT+timedelta(days=days),sender=lambda *a:calls.append(a) or 201)
     assert len(calls)==2
+
+
+@pytest.mark.asyncio
+async def test_before_and_after_push_at_the_same_times_as_chat(setup):
+    from app.pa_push import window
+    from app.pa_chat_reminders import window as chat_window
+    start = AT.replace(hour=8, minute=0)
+    calls = []
+    sender = lambda *args: calls.append(args) or 201
+    async with setup() as db:
+        item, = await candidates(db, 'u', start - timedelta(hours=1))
+    for kind in ('before', 'after'):
+        assert window(item, kind) == chat_window(item, kind)
+    assert window(item, 'before') == (start - timedelta(minutes=30), start)
+    assert (await tick(setup, at=start - timedelta(minutes=31), sender=sender))['accepted'] == 0
+    assert (await tick(setup, at=start - timedelta(minutes=30), sender=sender))['accepted'] == 1
+    assert (await tick(setup, at=start - timedelta(minutes=10), sender=sender))['duplicate'] == 1
+    assert (await tick(setup, at=start, sender=sender))['accepted'] == 0
+    assert (await tick(setup, at=AT, sender=sender))['accepted'] == 1
+    before, after = calls
+    assert before[1]['kind'] == 'before' and before[1]['title'] == 'BA Coach · 活动前提醒'
+    assert before[2] == 1800 and before[1]['expires_at'] == int(start.timestamp() * 1000)
+    assert after[1]['kind'] == 'after' and after[1]['title'] == 'BA Coach · 活动后提醒'
+    assert before[1]['tag'] != after[1]['tag']
+    assert not any('散步' in str(call[1]) for call in calls)
+    async with setup() as db:
+        rows = (await db.execute(select(deliveries.c.state, deliveries.c.due_at))).all()
+    assert sorted(rows, key=lambda row: row[1]) == [('accepted', (start - timedelta(minutes=30)).replace(tzinfo=None)),
+        ('accepted', AT.replace(tzinfo=None))]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('case', ['feedback', 'confirmed_late', 'missed_window'])
+async def test_before_push_rules(setup, case):
+    start = AT.replace(hour=8, minute=0)
+    async with setup() as db:
+        if case == 'feedback':
+            # Feedback only answers the after-reminder.
+            await db.execute(insert(ConversationMessage), {'id': 3, 'conversation_id': 1, 'position': 2,
+                'role': 'user', 'content': '今天不去了', 'created_at': start - timedelta(hours=2)})
+        if case == 'confirmed_late':
+            await db.execute(update(ConversationMessage).where(ConversationMessage.id == 2)
+                .values(created_at=start - timedelta(minutes=20)))
+            await db.execute(update(devices).values(enabled_at=(start - timedelta(hours=1)).replace(tzinfo=None)))
+        await db.commit()
+    calls = []
+    at = start + timedelta(seconds=1) if case == 'missed_window' else start - timedelta(minutes=15)
+    await tick(setup, at=at, sender=lambda *a: calls.append(a) or 201)
+    assert [call[1]['kind'] for call in calls] == (['before'] if case == 'feedback' else [])
+
+
+@pytest.mark.asyncio
+async def test_status_lists_before_and_after_reminders(setup, monkeypatch):
+    app = FastAPI(); app.include_router(route.router, prefix='/api')
+    async def db_dependency():
+        async with setup() as db: yield db
+    app.dependency_overrides[get_db] = db_dependency
+    app.dependency_overrides[require_caller] = lambda: SimpleNamespace(subject_id='u', session=SimpleNamespace(id=1))
+    monkeypatch.setattr(route, 'available', lambda: True)
+    monkeypatch.setattr(route, 'now', lambda: AT.replace(hour=7, minute=0, tzinfo=None))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+        upcoming = (await client.get('/api/push/status')).json()['upcoming']
+    assert [(item['kind'], item['due_at']) for item in upcoming] == [
+        ('before', '2026-09-18T07:30:00+00:00'), ('after', '2026-09-18T09:15:00+00:00')]

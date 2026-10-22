@@ -133,7 +133,7 @@ export default function GoalOverview({embedded = false,open,initialKind = "all",
           </details>
         </div>
         <div ref={archiveScroll} className="zen-scroll min-h-0 flex-1 overflow-y-auto bg-raised/25 px-6 py-5 sm:px-9">
-          {onOpenReminders&&<div className="mb-4 flex items-center justify-between gap-3 text-xs text-ink-muted"><span>给每次尝试留一点回顾的空间</span><button onClick={onOpenReminders} className="surface-button min-h-11 shrink-0 rounded-xl px-3 text-accent-ink">活动后提醒</button></div>}
+          {onOpenReminders&&<div className="mb-4 flex items-center justify-between gap-3 text-xs text-ink-muted"><span>给每次尝试留一点回顾的空间</span><button onClick={onOpenReminders} className="surface-button min-h-11 shrink-0 rounded-xl px-3 text-accent-ink">活动前后提醒</button></div>}
           {loading?<Empty title="正在整理目标档案…"/>:error?<Empty title="加载未完成" detail={error}><button className="archive-action" onClick={()=>setRetry(n=>n+1)}>重新加载</button></Empty>:!overview?.enabled?<Empty title="目标档案尚未启用" detail="当前环境暂不支持目标历史。"/>:!visible.length&&!visibleSecondary.length?<Empty title={goals.length||secondaryCards.length?"没有找到匹配的目标":"还没有目标，先从聊聊开始"} detail={goals.length||secondaryCards.length?"试试其他关键词，或查看全部状态。":"在聊天中与教练讨论，也可以通过目标卡整理想法。确认后的安排会保存在这里。"}>{(goals.length>0||secondaryCards.length>0)&&<button className="archive-action" onClick={reset}>清除筛选</button>}</Empty>:viewMode==="timeline"?<>
             {visible.length>0&&<p className="mb-5 text-xs leading-5 text-ink-muted">按设定顺序串起每个目标。点开卡片，回顾计划与每轮执行。</p>}
             <ol aria-label="目标设定时间线" className="goal-timeline mx-auto max-w-4xl">

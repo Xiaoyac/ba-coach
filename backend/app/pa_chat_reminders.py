@@ -1,7 +1,8 @@
 """Scheduled chat messages, independent of browser permissions and LLM calls.
 
-Each planned occurrence gets up to two: a nudge LEAD before the start and a
-feedback/record reminder BUFFER after the end.
+Each planned occurrence gets up to two, at the same times as push (see
+``pa_push.window``): a nudge LEAD before the start and a feedback/record
+reminder BUFFER after the end.
 
 The receipt, message and transcript revision commit together. The normal chat
 SSE/revision API delivers them to open clients; offline clients read them later.
@@ -18,15 +19,11 @@ from .chat_reminder_schema import reminders
 from .config import get_settings
 from .database_v2_schema import metadata as schema
 from .models import Conversation, ConversationMessage, UserAccount
-from .pa_push import candidates, feedback_received, preference_allows
-from .pa_schedule import BUFFER, MAX_LATENESS, naive_utc, utc
+from .pa_push import KINDS, candidates, feedback_received, preference_allows, window
+from .pa_schedule import BUFFER, naive_utc, utc
 from .v2_repository import now
 
 log = logging.getLogger(__name__)
-
-LEAD = timedelta(minutes=30)
-KINDS = ('before', 'after')
-
 
 def available():
     settings = get_settings()
@@ -44,14 +41,6 @@ def before_text(item):
     start = item['start_at'].astimezone(ZoneInfo(item['timezone']))
     return (f'活动前提醒：按原计划，「{item["activity"]}」将在{start:%m月%d日 %H:%M}开始，'
             '大约还有半小时。准备好了就可以去做；如果今天不方便或想调整，也可以告诉我。')
-
-
-def window(item, kind):
-    """[due, until) for one reminder of a candidate occurrence."""
-    if kind == 'before':
-        # Never nudge once the activity should already have started.
-        return item['start_at'] - LEAD, item['start_at']
-    return item['due_at'], item['due_at'] + MAX_LATENESS
 
 
 def receipt_id(item, kind):

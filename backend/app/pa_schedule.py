@@ -8,6 +8,7 @@ from datetime import datetime, date, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 BUFFER = timedelta(hours=1)
+LEAD = timedelta(minutes=30)
 MAX_LATENESS = timedelta(minutes=30)
 
 

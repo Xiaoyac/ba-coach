@@ -20,8 +20,13 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('nod
   await event('push',{data:{json:()=>({...payload,expires_at:0})}});assert.equal(notifications.length,0);
   await event('push',{data:{json:()=>payload}});assert.equal(notifications.length,1);
   assert.ok(!JSON.stringify(notifications).includes('secret'));
+  assert.equal(notifications[0].title,'BA Coach · 活动后提醒');
   await event('notificationclick',{notification:{close:()=>{},data:notifications[0].data}});
   assert.equal(opened[0],'https://test.example/?pa_reminder=1');
+  await event('push',{data:{json:()=>({...payload,kind:'before',tag:'before'})}});
+  assert.equal(notifications.at(-1).title,'BA Coach · 活动前提醒');
+  assert.ok(notifications.at(-1).body.includes('半小时后开始')&&!notifications.at(-1).body.includes('secret'));
+  notifications.pop();
   const diagnostic={...payload,kind:'delivery_check',check_id:'a'.repeat(64),receipt_token:'A'.repeat(43)};
   await event('push',{data:{json:()=>diagnostic}});
   assert.equal(receipts.length,1);assert.equal(JSON.parse(receipts[0].body).had_open_window,false);
