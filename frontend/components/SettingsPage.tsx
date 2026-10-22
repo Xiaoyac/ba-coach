@@ -8,7 +8,6 @@ import { CloseMark, SunMark, IdCardMark, KeyMark, SignOutMark } from "@/componen
 import ProfileModal from "@/components/ProfileModal";
 import ChangePasswordModal from "@/components/ChangePasswordModal";
 import OverallStyleSelector from "@/components/OverallStyleSelector";
-import LeadSpeedSetting from "@/components/LeadSpeedSetting";
 import ThemeToggle from "@/components/ThemeToggle";
 
 const sections = [
@@ -72,7 +71,6 @@ export default function SettingsPage({ account, onAccountRefresh, onLogout, acti
               <h2 className="flex items-center gap-2 text-2xl font-semibold"><SunMark className="h-5 w-5" />外观</h2>
               <p className="mb-8 mt-2 text-sm leading-6 text-ink-muted">选择你习惯的界面风格与配色。</p>
               {account.role === "admin" && <OverallStyleSelector />}
-              {account.role === "admin" && <LeadSpeedSetting />}
               <h3 className="mb-3 text-sm font-medium">界面配色</h3>
               <ThemeToggle embedded />
               <p className="mt-5 text-xs leading-6 text-ink-faint">选择会自动保存在当前浏览器。</p>

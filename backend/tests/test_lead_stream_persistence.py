@@ -11,6 +11,7 @@ BODY='当时是什么让你没能出门？'
 def test_member_sse_handoff_and_durable_history(client, auth_headers, provider, monkeypatch, repeated, caplog):
     from app.config import get_settings
     monkeypatch.setattr(get_settings(),'reply_lead_character_seconds',.01)
+    monkeypatch.setattr(get_settings(),'reply_lead_enabled',True)
     async def fast(**kwargs):
         return Completion(text=LEAD,model='stub',finish_reason='stop')
     async def main(*,system,messages):

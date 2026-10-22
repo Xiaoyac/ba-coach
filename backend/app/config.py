@@ -132,6 +132,9 @@ class Settings(BaseSettings):
     chat_fast_ack_enabled: bool = True
     # Separate short opening from the main reply's reasoning budget/channel.
     # DeepSeek Flash explicitly disables thinking; never inherit the main effort.
+    # Off since 2026-10-22: replies are the main reply only. ack_deep keeps its
+    # main-reply policy; turning this back on restores the 承接 opening.
+    reply_lead_enabled: bool = False
     reply_lead_provider: Provider | None = None
     reply_lead_base_url: str | None = None
     reply_lead_api_key: str | None = Field(default=None, repr=False)

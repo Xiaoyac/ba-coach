@@ -698,7 +698,7 @@ async def _prepare_chat_stream(
                 graph_events = control.iterate(get_graph().astream(
                     state, context=context, stream_mode=["custom", "values"]
                 ))
-                if reply_mode == "ack_deep":
+                if reply_mode == "ack_deep" and context.settings.reply_lead_enabled:
                     from ..provisional_reply import with_natural_lead
                     graph_events = with_natural_lead(graph_events, provider=provider,
                         user_input=request.message, generation_id=str(request.generation_id or ""),

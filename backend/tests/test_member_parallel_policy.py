@@ -56,7 +56,25 @@ def test_ownership_and_admin_choices_are_preserved(client, auth_headers, admin_h
     client.portal.call(check)
 
 
+def test_member_stream_has_no_lead_by_default(client, auth_headers, monkeypatch):
+    from app import provisional_reply as chat
+    calls = []
+    async def wrapped(events, **kwargs):
+        calls.append(kwargs['session_id'])
+        async for event in events:
+            yield event
+    monkeypatch.setattr(chat, 'with_natural_lead', wrapped)
+    c = client.post('/api/conversations/current', headers=auth_headers).json()
+    response = client.post('/api/chat/stream', headers=auth_headers,
+        json={'session_id':c['session_id'],'message':'我想开始散步'})
+    assert response.status_code == 200, response.text
+    assert calls == []
+    assert '"phase": "lead"' not in response.text and 'event: done' in response.text
+
+
 def test_member_stream_uses_parallel_path(client, auth_headers, monkeypatch):
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), 'reply_lead_enabled', True)
     from app import provisional_reply as chat
     calls = []
     original = chat.with_natural_lead
