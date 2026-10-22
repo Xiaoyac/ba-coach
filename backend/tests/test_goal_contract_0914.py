@@ -235,7 +235,9 @@ async def test_secondary_goal_is_independent_and_assistant_only_or_stale_evidenc
     await db.commit()
     detail = (await db.execute(select(schema.tables["pa_goal_details"]).where(
         schema.tables["pa_goal_details"].c.goal_id == created["goal_id"]))).mappings().one()
-    assert detail["goal_kind"] == "secondary" and detail["long_term_direction"] is None
+    # The AI may write the direction without a user quote; the quote is just not kept.
+    assert detail["goal_kind"] == "secondary" and detail["long_term_direction"] == "不应保存"
+    assert detail["evidence"]["direction_quote"] is None
     assert (await db.execute(select(schema.tables["pa_goal_details"].c.goal_id).where(
         schema.tables["pa_goal_details"].c.goal_kind == "primary"))).scalars().all() == []
 
@@ -314,3 +316,22 @@ async def test_overview_has_safe_fallbacks_and_keeps_schedule_and_review_cadence
     assert rows["g1"]["plan"]["schedule_kind"] == "recurring"
     assert rows["g1"]["plan"]["review_cadence"] == "每两周复盘"
     assert rows["g2"]["goal_kind"] == "unclassified" and rows["g2"]["long_term_direction"] is None
+
+
+@pytest.mark.asyncio
+async def test_ai_direction_reaches_the_core_card_without_a_user_quote(goal_api):
+    from app.goal_contract import save_goal_direction
+    from app.goal_card_workspace import _core_fields
+    _, db, _ = goal_api
+    latest = await seed_goal_dialogue(db)
+    payload = primary_payload()
+    payload["goal_proposal"].update(long_term_direction=None, direction_quote=None)
+    created = await create_goal_from_agent_dialogue(db, session_id="new-chat-a", user_id="a",
+        data=payload, completed_steps=[], assistant_message_id=latest)
+    plan = (await db.execute(select(schema.tables["module_two_record"]).where(
+        schema.tables["module_two_record"].c.id == created["plan_id"]))).mappings().one()
+    assert "long_term_direction" not in await _core_fields(db, plan)
+    # A later save without a new goal selection still updates the direction.
+    await save_goal_direction(db, created["goal_id"], {"long_term_direction": "更健康"})
+    await save_goal_direction(db, created["goal_id"], None)
+    assert (await _core_fields(db, plan))["long_term_direction"] == "更健康"
