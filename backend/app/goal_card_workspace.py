@@ -199,7 +199,7 @@ async def open_card(db, conversation, state, kind, user_message_id, *, following
         from .program_confirmation import draft
         pending = await draft(db, state, conversation.subject_id)
         if pending and pending["record_status"] == "draft" and pending["goal_id"] == state["active_goal_id"]:
-            row.update(fields=_plan_fields(pending), plan_id=pending["id"],
+            row.update(fields=await _core_fields(db, pending), plan_id=pending["id"],
                 goal_id=pending["goal_id"], cycle_id=state["active_cycle_id"])
     await db.execute(insert(table), row)
     await _audit(db, row, "entered_formulation_stage", user_message_id)
@@ -286,6 +286,17 @@ def _plan_fields(record):
     return direct
 
 
+async def _core_fields(db, record):
+    """Plan fields plus the goal's 希望改善的方向, which lives on the goal."""
+    fields = _plan_fields(record)
+    details = schema.tables["pa_goal_details"]
+    direction = (await db.execute(select(details.c.long_term_direction).where(
+        details.c.goal_id == record.get("goal_id")))).scalar_one_or_none() if record.get("goal_id") else None
+    if direction:
+        fields["long_term_direction"] = direction
+    return fields
+
+
 async def sync_core_card(db, conversation, state, phase, record):
     _check_scope(conversation, state, m2=False)
     if phase not in {"discussing", "ready", "confirmed"} or not isinstance(record, Mapping):
@@ -313,7 +324,7 @@ async def sync_core_card(db, conversation, state, phase, record):
     if phase == "confirmed" and (record.get("record_status") != "confirmed"
             or record.get("confirmation_status") != "confirmed" or not record.get("confirmation_message_id")):
         raise ValueError("plan_not_confirmed")
-    fields = {**(row["fields"] or {}), **_plan_fields(record)}
+    fields = {**(row["fields"] or {}), **await _core_fields(db, record)}
     changes = {"fields": fields, "phase": phase, "goal_id": record_goal, "plan_id": record.get("id"),
         "cycle_id": state.get("active_cycle_id"), "concerns": []}
     if phase == "confirmed":

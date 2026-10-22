@@ -75,7 +75,7 @@ export const goalCardFieldLabels: Record<keyof GoalCardFields, string> = {
   // "When" and "how often" share one form row (activity spans the full row above).
   activity_content: "想做的活动", schedule_text: "什么时候做", frequency_text: "大约多常做",
   location: "在哪里做", duration_minutes: "每次多长时间", difficulty_rating: "你觉得有多难",
-  potential_barriers: "可能遇到的困难", barrier_coping_plan: "可以怎么应对", long_term_direction: "这对你有什么意义",
+  potential_barriers: "可能遇到的困难", barrier_coping_plan: "可以怎么应对", long_term_direction: "我希望改善的方向",
 };
 
 export function goalCardFieldValue(key: keyof GoalCardFields, value: GoalCardFields[keyof GoalCardFields]): string {

@@ -129,14 +129,16 @@ def proposal_evidence(raw, messages, activity):
         return None
     source_activity = normalized if normalized in source.content else phrase
     direction, direction_quote = text(raw.get("long_term_direction")), text(raw.get("direction_quote"), 2000)
-    direction_valid = (direction and direction_quote and direction in direction_quote
-                       and any(m.role == "user" and direction_quote in (m.content or "") for m in messages))
-    return {"goal_kind": raw["goal_kind"], "long_term_direction": direction if direction_valid else None,
+    # The AI may write the direction itself (e.g. one the user agreed to);
+    # a user quote is kept as evidence only when it checks out.
+    quote_valid = (direction and direction_quote and direction in direction_quote
+                   and any(m.role == "user" and direction_quote in (m.content or "") for m in messages))
+    return {"goal_kind": raw["goal_kind"], "long_term_direction": direction or None,
         "source_message_id": source.id, "source_conversation_id": source.conversation_id,
         "source_activity": source_activity,
         "evidence": {"selection_status": "selected", "selection_quote": raw["selection_quote"],
                      "selection_role": "core", "activity_quote": phrase,
-                     "direction_quote": direction_quote if direction_valid else None}}
+                     "direction_quote": direction_quote if quote_valid else None}}
 
 
 def recover_goal_proposal(messages, activity):
@@ -348,6 +350,21 @@ async def save_goal_details(db, goal_id, evidence):
         await db.execute(update(table).where(table.c.goal_id == goal_id).values(**fields, updated_at=now()))
     else:
         await db.execute(insert(table), {"goal_id": goal_id, **fields})
+
+
+async def save_goal_direction(db, goal_id, raw):
+    """Let a later save update just the direction, without a new goal selection."""
+    direction = text(raw.get("long_term_direction"), 1000) if isinstance(raw, dict) else None
+    if not direction:
+        return
+    table = schema.tables["pa_goal_details"]
+    exists = (await db.execute(select(table.c.goal_id).where(table.c.goal_id == goal_id))).scalar_one_or_none()
+    if exists:
+        await db.execute(update(table).where(table.c.goal_id == goal_id).values(
+            long_term_direction=direction, updated_at=now()))
+    else:
+        await db.execute(insert(table), {"goal_id": goal_id, "goal_kind": "unclassified",
+            "long_term_direction": direction})
 
 
 async def save_plan_context(db, plan_id, raw, messages):

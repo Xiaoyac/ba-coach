@@ -936,11 +936,13 @@ async def persist_record(maker, *, module, user_id, data, cycle_id, db_session=N
                 values.get("review_decision"), decision_evidence=values.get("phase_c", {}).get(
                     "_m4_contract", {}).get("evidence", {}).get("decision_quote"))
         if module == "module_2" and messages:
-            from .goal_contract import save_plan_context, proposal_evidence, save_goal_details
+            from .goal_contract import save_plan_context, proposal_evidence, save_goal_details, save_goal_direction
             await save_plan_context(db, record_id, data.get("plan_context"), messages)
             evidence = proposal_evidence(data.get("goal_proposal"), messages, values.get("activity_content", ""))
             if evidence:
                 await save_goal_details(db, defaults["goal_id"], evidence)
+            else:
+                await save_goal_direction(db, defaults["goal_id"], data.get("goal_proposal"))
         if (source_state is not None and module in FRESHNESS_FIELDS
                 and set(values).intersection(FRESHNESS_FIELDS[module])):
             # This marker is the durable bridge between the source-validated
