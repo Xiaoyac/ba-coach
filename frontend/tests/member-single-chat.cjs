@@ -157,52 +157,37 @@ async function checkMember(browser, width) {
   } finally { await page.close(); }
 }
 
-async function chooseMode(page, mode, doubleClick = false) {
-  const dialog = page.getByRole("dialog", { name: "选择新对话模式", exact: true });
-  await dialog.waitFor();
-  await dialog.locator(`input[value="${mode}"]`).check();
-  const create = dialog.getByRole("button", { name: "创建对话", exact: true });
-  if (doubleClick) await create.evaluate(button => { button.click(); button.click(); });
-  else await create.click();
-}
-
 async function checkEmptyAdmin(browser, width) {
   const { page, requests, errors, createdSessionIds } = await fixture(browser, { role: "admin", width, empty: true, failCreateOnce: true });
   try {
     await page.goto(base);
-    const dialog = page.getByRole("dialog", { name: "选择新对话模式", exact: true });
-    await dialog.waitFor();
-    await dialog.getByText(/模块切换不会自动把目标标记为已确认/).waitFor();
-    assert.equal(requests.filter(r => r.path === "/api/conversations" && r.method === "POST").length, 0);
-    const dimensions = await dialog.evaluate(node => ({ left: node.getBoundingClientRect().left,
-      right: node.getBoundingClientRect().right, width: innerWidth, height: node.clientHeight, scroll: node.scrollHeight }));
-    assert.ok(dimensions.left >= 0 && dimensions.right <= dimensions.width && dimensions.scroll <= dimensions.height + 1);
-    await page.screenshot({ path: path.join(artifacts, `admin-mode-${width}.png`), fullPage: true });
-    await page.keyboard.press("Escape");
-    await dialog.waitFor({ state: "detached" });
-    await page.getByRole("button", { name: "选择对话模式", exact: true }).waitFor();
-    assert.equal(await page.getByLabel("Message", { exact: true }).count(), 0, "cancelled initial selection cannot accept an unbound message");
-    assert.equal(createdSessionIds.length, 0);
-    await page.getByRole("button", { name: "选择对话模式", exact: true }).click();
-    await chooseMode(page, "router_only", true);
-    await dialog.getByRole("alert").waitFor();
+    const creates = () => requests.filter(r => r.path === "/api/conversations" && r.method === "POST");
+    // An empty admin account creates a pure-Router chat straight away; the
+    // mode chooser is hidden. The synthetic first create fails.
+    await page.getByRole("alert").filter({ hasText: /synthetic create outage/ }).waitFor();
+    assert.equal(await page.getByRole("dialog", { name: "选择新对话模式", exact: true }).count(), 0);
+    assert.equal(await page.getByLabel("Message", { exact: true }).count(), 0, "failed creation cannot accept an unbound message");
     assert.equal(createdSessionIds.length, 0, "failed creation must not be treated as a successful chat");
-    assert.equal(requests.filter(r => r.path === "/api/conversations" && r.method === "POST").length, 1,
-      "same-event double submit cannot create two requests even when the first fails");
-    await chooseMode(page, "router_only", true);
-    await dialog.waitFor({ state: "detached" });
+    assert.equal(creates().length, 1);
+    const retry = page.getByRole("button", { name: "创建新对话", exact: true });
+    await retry.evaluate(button => { button.click(); button.click(); });
     await page.getByText("在开始之前，你希望我怎么称呼你呢？", { exact: false }).waitFor();
+    assert.equal(creates().length, 2, "same-event double click cannot create two requests");
+    for (const request of creates()) {
+      const body = JSON.parse(request.body);
+      assert.equal(body.routing_mode, "router_only");
+    }
     assert.equal(await page.getByLabel("当前对话模式", { exact: true }).innerText(), "仅 Router");
+    assert.equal(await page.getByRole("dialog", { name: "选择新对话模式", exact: true }).count(), 0);
     assert.equal(createdSessionIds.length, 1);
     await page.screenshot({ path: path.join(artifacts, `admin-mode-chat-${width}.png`), fullPage: true });
     await page.reload();
     await page.getByText("在开始之前，你希望我怎么称呼你呢？", { exact: false }).waitFor();
     assert.equal(await page.getByLabel("当前对话模式", { exact: true }).innerText(), "仅 Router");
-    assert.equal(await page.getByRole("dialog", { name: "选择新对话模式", exact: true }).count(), 0);
-    assert.equal(createdSessionIds.length, 1, "refresh must restore mode without creating or asking again");
+    assert.equal(createdSessionIds.length, 1, "refresh must restore the chat without creating another");
     assert.equal(requests.filter(r => r.path === "/api/conversations/current").length, 0);
     assert.deepEqual(errors, []);
-    console.log(`PASS: empty admin ${width}px mode choice, Escape cancel, failure retry, double-submit guard and persisted mode`);
+    console.log(`PASS: empty admin ${width}px auto-creates a pure-Router chat, retries after failure, double-click guard and persisted mode`);
   } finally { await page.close(); }
 }
 
@@ -246,29 +231,21 @@ async function checkEmptyAdmin(browser, width) {
     await admin.page.getByRole("navigation", { name: "对话历史" }).waitFor();
     assert.equal(await admin.page.getByRole("button", { name: "切换对话侧栏", exact: true }).count(), 1);
     assert.equal(await admin.page.getByLabel("当前对话模式", { exact: true }).innerText(), "Router + 代码", "legacy conversation defaults to router_code");
-    await admin.page.getByRole("button", { name: "开启新对话", exact: true }).click();
-    const modeDialog = admin.page.getByRole("dialog", { name: "选择新对话模式", exact: true });
-    await modeDialog.waitFor();
-    await modeDialog.getByRole("button", { name: "取消", exact: true }).click();
-    assert.equal(admin.createdSessionIds.length, 0, "cancel must preserve the current conversation without a POST");
-    await admin.page.getByText("这是已经开始的管理员对话。", { exact: true }).waitFor();
     // First start abandons the M4 view; the second starts again even when the
     // freshly created M1 chat has no user turn yet. Each must receive a new id.
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       const created = admin.page.waitForResponse(response => new URL(response.url()).pathname === "/api/conversations" && response.request().method() === "POST");
       await admin.page.getByRole("button", { name: "开启新对话", exact: true }).click();
-      const mode = attempt === 1 ? "router_only" : "router_code";
-      await chooseMode(admin.page, mode, true);
       const response = await (await created).json();
       assert.equal(response.session_id, `admin-new-${attempt}`);
       assert.equal(response.next_module, "module_1");
-      assert.equal(response.routing_mode, mode);
+      assert.equal(response.routing_mode, "router_only");
       assert.deepEqual(response.messages.map(message => message.content), [opening]);
       await admin.page.getByText("当前 MODULE I", { exact: true }).waitFor();
       await admin.page.getByText("在开始之前，你希望我怎么称呼你呢？", { exact: false }).waitFor();
-      assert.equal(await admin.page.getByLabel("当前对话模式", { exact: true }).innerText(), attempt === 1 ? "仅 Router" : "Router + 代码");
+      assert.equal(await admin.page.getByLabel("当前对话模式", { exact: true }).innerText(), "仅 Router");
       assert.equal(await admin.page.getByText("这是已经开始的管理员对话。", { exact: true }).count(), 0);
-      assert.equal(await admin.page.getByRole("dialog").count(), 0, "New Conversation must never mount a goal chooser");
+      assert.equal(await admin.page.getByRole("dialog").count(), 0, "New Conversation must never mount a goal or mode chooser");
       assert.equal(await admin.page.getByText("这段对话从哪里开始？", { exact: true }).count(), 0);
     }
     assert.equal(new Set(admin.createdSessionIds).size, 2, "even an untouched fresh chat must not be reused");
@@ -278,7 +255,7 @@ async function checkEmptyAdmin(browser, width) {
       "starting a fresh chat must not load or select an existing program goal");
     await admin.page.getByRole("navigation", { name: "对话历史" }).getByText("新对话 1", { exact: true }).click();
     await admin.page.getByLabel("当前对话模式", { exact: true }).filter({ hasText: "仅 Router" }).waitFor();
-    await admin.page.getByRole("navigation", { name: "对话历史" }).getByText("新对话 2", { exact: true }).click();
+    await admin.page.getByRole("navigation", { name: "对话历史" }).getByText("持续对话", { exact: true }).click();
     await admin.page.getByLabel("当前对话模式", { exact: true }).filter({ hasText: "Router + 代码" }).waitFor();
     assert.equal(admin.createdSessionIds.length, 2, "switching conversations must restore their modes, not create another chat");
     await admin.page.getByRole("button", { name: /账号菜单/ }).click();

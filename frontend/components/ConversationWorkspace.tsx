@@ -425,14 +425,10 @@ export default function ConversationWorkspace({
   }
 
   async function beginConversation(mode?: ConversationRoutingMode, effort?: ConversationReplyEffort): Promise<ConversationDetail | null> {
-    if (isAdmin && mode === undefined) {
-      viewGenerationRef.current++;
-      setModeChooserError(null);
-      setModeChooserOpen(true);
-      setSidebarOpen(false);
-      if (!activeSessionIdRef.current) setLoadingConversation(false);
-      return null;
-    }
+    // Admins no longer pick a mode: new conversations use the same pure-Router
+    // setup members get. ConversationModeModal and the API fields stay so the
+    // chooser can be brought back by reopening it here.
+    if (isAdmin && mode === undefined) mode = "router_only";
     // The ref changes synchronously, so two clicks before React rerenders
     // cannot start two administrative POSTs with different mode selections.
     if (isAdmin && creatingConversationRef.current) return null;
@@ -1263,9 +1259,9 @@ export default function ConversationWorkspace({
             over from whatever was being typed in the previous conversation. */}
         {isAdmin && !sessionId && !loadingConversation ? <section className="workspace-card flex h-full w-full flex-col items-center justify-center px-6 text-center">
           <h1 className="text-lg font-semibold">开始一段新对话</h1>
-          <p className="mt-3 max-w-sm text-sm leading-6 text-ink-muted">先选择这段对话的模块跳转方式和回复模式，再从模块一开始。目前还没有创建新对话。</p>
+          <p className="mt-3 max-w-sm text-sm leading-6 text-ink-muted">新对话会从模块一开始。目前还没有创建新对话。</p>
           {error && <p role="alert" className="mt-3 max-w-sm text-sm text-alert-ink">{error}</p>}
-          <button type="button" onClick={handleNew} className="mt-6 min-h-11 rounded-xl bg-accent px-5 text-sm text-on-accent">选择对话模式</button>
+          <button type="button" onClick={handleNew} className="mt-6 min-h-11 rounded-xl bg-accent px-5 text-sm text-on-accent">创建新对话</button>
           <div className="mt-3 flex gap-3"><button type="button" onClick={() => { if (desktopLayout) setSidebarCollapsed(false); else setSidebarOpen(true); }} className="min-h-11 px-2 text-sm text-ink-muted">查看对话历史</button><button type="button" onClick={onLogout} className="min-h-11 px-2 text-sm text-ink-muted">退出登录</button></div>
         </section> : <Chat
           key={sessionId ?? "draft"}
