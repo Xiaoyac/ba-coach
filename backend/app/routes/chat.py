@@ -620,6 +620,9 @@ async def _prepare_chat_stream(
     )
     context.generation = control
     context.generation_id = str(request.generation_id or "")
+    from ..conversation_reply_mode import reply_lead_wanted
+    lead_enabled = await reply_lead_wanted(db, subject_id=subject_id, requested=request.reply_lead,
+                                           default=settings.reply_lead_enabled)
     # The request-scoped dependency survives as long as StreamingResponse, but
     # the model may think for minutes. End the setup transaction now so that
     # idle time does not pin a MySQL connection; final writes use a fresh,
@@ -698,7 +701,7 @@ async def _prepare_chat_stream(
                 graph_events = control.iterate(get_graph().astream(
                     state, context=context, stream_mode=["custom", "values"]
                 ))
-                if reply_mode == "ack_deep" and context.settings.reply_lead_enabled:
+                if reply_mode == "ack_deep" and lead_enabled:
                     from ..provisional_reply import with_natural_lead
                     graph_events = with_natural_lead(graph_events, provider=provider,
                         user_input=request.message, generation_id=str(request.generation_id or ""),

@@ -68,6 +68,9 @@ class ChatRequest(BaseModel):
     # Free-form context carried from the frontend (user profile, scenario, …).
     # Available to the prompt builder; nothing here is trusted as instructions.
     metadata: dict[str, str] = Field(default_factory=dict)
+    # An admin's own on/off choice for the 承接 opening. Ignored for members,
+    # who follow REPLY_LEAD_ENABLED.
+    reply_lead: bool | None = None
 
 
 class CancelGenerationRequest(BaseModel):
