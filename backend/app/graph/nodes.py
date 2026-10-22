@@ -2005,6 +2005,32 @@ async def _run_background_routing(
                         rt = schema.tables["conversation_runtime_states"]
                         await db.execute(update(rt).where(rt.c.conversation_id == conversation.id).values(
                             current_module=current))
+                if mode == ROUTER_ONLY and current == 'module_3' and record_id:
+                    # Router-only has no pre-reply M3 extraction, so a sourced
+                    # acceptance of the recording agreement closes here, as an
+                    # M4 review does above. The Router keeps its module.
+                    from fastapi import HTTPException
+                    from ..program_confirmation import confirmation_readiness, commit_confirmation, draft, record_hash
+                    from ..v2_repository import V2Conflict
+                    _, persisted = await runtime_for(db, session_id)
+                    pending = await draft(db, persisted, subject_id) if persisted["current_module"] == current else None
+                    readiness = pending and await confirmation_readiness(db, conversation=conversation,
+                        state=persisted, user_id=subject_id, session_id=session_id, pending=pending,
+                        extraction_assistant_message_id=assistant_message_id)
+                    decision = (await db.get(ConversationMessage, readiness["recording_decision_message_id"])
+                        if readiness and readiness["ready"] and readiness["recording_decision_message_id"] else None)
+                    if decision is not None:
+                        try:
+                            async with db.begin_nested():
+                                await commit_confirmation(db, conversation=conversation, state=persisted,
+                                    user_id=subject_id, pending=pending, message=decision, review_action=None,
+                                    snapshot_hash=record_hash(pending), source="router_only_sourced_decision",
+                                    boundary_message_id=assistant_message_id)
+                                rt = schema.tables["conversation_runtime_states"]
+                                await db.execute(update(rt).where(rt.c.conversation_id == conversation.id).values(
+                                    current_module=current))
+                        except (HTTPException, V2Conflict) as exc:
+                            diagnostics["m3_confirmation"] = str(getattr(exc, "detail", exc))
                 if mode == ROUTER_ONLY and current == 'module_2' and data:
                     from ..dialogue_confirmation import advance_from_dialogue
                     await advance_from_dialogue(db, session_id=session_id, user_id=subject_id,

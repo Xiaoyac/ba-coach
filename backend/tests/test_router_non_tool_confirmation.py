@@ -140,3 +140,72 @@ async def test_non_tool_from_zero_goals_to_displayed_confirmed_archive(goal_api,
         archive = (await client.get('/api/program/goals/overview')).json()['pa_cards']
         assert len(archive) == 1 and archive[0]['id'] == durable['active_goal_id']
         assert archive[0]['status'] != 'draft'
+
+
+
+@pytest.mark.parametrize('case', ['accepted', 'invented_quote'])
+async def test_non_tool_member_sourced_m3_acceptance_reaches_waiting_execution(goal_api, context, provider, monkeypatch, case):
+    """Router-only has no pre-reply M3 extraction; the post-reply one commits a sourced acceptance."""
+    from app.graph import nodes
+    _, db, _ = goal_api
+    state, _ = await setup_turn(db, '确认，就按这个计划试试。')
+    await member(db)
+    provider.route_result = 'module_3'
+    ctx = replace(context, sessionmaker=async_sessionmaker(db.bind, expire_on_commit=False),
+        settings=context.settings.model_copy(update={'database_schema_version': 'v2',
+            'pa_card_tools_enabled': False, 'goal_card_ui_enabled': False}))
+    await ctx.store.adopt('chat-a', [], 'module_2', {})
+    result = await route_before_reply({**state, 'user_input': '确认，就按这个计划试试。', 'current_module': 'module_2'}, ctx)
+    assert result['current_module'] == 'module_3' and result['confirmation_receipt']
+    await db.rollback()
+    monkeypatch.setattr('app.v2_profile.enabled', lambda: True)
+    cycles, records = schema.tables['pa_cycles'], schema.tables['module_three_record']
+    agreement = '每天在记录今日填写活动内容和活动后心情'
+    card = f'{agreement}，这个记录方式可以吗？遇到困难回来聊'
+    shown = {'negotiated_record_plan': agreement, 'ai_record_requirement': agreement,
+        'difficulty_feedback_mechanism': '遇到困难回来聊', 'recording_status': 'unknown',
+        'recording_evidence': {'requirement': {'message_id': 22, 'quote': agreement},
+            'plan': {'message_id': 22, 'quote': agreement},
+            'feedback': {'message_id': 22, 'quote': '遇到困难回来聊'}}}
+    extracted = [shown]
+    async def extract(*args, **kwargs): return dict(extracted[-1])
+    monkeypatch.setattr(nodes, '_extract_module_data', extract)
+
+    async def reply(user_id, user_text, assistant_id, text):
+        turn = {'session_id': 'chat-a', 'subject_id': 'a', 'user_message_id': user_id, 'user_input': user_text,
+            'current_module': 'module_3', 'extracted_intent': 'module_3', 'routing_mode': 'router_only',
+            'active_cycle_id': 'm2-cycle', 'routing_pending': True, 'final_response': text, 'memory': {}}
+        await db.execute(insert(ConversationMessage), {'id': assistant_id, 'conversation_id': 1,
+            'position': assistant_id - 19, 'role': 'assistant', 'content': text})
+        await db.commit()
+        nodes.schedule_background_routing(turn, ctx, assistant_message_id=assistant_id)
+        await nodes.wait_for_pending_routing('chat-a')
+        await db.rollback()
+        return turn
+
+    turn = await reply(21, '确认，就按这个计划试试。', 22, card)
+    assert await db.scalar(select(records.c.record_status)) == 'draft'
+    assert await db.scalar(select(cycles.c.status).where(cycles.c.id == 'm2-cycle')) == 'planning'
+
+    acceptance = '我同意这样记录。'
+    await db.execute(insert(ConversationMessage), {'id': 23, 'conversation_id': 1, 'position': 4,
+        'role': 'user', 'content': acceptance})
+    await db.commit()
+    result = await route_before_reply({**turn, 'user_message_id': 23, 'user_input': acceptance}, ctx)
+    assert result['current_module'] == 'module_3'
+    await db.rollback()
+    quote = acceptance if case == 'accepted' else '我已经确认了'
+    extracted.append({**shown, 'recording_status': 'accepted', 'recording_evidence': {
+        **shown['recording_evidence'], 'decision': {'message_id': 23, 'quote': quote,
+            'status': 'accepted', 'scope': 'current_arrangement'}}})
+    await reply(23, acceptance, 24, '好，记录约定就这样定了。')
+    _, durable = await runtime_for(db, 'chat-a')
+    assert durable['current_module'] == 'module_3'
+    cycle = await db.scalar(select(cycles.c.status).where(cycles.c.id == 'm2-cycle'))
+    if case == 'accepted':
+        record = (await db.execute(select(records))).mappings().one()
+        assert record['record_status'] == 'confirmed' and record['confirmation_message_id'] == 23
+        assert cycle == 'waiting_execution' and durable['flow_status'] == 'waiting_execution'
+    else:
+        assert await db.scalar(select(records.c.record_status)) == 'draft'
+        assert cycle == 'planning' and durable['flow_status'] != 'waiting_execution'
