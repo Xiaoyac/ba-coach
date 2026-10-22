@@ -1124,8 +1124,8 @@ async def clinical_context(maker, user_id, session_id):
             lines.append("本聊天目标绑定状态：" + json.dumps({"active_goal_id": None}, ensure_ascii=False))
         for memory in await reply_memories(db, user_id=user_id, conversation_id=context_conversation.id if context_conversation else None):
             lines.append(f"长期记忆（{memory['confirmation_status']} / {memory['source_kind']}）：{memory['content']}")
-        from .daily_record_context import daily_record_line
-        records = await daily_record_line(db, user_id)
-        if records:
-            lines.append(records)
+        from .daily_record_context import daily_measurement_line, daily_record_line
+        for line in (await daily_record_line(db, user_id), await daily_measurement_line(db, user_id)):
+            if line:
+                lines.append(line)
     return lines

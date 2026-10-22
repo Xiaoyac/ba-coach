@@ -4,7 +4,8 @@ from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from app.database_v2_schema import metadata
-from app.models import AccountSettings, ActivityLog, AssessmentEntry, Conversation, ConversationMessage, UserAccount
+from app.models import (AccountSettings, ActivityLog, AssessmentEntry, Conversation, ConversationMessage,
+    DailyMeasurement, UserAccount)
 from app.v2_repository import (V2Conflict, V2NotFound, active_memories, append_memory,
     append_plan_draft, can_reuse_m1, confirm_plan, create_goal, initial_module,
     owned_goal, start_cycle, transition_cycle)
@@ -21,6 +22,7 @@ async def db():
         await connection.run_sync(AccountSettings.__table__.create)
         await connection.run_sync(AssessmentEntry.__table__.create)
         await connection.run_sync(ActivityLog.__table__.create)
+        await connection.run_sync(DailyMeasurement.__table__.create)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as session:
         await session.execute(insert(metadata.tables["user_profile"]), [{"uuid": "a"}, {"uuid": "b"}])
