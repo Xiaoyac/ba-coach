@@ -1,28 +1,19 @@
-"""Owned member chats use parallel low-effort replies; admins retain choices."""
+"""Every owned chat uses 自然接话＋深度回复; the old 现有回复 mode is gone."""
 from sqlalchemy import select
 
-from .models import (AccountSettings, Conversation, ConversationResponseMode,
-                     ConversationReplyEffort, UserAccount)
+from .models import AccountSettings, Conversation, ConversationReplyEffort, UserAccount
 
 STANDARD = "standard"
 ACK_DEEP = "ack_deep"
 
 
 async def effective_reply_mode(db, *, session_id: str, subject_id: str | None) -> str:
-    """Resolve server policy from current ownership and the persisted role."""
+    """Owned conversations, old 现有回复 ones included, all reply as ack_deep."""
     if not subject_id:
         return STANDARD
-    row = (await db.execute(select(AccountSettings.role, ConversationResponseMode.mode)
-        .select_from(Conversation)
-        .join(UserAccount, UserAccount.profile_uuid == Conversation.subject_id)
-        .join(AccountSettings, AccountSettings.account_id == UserAccount.id)
-        .outerjoin(ConversationResponseMode, ConversationResponseMode.conversation_id == Conversation.id)
-        .where(Conversation.session_id == session_id, Conversation.subject_id == subject_id))).one_or_none()
-    if row is not None and row.role == "user":
-        return ACK_DEEP
-    if row is None or row.role != "admin" or row.mode != ACK_DEEP:
-        return STANDARD
-    return ACK_DEEP
+    owned = await db.scalar(select(Conversation.id).where(
+        Conversation.session_id == session_id, Conversation.subject_id == subject_id))
+    return ACK_DEEP if owned is not None else STANDARD
 
 
 async def effective_reply_effort(db, *, session_id: str, subject_id: str | None) -> str | None:

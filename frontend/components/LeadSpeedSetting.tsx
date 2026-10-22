@@ -19,8 +19,8 @@ export default function LeadSpeedSetting() {
     <div className="mt-3 flex items-center gap-2 rounded-xl bg-raised/50 px-4 py-3">
       <label htmlFor="lead-enabled-switch" className="text-sm text-ink">在我的对话中显示承接开头</label>
       <SettingHelp hover align="start" id="lead-enabled-details" label="承接开头说明">
-        <p>打开后，你的「自然接话＋深度回复」对话会先逐字显示一句简短接话，再接着显示主回复。关闭时只显示主回复。</p>
-        <p className="mt-2">只影响你自己的对话，不影响其他管理员和用户。「现有回复」模式的对话没有承接开头。</p>
+        <p>打开后，你的对话会先逐字显示一句简短接话，再接着显示主回复。关闭时只显示主回复。</p>
+        <p className="mt-2">只影响你自己的对话，不影响其他管理员和用户。</p>
       </SettingHelp>
       <button id="lead-enabled-switch" type="button" role="switch" aria-checked={enabled} onClick={() => chooseLeadEnabled(!enabled)}
         className={`ml-auto inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors ${enabled ? "bg-accent" : "bg-line-strong"}`}>

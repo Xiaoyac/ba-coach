@@ -64,7 +64,6 @@ async def load_reply_history(db: AsyncSession, *, subject_id: str, session_id: s
 async def create_conversation_with_opening(
     db: AsyncSession, *, subject_id: str, session_id: str, start_from_m1: bool = False,
     routing_mode: str = "router_code",
-    reply_mode: str = "standard",
     reply_effort: str = "low",
 ) -> Conversation:
     """Create a durable conversation whose first turn is the BA opening.
@@ -101,13 +100,10 @@ async def create_conversation_with_opening(
             memory={"fresh_m1": True, "routing_mode": routing_mode} if start_from_m1 else {"routing_mode": routing_mode},
         )
     )
-    if reply_mode != "standard":
-        if reply_mode != "ack_deep":
-            raise ValueError("Unsupported conversation reply mode")
-        db.add(ConversationResponseMode(conversation_id=conversation.id, mode=reply_mode))
-        if reply_effort not in {"low", "high", "max"}:
-            raise ValueError("Unsupported conversation reply effort")
-        db.add(ConversationReplyEffort(conversation_id=conversation.id, effort=reply_effort))
+    db.add(ConversationResponseMode(conversation_id=conversation.id, mode="ack_deep"))
+    if reply_effort not in {"low", "high", "max"}:
+        raise ValueError("Unsupported conversation reply effort")
+    db.add(ConversationReplyEffort(conversation_id=conversation.id, effort=reply_effort))
     await db.commit()
     await db.refresh(conversation, attribute_names=["messages"])
     return conversation

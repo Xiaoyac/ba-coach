@@ -17,14 +17,9 @@ export const routingModeLabels: Record<ConversationRoutingMode, string> = {
   router_only: "仅 Router",
 };
 
-export type ConversationReplyMode = "standard" | "ack_deep";
 export type ConversationReplyEffort = "low" | "high" | "max";
 export const replyEffortLabels: Record<ConversationReplyEffort, string> = {
   low: "低（更快）", high: "高（更充分）", max: "最高（更慢）",
-};
-export const replyModeLabels: Record<ConversationReplyMode, string> = {
-  standard: "现有回复",
-  ack_deep: "自然接话＋深度回复",
 };
 
 export interface ConversationDetail extends ConversationSummary {
@@ -36,7 +31,7 @@ export interface ConversationDetail extends ConversationSummary {
   messages: ChatMessage[];
   next_module: string | null;
   routing_mode?: ConversationRoutingMode;
-  reply_mode?: ConversationReplyMode;
+  reply_mode?: "ack_deep";
   reply_effort?: ConversationReplyEffort | null;
   reply_effort_options?: ConversationReplyEffort[];
 }
@@ -146,15 +141,13 @@ export async function listConversations(
 /** Create the durable opening turn and receive its server-owned session id. */
 export async function createConversation(
   routingMode: ConversationRoutingMode,
-  replyMode: ConversationReplyMode = "standard",
   replyEffort?: ConversationReplyEffort,
   signal?: AbortSignal,
 ): Promise<ConversationDetail> {
   const res = await fetch(`${API_BASE}/api/conversations`, {
     method: "POST",
     headers: apiHeaders({ json: true }),
-    body: JSON.stringify({ routing_mode: routingMode, reply_mode: replyMode,
-      ...(replyMode === "ack_deep" && replyEffort ? { reply_effort: replyEffort } : {}) }),
+    body: JSON.stringify({ routing_mode: routingMode, ...(replyEffort ? { reply_effort: replyEffort } : {}) }),
     signal,
   });
   return parse(res, "Starting a conversation");

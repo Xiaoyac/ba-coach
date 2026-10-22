@@ -845,7 +845,7 @@ class ConversationCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     routing_mode: Literal["router_code", "router_only"] = "router_code"
-    reply_mode: Literal["standard", "ack_deep"] = "standard"
+    reply_mode: Literal["ack_deep"] = "ack_deep"  # the only mode; kept so older clients still validate
     reply_effort: Literal["low", "high", "max"] = "low"
 
 
@@ -898,7 +898,7 @@ class ConversationDetail(ConversationSummary):
     knowledge_mediator_enabled: bool = True  # historical architecture selector
     knowledge_mediator_node_enabled: bool = False
     knowledge_mode: Literal["legacy_mediator", "astrbot_hybrid"] = "legacy_mediator"
-    reply_mode: Literal["standard", "ack_deep"] = "standard"
+    reply_mode: Literal["ack_deep"] = "ack_deep"
     reply_effort: Literal["low", "high", "max"] | None = None
     reply_effort_options: list[Literal["low", "high", "max"]] = Field(default_factory=list)
     messages: list[ConversationMessageDetail] = Field(default_factory=list)
