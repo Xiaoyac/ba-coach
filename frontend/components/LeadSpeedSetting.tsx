@@ -3,18 +3,31 @@
 import { useSyncExternalStore } from "react";
 import { SettingHelp } from "@/components/ConversationControls";
 import {
-  LEAD_INTERVAL_MAX_MS, LEAD_INTERVAL_MIN_MS, chooseLeadInterval, getLeadInterval, subscribeLeadInterval,
+  LEAD_INTERVAL_MAX_MS, LEAD_INTERVAL_MIN_MS, chooseLeadEnabled, chooseLeadInterval, getLeadEnabled, getLeadInterval,
+  subscribeLeadInterval,
 } from "@/lib/leadPacing";
 
 const DEFAULT_START_MS = 280;
 
 export default function LeadSpeedSetting() {
+  const enabled = useSyncExternalStore(subscribeLeadInterval, getLeadEnabled, () => false);
   const interval = useSyncExternalStore(subscribeLeadInterval, getLeadInterval, () => null);
   const isDefault = interval === null;
   const value = interval ?? DEFAULT_START_MS;
   return <section aria-labelledby="lead-speed-heading" className="overall-style-section">
-    <h3 id="lead-speed-heading" className="text-sm font-medium">快速接话显示速度<span className="ml-2 text-xs font-normal text-ink-faint">管理员专享</span></h3>
-    <div className="mt-3 rounded-xl bg-raised/50 px-4 py-3">
+    <h3 id="lead-speed-heading" className="text-sm font-medium">快速接话（承接开头）<span className="ml-2 text-xs font-normal text-ink-faint">管理员专享</span></h3>
+    <div className="mt-3 flex items-center gap-2 rounded-xl bg-raised/50 px-4 py-3">
+      <label htmlFor="lead-enabled-switch" className="text-sm text-ink">在我的对话中显示承接开头</label>
+      <SettingHelp hover align="start" id="lead-enabled-details" label="承接开头说明">
+        <p>打开后，你的「自然接话＋深度回复」对话会先逐字显示一句简短接话，再接着显示主回复。关闭时只显示主回复。</p>
+        <p className="mt-2">只影响你自己的对话，不影响其他管理员和用户。「现有回复」模式的对话没有承接开头。</p>
+      </SettingHelp>
+      <button id="lead-enabled-switch" type="button" role="switch" aria-checked={enabled} onClick={() => chooseLeadEnabled(!enabled)}
+        className={`ml-auto inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors ${enabled ? "bg-accent" : "bg-line-strong"}`}>
+        <span aria-hidden="true" className={`size-5 rounded-full bg-sheet shadow transition-transform ${enabled ? "translate-x-5" : ""}`} />
+      </button>
+    </div>
+    {enabled && <div className="mt-3 rounded-xl bg-raised/50 px-4 py-3">
       <div className="flex items-center gap-2">
         <label htmlFor="lead-speed-slider" className="text-sm text-ink">每字间隔</label>
         <SettingHelp hover align="start" id="lead-speed-slider-details" label="每字间隔说明">
@@ -42,7 +55,7 @@ export default function LeadSpeedSetting() {
           <p className="mt-2">也就是开始约每秒 3.5 字，显示约 6 秒后放慢到每秒 2 字。</p>
         </SettingHelp>
       </div>
-    </div>
-    <p className="mt-3 text-xs leading-6 text-ink-faint">仅影响你在当前浏览器中看到的快速接话，选择会自动保存。</p>
+    </div>}
+    <p className="mt-3 text-xs leading-6 text-ink-faint">选择保存在当前浏览器，只对你的账号生效。</p>
   </section>;
 }

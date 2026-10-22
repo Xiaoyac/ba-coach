@@ -55,3 +55,12 @@ async def configured_reply_effort_options(db, *, subject_id: str) -> tuple[str, 
     provider = row.preferred_provider or settings.default_provider
     return reply_effort_options(settings, provider,
         model=str(getattr(settings, f"{provider}_model", "") or ""))
+
+
+async def reply_lead_wanted(db, *, subject_id: str | None, requested: bool | None, default: bool) -> bool:
+    """An admin's explicit choice decides their own 承接 opening; everyone else gets the default."""
+    if requested is None or not subject_id:
+        return default
+    role = await db.scalar(select(AccountSettings.role).join(
+        UserAccount, UserAccount.id == AccountSettings.account_id).where(UserAccount.profile_uuid == subject_id))
+    return requested if role == "admin" else default

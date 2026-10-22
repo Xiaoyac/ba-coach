@@ -1,5 +1,6 @@
 import { apiHeaders, checkAuthentication } from "@/lib/http";
 import { chatRequestError, safeGenerationError } from "@/lib/chatRecovery";
+import { leadRequestFlag } from "@/lib/leadPacing";
 import type { GoalCardConfirmationResult } from "@/lib/goal-card";
 
 /**
@@ -72,6 +73,8 @@ export interface ChatRequest {
   /** Pin a module and skip the router, e.g. "module_3". */
   module?: string;
   metadata?: Record<string, string>;
+  /** An admin's own choice for the fast opening; the server ignores it for members. */
+  reply_lead?: boolean;
 }
 
 export interface ChatResponse {
@@ -159,7 +162,7 @@ export async function streamChat(
   const res = await fetch(`${API_BASE}/api/chat/stream`, {
     method: "POST",
     headers: apiHeaders({ json: true }),
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, reply_lead: body.reply_lead ?? leadRequestFlag() }),
     signal,
   });
   checkAuthentication(res);
