@@ -38,9 +38,9 @@ def test_new_and_old_members_use_parallel_router_low_without_reset(client, auth_
     assert client.patch(f'/api/conversations/{sid}/reply-effort', headers=auth_headers, json={'effort':'max'}).status_code == 403
 
 
-def test_ownership_and_admin_choices_are_preserved(client, auth_headers, admin_headers, db_sessionmaker):
+def test_ownership_is_checked_and_admin_chats_use_ack_deep(client, auth_headers, admin_headers, db_sessionmaker):
     a = client.post('/api/conversations', headers=admin_headers).json()
-    assert (a['reply_mode'],a['routing_mode']) == ('standard','router_code')
+    assert (a['reply_mode'],a['routing_mode']) == ('ack_deep','router_code')
     b = client.post('/api/conversations/current', headers=auth_headers).json()
     subject = client.get('/api/auth/me', headers=auth_headers).json()['profile_uuid']
     assert client.get('/api/conversations/'+a['session_id'], headers=auth_headers).status_code == 404

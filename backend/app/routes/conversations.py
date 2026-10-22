@@ -103,7 +103,7 @@ def _summary(c: Conversation) -> ConversationSummary:
 
 def _detail(c: Conversation, *, next_module: str | None = None,
             routing_mode: str = "router_code", thinking_enabled: bool | None = None,
-            reply_mode: str = "standard", reply_effort: str | None = None,
+            reply_mode: str = "ack_deep", reply_effort: str | None = None,
             reply_effort_options: tuple[str, ...] = (),
             knowledge_mediator_enabled: bool = True,
             knowledge_mediator_node_enabled: bool = False) -> ConversationDetail:
@@ -215,14 +215,9 @@ async def create_conversation(
         .join(UserAccount, UserAccount.id == AccountSettings.account_id)
         .where(UserAccount.profile_uuid == subject_id))).scalar_one_or_none()
     mode = payload.routing_mode if payload else "router_code"
-    reply_mode = payload.reply_mode if payload else "standard"
-    if reply_mode != "standard" and role != "admin":
-        raise HTTPException(status_code=403, detail="只有管理员可以创建快速回应加深度处理模式对话")
     if payload and "reply_effort" in payload.model_fields_set:
         if role != "admin":
             raise HTTPException(status_code=403, detail="只有管理员可以设置主回复思考强度")
-        if reply_mode != "ack_deep":
-            raise HTTPException(status_code=409, detail="思考强度仅适用于快速接话加深度回复模式")
         if payload.reply_effort not in await configured_reply_effort_options(db, subject_id=subject_id):
             raise HTTPException(status_code=409, detail="当前模型不支持选择思考强度")
     if mode == "router_only":
@@ -234,7 +229,7 @@ async def create_conversation(
     if role == "user":
         # Product defaults are server-owned. Existing member conversations
         # receive the same effective policy without resetting their progress.
-        mode, reply_mode = "router_only", "ack_deep"
+        mode = "router_only"
     session = await store.get_or_create(None)
     await store.append(session.session_id, OPENING_MESSAGE)
     try:
@@ -244,7 +239,6 @@ async def create_conversation(
             session_id=session.session_id,
             start_from_m1=role == "admin",
             routing_mode=mode,
-            reply_mode=reply_mode,
             reply_effort=payload.reply_effort if payload and role == "admin" else "low",
         )
     except Exception:

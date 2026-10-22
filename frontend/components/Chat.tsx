@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useClaudeStyle, useParticipantStyle } from "@/lib/useParticipantStyle";
 import type { ChatMessage, RoutingMeta } from "@/lib/api";
-import { type ConversationReplyEffort, type ConversationReplyMode } from "@/lib/conversations";
+import { type ConversationReplyEffort } from "@/lib/conversations";
 import MessageRow from "@/components/MessageRow";
 import { ReplyEffortSlider, SettingHelp } from "@/components/ConversationControls";
 import { MessageFeedbackProvider } from "@/components/MessageFeedback";
@@ -63,7 +63,6 @@ export default function Chat({
   mediatorNodeEnabled = false,
   mediatorEnabled = true,
   mediatorBusy = false,
-  replyMode = "standard",
   replyEffort = "low",
   replyEffortOptions = [],
   replyEffortBusy = false,
@@ -113,7 +112,6 @@ export default function Chat({
   mediatorNodeEnabled?: boolean;
   mediatorEnabled?: boolean;
   mediatorBusy?: boolean;
-  replyMode?: ConversationReplyMode;
   replyEffort?: ConversationReplyEffort;
   replyEffortOptions?: ConversationReplyEffort[];
   replyEffortBusy?: boolean;
@@ -445,9 +443,9 @@ export default function Chat({
           </div>
         </div>
       </header>
-      {accountRole === "admin" && (onToggleMediator || onToggleMediatorNode || (replyMode === "ack_deep" && onReplyEffortChange && replyEffortOptions.length > 0)) && (
+      {accountRole === "admin" && (onToggleMediator || onToggleMediatorNode || (onReplyEffortChange && replyEffortOptions.length > 0)) && (
         <div className="relative flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-1 border-b border-line px-3 py-1.5 sm:gap-x-5 sm:px-6" data-testid="conversation-controls" aria-busy={replyEffortBusy || mediatorBusy}>
-          {replyMode === "ack_deep" && onReplyEffortChange && replyEffortOptions.length > 0 && <div className="flex items-center gap-1">
+          {onReplyEffortChange && replyEffortOptions.length > 0 && <div className="flex items-center gap-1">
             <label htmlFor="conversation-reply-effort" className="hidden text-xs text-ink sm:block">思考强度</label>
             <ReplyEffortSlider key={sessionId} value={replyEffort} options={replyEffortOptions}
               disabled={busy || loading || replyEffortBusy || mediatorBusy} onChange={onReplyEffortChange} />

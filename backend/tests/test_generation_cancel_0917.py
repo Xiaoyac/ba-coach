@@ -114,7 +114,7 @@ def test_stop_real_graph_preserves_only_visible_parallel_output_and_can_send_aga
     assert not any(name == 'persisted' for name, _ in events)
     detail = client.get(f'/api/conversations/{sid}', headers=admin_headers).json()
     visible = ''.join(data['text'] for name, data in events if name == 'delta')
-    saved_partial = member and bool(visible)
+    saved_partial = bool(visible)
     assert len(detail['messages']) == len(initial) + 1 + int(saved_partial)
     assert detail['messages'][-2 if saved_partial else -1]['content'] == '请先听我说'
     if saved_partial:
