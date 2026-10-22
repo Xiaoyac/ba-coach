@@ -172,3 +172,28 @@ def test_deleting_an_account_removes_measurements_and_frees_its_research_id(clie
                     await db.scalar(select(func.count(DailyMeasurementRevision.id)).where(
                         DailyMeasurementRevision.measurement_id == saved['id'])))
     assert asyncio.run(remaining()) == (0, 0)
+
+
+def test_admin_sees_each_users_measurement_status_and_answers(client, register, admin_headers):
+    from app.routes.admin_assessments import _today
+    today = _today().isoformat()
+    headers = register('measureseen')
+    target = account_id(client, admin_headers, 'measureseen')
+    client.put(f'/api/admin/accounts/{target}/research-id', headers=admin_headers, json={'research_id': '321'})
+    measure(client, headers, on='2020-04-01')
+    latest = measure(client, headers, on=today, lonely=2)
+    register('measureidle')
+    assert client.get('/api/admin/assessments/measurements/users', headers=headers).status_code == 403
+
+    page = client.get('/api/admin/assessments/measurements/users?query=321', headers=admin_headers).json()
+    assert page['total'] == 1 and page['today'] == today and page['today_count'] == 1
+    [seen] = page['items']
+    assert seen['research_id'] == '321' and seen['today_completed'] is True
+    assert seen['day_count'] == 2 and seen['last_date'] == today
+    idle = client.get('/api/admin/assessments/measurements/users?query=measureidle', headers=admin_headers).json()
+    assert idle['items'][0]['today_completed'] is False and idle['items'][0]['day_count'] == 0
+
+    days = client.get(f"/api/admin/assessments/measurements/users/{seen['subject_id']}", headers=admin_headers).json()
+    assert [item['local_date'] for item in days['items']] == [today, '2020-04-01'] and days['total'] == 2
+    assert days['items'][0]['id'] == latest['id'] and days['items'][0]['answers']['lonely'] == 2
+    assert client.get('/api/admin/assessments/measurements/users/nobody', headers=admin_headers).status_code == 404

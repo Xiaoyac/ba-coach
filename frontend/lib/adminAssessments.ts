@@ -1,6 +1,7 @@
 import { API_BASE } from './api';
 import { apiHeaders, checkAuthentication } from './http';
 import type { AssessmentRecord } from './assessment';
+import type { MeasurementRecord } from './dailyMeasurement';
 
 export type RecordFilters = { query: string; start: string; end: string; scale_version: string };
 export type AdminRecord = { subject_id: string; username: string | null; nickname: string | null; research_id?: string | null; record: AssessmentRecord };
@@ -75,4 +76,38 @@ export async function exportAdminRecords(filters: RecordFilters, kind: ExportKin
   const url=URL.createObjectURL(blob), a=document.createElement('a');
   a.href=url; a.download=kind === 'measurements' ? 'daily-measurements.csv' : `daily-records-${kind}.csv`; document.body.appendChild(a); a.click(); a.remove();
   window.setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
+// 每日测量 per user. Read-only; separate from 每日记录 above.
+export type AdminMeasurementUser = {
+  subject_id: string;
+  username: string | null;
+  nickname: string | null;
+  research_id: string | null;
+  today_completed: boolean;
+  day_count: number;
+  last_date: string | null;
+};
+export type AdminMeasurementUserPage = {
+  items: AdminMeasurementUser[];
+  total: number;
+  today_count: number;
+  has_more: boolean;
+  today: string;
+  time_zone: 'Asia/Shanghai';
+};
+export type AdminUserMeasurements = { subject_id: string; items: MeasurementRecord[]; total: number };
+
+export async function fetchAdminMeasurementUsers(query: string, offset: number, signal: AbortSignal): Promise<AdminMeasurementUserPage> {
+  const search = new URLSearchParams({ query, offset: String(offset), limit: '20' });
+  const response = await checked(await fetch(`${API_BASE}/api/admin/assessments/measurements/users?${search}`, {
+    headers: apiHeaders(), signal, cache: 'no-store',
+  }));
+  return response.json();
+}
+export async function fetchAdminUserMeasurements(subjectId: string, signal: AbortSignal): Promise<AdminUserMeasurements> {
+  const response = await checked(await fetch(`${API_BASE}/api/admin/assessments/measurements/users/${encodeURIComponent(subjectId)}`, {
+    headers: apiHeaders(), signal, cache: 'no-store',
+  }));
+  return response.json();
 }

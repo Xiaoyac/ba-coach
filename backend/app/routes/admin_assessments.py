@@ -19,6 +19,7 @@ from ..models import (
 )
 from ..models_business import UserProfile
 from .assessment import _to_out, revision_history
+from .daily_measurement import to_out as measurement_out
 
 router = APIRouter(prefix='/admin/assessments', tags=['admin-assessments'], dependencies=[Depends(require_admin)])
 logger = logging.getLogger(__name__)
@@ -170,6 +171,58 @@ async def records_for_day(subject_id: str, local_date: date, response: Response,
     ]))).all()
     return {'subject_id': subject_id, 'local_date': local_date,
             'items': [item(row) for row in rows], 'total': len(rows)}
+
+
+@router.get('/measurements/users')
+async def list_measurement_users(response: Response, query: str = Query('', max_length=64),
+                                 limit: int = Query(20, ge=1, le=50), offset: int = Query(0, ge=0),
+                                 db: AsyncSession = Depends(get_db)):
+    """每日测量 status per ordinary user, mirroring the 每日记录 user list."""
+    response.headers['Cache-Control'] = 'no-store'
+    today = _today()
+    totals = (select(
+        DailyMeasurement.subject_id.label('subject_id'),
+        func.count(DailyMeasurement.id).label('day_count'),
+        func.max(DailyMeasurement.recorded_on).label('last_date'),
+        func.max(case((DailyMeasurement.recorded_on == today, 1), else_=0)).label('today_completed'),
+    ).group_by(DailyMeasurement.subject_id).subquery())
+    directory = (_ordinary_users(select(
+        UserAccount.id, UserAccount.profile_uuid, UserAccount.username,
+        UserProfile.nickname, ResearchParticipant.research_id,
+    )).outerjoin(UserProfile, UserProfile.uuid == UserAccount.profile_uuid)
+        .outerjoin(ResearchParticipant, ResearchParticipant.account_id == UserAccount.id))
+    if query.strip():
+        needle = query.strip()
+        directory = directory.where(or_(
+            UserAccount.username.contains(needle, autoescape=True),
+            UserProfile.nickname.contains(needle, autoescape=True),
+            ResearchParticipant.research_id.contains(needle, autoescape=True),
+            UserAccount.profile_uuid.contains(needle, autoescape=True),
+        ))
+    total = await db.scalar(select(func.count()).select_from(directory.subquery()))
+    today_count = await db.scalar(select(func.count()).select_from(
+        directory.join(DailyMeasurement, (DailyMeasurement.subject_id == UserAccount.profile_uuid)
+                       & (DailyMeasurement.recorded_on == today)).subquery()))
+    rows = (await db.execute(directory.add_columns(totals.c.day_count, totals.c.last_date, totals.c.today_completed)
+        .outerjoin(totals, totals.c.subject_id == UserAccount.profile_uuid)
+        .order_by(UserAccount.id.desc()).offset(offset).limit(limit))).all()
+    items = [{
+        'subject_id': row.profile_uuid, 'username': row.username, 'nickname': row.nickname,
+        'research_id': row.research_id, 'today_completed': bool(row.today_completed),
+        'day_count': row.day_count or 0, 'last_date': row.last_date,
+    } for row in rows]
+    return {'items': items, 'total': total, 'today_count': today_count or 0,
+            'has_more': offset + len(items) < total, 'today': today, 'time_zone': ADMIN_RECORD_TIME_ZONE}
+
+
+@router.get('/measurements/users/{subject_id}')
+async def list_user_measurements(subject_id: str, response: Response, db: AsyncSession = Depends(get_db)):
+    """Every 每日测量 of one ordinary user, newest day first; one per day, so unpaged."""
+    response.headers['Cache-Control'] = 'no-store'
+    await _require_record_user(db, subject_id)
+    rows = (await db.scalars(select(DailyMeasurement).where(DailyMeasurement.subject_id == subject_id)
+        .order_by(DailyMeasurement.recorded_on.desc(), DailyMeasurement.id.desc()))).all()
+    return {'subject_id': subject_id, 'items': [measurement_out(row) for row in rows], 'total': len(rows)}
 
 
 def safe_cell(value):

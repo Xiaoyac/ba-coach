@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import AssessmentHistory from './AssessmentHistory';
+import AdminDailyMeasurements from './AdminDailyMeasurements';
 import WorkbenchSelect from './WorkbenchSelect';
 import { CloseMark, NotebookMark } from './icons';
 import {
@@ -33,6 +34,7 @@ export default function AdminDailyRecords({ onClose }: { onClose: () => void }) 
   const [selected, setSelected] = useState<AdminRecordUser | null>(null);
   const [loading, setLoading] = useState(true), [error, setError] = useState('');
   const [exportOpen, setExportOpen] = useState(false);
+  const [tab, setTab] = useState<'records' | 'measurements'>('records');
 
   useEffect(() => { dialog.current?.showModal(); }, []);
   useEffect(() => {
@@ -78,11 +80,17 @@ export default function AdminDailyRecords({ onClose }: { onClose: () => void }) 
         <div>
           <p className="mb-1 flex items-center gap-2 text-xs text-accent-ink"><NotebookMark className="h-4 w-4" />管理员 · 数据查阅</p>
           <h2 id="admin-daily-title" className="text-xl font-semibold sm:text-2xl">每日记录数据</h2>
-          <p className="mt-1 text-xs leading-5 text-ink-muted">按用户查看填写日期及当天全部记录。仅统计普通用户，不含管理员。</p>
+          <p className="mt-1 text-xs leading-5 text-ink-muted">按用户查看每日记录和每日测量的填写情况。仅统计普通用户，不含管理员。</p>
         </div>
         <button onClick={onClose} aria-label="关闭每日记录数据" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-raised"><CloseMark className="h-4 w-4" /></button>
       </header>
+      <div role="tablist" aria-label="数据类型" className="flex shrink-0 gap-1 px-5 pb-3 sm:px-7">
+        {([['records', '每日记录'], ['measurements', '每日测量']] as const).map(([value, label]) =>
+          <button key={value} type="button" role="tab" aria-selected={tab === value} onClick={() => setTab(value)}
+            className={`min-h-11 rounded-full px-4 text-sm transition ${tab === value ? 'bg-accent-wash font-medium text-accent-ink' : 'text-ink-muted hover:bg-raised'}`}>{label}</button>)}
+      </div>
       <div className="zen-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-6 sm:px-7">
+        {tab === 'measurements' ? <AdminDailyMeasurements refresh={refresh} onRefresh={() => setRefresh(value => value + 1)} /> : <>
         <div className="flex flex-wrap items-end justify-between gap-3 rounded-2xl bg-raised/60 p-4">
           <form onSubmit={event => { event.preventDefault(); applyQuery(); }} className="flex w-full flex-wrap items-end gap-2 sm:w-auto sm:flex-1">
             <label className="min-w-0 flex-1 sm:max-w-md"><span className="mb-1.5 block text-xs text-ink-muted">查找用户</span><input aria-label="查找用户" placeholder="账号、昵称或用户编号" maxLength={64} value={draftQuery} onChange={event => setDraftQuery(event.target.value)} className={inputStyle} /></label>
@@ -128,6 +136,7 @@ export default function AdminDailyRecords({ onClose }: { onClose: () => void }) 
           {exportOpen && <ExportPanel />}
         </section>
         <p className="mt-4 text-xs leading-6 text-ink-muted">记录详情只读。未填写不等于 0 分；旧版 0–10 与新版 0–5 不混算。页面每分钟更新今日状态，返回页面时也会刷新。</p>
+        </>}
       </div>
     </div>
   </dialog>;
