@@ -195,7 +195,8 @@ def test_imported_knowledge_reaches_the_next_agent_turn(
     client: TestClient,
     knowledge_admin_headers: dict[str, str],
     provider,
-    approved_mediator,
+    db_sessionmaker,
+    monkeypatch,
 ) -> None:
     sentinel = "ACTIVITY-MONITORING-KNOWLEDGE-SENTINEL"
     response = client.post(
@@ -209,14 +210,13 @@ def test_imported_knowledge_reaches_the_next_agent_turn(
     )
     assert response.status_code == 201, response.text
 
-    # Members always use hybrid retrieval, whose index rebuilds in the
-    # background. This wiring check uses an administrator chat explicitly on
-    # the legacy architecture (mediation is covered by approved_mediator).
+    # Every chat uses hybrid retrieval, whose embedding index rebuilds in the
+    # background and is covered by test_hybrid_knowledge. This wiring check
+    # serves the same imported rows through the database retriever instead.
+    from app import retrieval
+    monkeypatch.setattr(retrieval, "get_hybrid_knowledge_base",
+                        lambda: DatabaseKnowledgeBase(lambda: db_sessionmaker))
     sid = client.post("/api/conversations", headers=knowledge_admin_headers, json={}).json()["session_id"]
-    assert client.patch(f"/api/conversations/{sid}/knowledge-mediator",
-        headers=knowledge_admin_headers, json={"enabled": True}).status_code == 200
-    assert client.patch(f"/api/conversations/{sid}/mediator-node",
-        headers=knowledge_admin_headers, json={"enabled": True}).status_code == 200
     turn = client.post(
         "/api/chat",
         json={"session_id": sid, "message": sentinel, "module": "module_1"},

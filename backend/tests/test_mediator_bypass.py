@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from app.graph import get_graph
 from app.knowledge_mediator import mediate_knowledge
-from app.models import AccountSettings, ConversationKnowledgeSettings, UserAccount
+from app.models import AccountSettings, Conversation, ConversationKnowledgeSettings, UserAccount
 from app.providers.base import as_text
 from app.retrieval import KnowledgeChunk
 from test_admin_sandbox import sandbox_admin_headers
@@ -20,27 +20,24 @@ def create(client, headers):
     return response.json()
 
 
-def test_owned_admin_preference_persists_isolated_and_deleted(client, sandbox_admin_headers,
-        auth_headers, db_sessionmaker, store):
+def test_architecture_switch_is_gone_and_stale_legacy_choice_is_ignored(client, sandbox_admin_headers,
+        db_sessionmaker, store):
     admin = create(client, sandbox_admin_headers)
-    other = create(client, sandbox_admin_headers)
-    member = create(client, auth_headers)
     base = f"/api/conversations/{admin['session_id']}"
-    path = base + '/knowledge-mediator'
-    assert admin['knowledge_mediator_enabled'] is True
-    assert client.patch(path, json={'enabled': False}).status_code == 401
-    assert client.patch(path, headers=auth_headers, json={'enabled': False}).status_code == 403
-    assert client.patch(f"/api/conversations/{member['session_id']}/knowledge-mediator",
-                        headers=sandbox_admin_headers, json={'enabled': False}).status_code == 404
-    assert client.patch(path, headers=sandbox_admin_headers, json={'enabled': 'false'}).status_code == 422
-    changed = client.patch(path, headers=sandbox_admin_headers, json={'enabled': False})
-    assert changed.status_code == 200, changed.text
-    assert changed.json()['knowledge_mediator_enabled'] is False
-    assert changed.json()['next_module'] == admin['next_module']
+    assert admin['knowledge_mode'] == 'astrbot_hybrid'
+    assert admin['knowledge_mediator_enabled'] is False
+    assert client.patch(base + '/knowledge-mediator', headers=sandbox_admin_headers,
+                        json={'enabled': True}).status_code in (404, 405)
+    # A legacy choice saved before the switch was removed no longer applies.
+    async def save_legacy():
+        async with db_sessionmaker() as db:
+            conversation_id = (await db.execute(select(Conversation.id).where(
+                Conversation.session_id == admin['session_id']))).scalar_one()
+            db.add(ConversationKnowledgeSettings(conversation_id=conversation_id, mediator_enabled=True))
+            await db.commit()
+    asyncio.run(save_legacy())
     store._sessions.clear()
-    assert client.get(base, headers=sandbox_admin_headers).json()['knowledge_mediator_enabled'] is False
-    assert client.get(f"/api/conversations/{other['session_id']}", headers=sandbox_admin_headers).json()['knowledge_mediator_enabled'] is True
-    assert client.patch(path, headers=sandbox_admin_headers, json={'enabled': True}).json()['knowledge_mediator_enabled'] is True
+    assert client.get(base, headers=sandbox_admin_headers).json()['knowledge_mode'] == 'astrbot_hybrid'
     assert client.delete(base, headers=sandbox_admin_headers).status_code == 204
     async def remaining():
         async with db_sessionmaker() as db:
@@ -80,15 +77,12 @@ def test_effective_setting_reaches_pipeline_and_ignores_spoofing(client, sandbox
         assert result.status_code == 200, result.text
         detail = client.get(f'/api/conversations/{session_id}', headers=headers).json()
         assert detail['knowledge_mediator_node_enabled'] is expected
-    for legacy in [True, False]:
-        assert client.patch(f'/api/conversations/{sid}/knowledge-mediator', headers=sandbox_admin_headers,
-                            json={'enabled': legacy}).status_code == 200
-        # Both architectures bypass unless the independent switch was enabled.
-        for node_on in [False, True, False]:
-            assert client.patch(f'/api/conversations/{sid}/mediator-node', headers=sandbox_admin_headers,
-                                json={'enabled': node_on}).status_code == 200
-            send(sandbox_admin_headers, sid, node_on)
-            assert seen == [('legacy_mediator' if legacy else 'hybrid_mediator') if node_on else 'direct']
+    # Admin chats always use hybrid retrieval; the node switch alone decides mediation.
+    for node_on in [False, True, False]:
+        assert client.patch(f'/api/conversations/{sid}/mediator-node', headers=sandbox_admin_headers,
+                            json={'enabled': node_on}).status_code == 200
+        send(sandbox_admin_headers, sid, node_on)
+        assert seen == ['hybrid_mediator' if node_on else 'direct']
     member = create(client, auth_headers)
     assert member['knowledge_mode'] == 'astrbot_hybrid'
     assert member['knowledge_mediator_node_enabled'] is True
@@ -122,8 +116,8 @@ def test_busy_turn_rejects_switch(client, sandbox_admin_headers, store):
     lock = asyncio.run(store.get_turn_lock(sid))
     asyncio.run(lock.acquire())
     try:
-        result = client.patch(f'/api/conversations/{sid}/knowledge-mediator',
-            headers=sandbox_admin_headers, json={'enabled': False})
+        result = client.patch(f'/api/conversations/{sid}/mediator-node',
+            headers=sandbox_admin_headers, json={'enabled': True})
         assert result.status_code == 409
     finally:
         lock.release()

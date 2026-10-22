@@ -1,4 +1,4 @@
-"""Member rollout uses current ownership/role, not a stale per-chat flag."""
+"""Every chat uses hybrid retrieval; a stale per-chat legacy flag is ignored."""
 from types import SimpleNamespace
 
 import pytest
@@ -38,18 +38,18 @@ async def test_effective_mode_for_new_and_existing_chats(mode_db, role, saved):
         if saved is not None:
             await db.execute(insert(ConversationKnowledgeSettings), {'conversation_id': 1, 'mediator_enabled': saved})
         enabled = await mediator_enabled_for_conversation(db, session_id='owned-chat', subject_id='owned-user')
-        assert enabled is (role == 'admin' and saved is not False)
-        # Unknown or unowned requests cannot borrow an administrator's legacy choice.
+        assert enabled is False
+        # Unknown or unowned requests are hybrid too.
         for session, subject in [('owned-chat', 'other-user'), ('missing-chat', 'owned-user'), ('owned-chat', None)]:
             assert not await mediator_enabled_for_conversation(db, session_id=session, subject_id=subject)
 
 
 @pytest.mark.asyncio
-async def test_former_admin_uses_member_policy_immediately(mode_db):
+async def test_saved_legacy_choice_is_ignored_for_admins_and_members(mode_db):
     async with mode_db() as db:
         await db.execute(insert(AccountSettings), {'account_id': 1, 'role': 'admin'})
         await db.execute(insert(ConversationKnowledgeSettings), {'conversation_id': 1, 'mediator_enabled': True})
-        assert await mediator_enabled_for_conversation(db, session_id='owned-chat', subject_id='owned-user')
+        assert not await mediator_enabled_for_conversation(db, session_id='owned-chat', subject_id='owned-user')
         await db.execute(update(AccountSettings).values(role='user'))
         assert not await mediator_enabled_for_conversation(db, session_id='owned-chat', subject_id='owned-user')
 

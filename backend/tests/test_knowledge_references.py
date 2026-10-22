@@ -86,16 +86,20 @@ async def test_safety_context_failure_preserves_recalled_but_never_provides(cont
 def test_durable_snapshot_owned_lazy_and_deleted(client, sandbox_admin_headers, register, provider, monkeypatch, stream, caplog):
     kb = KB()
     monkeypatch.setattr(chat, "get_knowledge_base", lambda: kb)
+    from app import retrieval
+    monkeypatch.setattr(retrieval, "get_hybrid_knowledge_base", lambda: kb)
     from app.config import get_settings
     get_settings().knowledge_intent_gate_enabled = False
     provider.route_result = '{"decision":"use","selections":[{"id":"one","quote":"行动可能帮助情绪","application":"根据证据回应。"}],"note":""}'
-    original = provider.route_detailed
-    async def mediator_with_thought(**kwargs):
-        if kwargs.get("include_reasoning"):
-            return Completion(text=provider.route_result, model="mediator-test",
-                reasoning_content="PRIVATE_MEDIATOR_THOUGHT_SENTINEL")
-        return await original(**kwargs)
-    monkeypatch.setattr(provider, "route_detailed", mediator_with_thought)
+    # Every chat uses hybrid retrieval, whose mediator builds its own provider.
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from app import hybrid_mediator
+    mediator = SimpleNamespace(name="deepseek", model="mediator-test",
+        _client=SimpleNamespace(close=AsyncMock()),
+        route_detailed=AsyncMock(return_value=Completion(text=provider.route_result, model="mediator-test",
+            reasoning_content="PRIVATE_MEDIATOR_THOUGHT_SENTINEL", finish_reason="stop")))
+    monkeypatch.setattr(hybrid_mediator, "build_provider", lambda settings: mediator)
     sid = client.post("/api/conversations", headers=sandbox_admin_headers).json()["session_id"]
     assert client.patch(f"/api/conversations/{sid}/mediator-node",
         headers=sandbox_admin_headers, json={"enabled": True}).status_code == 200

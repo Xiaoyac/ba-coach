@@ -33,11 +33,7 @@ def test_node_ownership_persistence_independence_and_delete(client, sandbox_admi
     assert enabled['knowledge_mediator_node_enabled'] and enabled['revision'] > a['revision']
     assert enabled['next_module'] == a['next_module']
     assert enabled['messages'] == a['messages']
-    for legacy in [False, True]:
-        switched = client.patch(base + '/knowledge-mediator', headers=sandbox_admin_headers,
-                                json={'enabled': legacy}).json()
-        assert switched['knowledge_mediator_node_enabled'] is True
-        assert switched['knowledge_mediator_enabled'] is legacy
+    assert enabled['knowledge_mode'] == 'astrbot_hybrid'
     store._sessions.clear()
     assert client.get(base, headers=sandbox_admin_headers).json()['knowledge_mediator_node_enabled']
     assert not client.get(f"/api/conversations/{b['session_id']}", headers=sandbox_admin_headers).json()['knowledge_mediator_node_enabled']
@@ -87,6 +83,6 @@ def test_saved_main_metrics_identify_disabled_experiment(client, sandbox_admin_h
             return (await db.scalars(select(AIExecutionEvent).where(
                 AIExecutionEvent.session_id == sid, AIExecutionEvent.stage == 'main_generation'))).all()
     saved = asyncio.run(event())[-1].event_metadata
-    assert saved['knowledge_mode'] == 'legacy_mediator'
+    assert saved['knowledge_mode'] == 'astrbot_hybrid'
     assert saved['knowledge_mediator_node_enabled'] is False
     assert saved['knowledge_mediator']['status'] == 'bypassed'

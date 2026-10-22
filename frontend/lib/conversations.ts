@@ -107,13 +107,6 @@ async function parse<T>(res: Response, what: string): Promise<T> {
   catch { throw new ConversationRequestError("对话数据暂时无法读取，请稍后重试。", 502); }
 }
 
-export async function setConversationMediator(sessionId: string, enabled: boolean): Promise<ConversationDetail> {
-  const res = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}/knowledge-mediator`, {
-    method: "PATCH", headers: apiHeaders({ json: true }), body: JSON.stringify({ enabled }),
-  });
-  return parse(res, "保存知识中介设置");
-}
-
 export async function setConversationMediatorNode(sessionId: string, enabled: boolean): Promise<ConversationDetail> {
   const res = await fetch(`${API_BASE}/api/conversations/${encodeURIComponent(sessionId)}/mediator-node`, {
     method: "PATCH", headers: apiHeaders({ json: true }), body: JSON.stringify({ enabled }),

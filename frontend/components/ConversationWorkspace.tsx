@@ -15,7 +15,6 @@ import {
   isMissing,
   listConversations,
   routingModeLabels,
-  setConversationMediator,
   setConversationMediatorNode,
   setConversationReplyEffort,
   subscribeConversation,
@@ -104,7 +103,6 @@ export default function ConversationWorkspace({
   const [conversationRoutingMode, setConversationRoutingMode] = useState<ConversationRoutingMode>("router_code");
   const [replyWaiting, setReplyWaiting] = useState(false);
   const [replyComplete, setReplyComplete] = useState(false);
-  const [mediatorEnabled, setMediatorEnabled] = useState(true);
   const [mediatorNodeEnabled, setMediatorNodeEnabled] = useState(false);
   const [mediatorSavingSessions, setMediatorSavingSessions] = useState<string[]>([]);
   const mediatorSaveRef = useRef(new Set<string>());
@@ -114,7 +112,7 @@ export default function ConversationWorkspace({
   const [replyEffortSavingSessions, setReplyEffortSavingSessions] = useState<string[]>([]);
   const replyEffortSaveRef = useRef(new Set<string>());
   const replySettingsBySession = useRef(new Map<string, {
-    revision: number; effort: ConversationReplyEffort; options: ConversationReplyEffort[] | null; mediatorEnabled: boolean; mediatorNodeEnabled: boolean;
+    revision: number; effort: ConversationReplyEffort; options: ConversationReplyEffort[] | null; mediatorNodeEnabled: boolean;
   }>());
   const replyEffortSaving = Boolean(sessionId && replyEffortSavingSessions.includes(sessionId));
   const [modeChooserOpen, setModeChooserOpen] = useState(false);
@@ -249,13 +247,11 @@ export default function ConversationWorkspace({
     const revision = detail.revision ?? 0;
     const settings = known && known.revision > revision ? known : {
       revision, effort: detail.reply_effort ?? "low", options: detail.reply_effort_options ?? null,
-      mediatorEnabled: detail.knowledge_mediator_enabled ?? true,
       mediatorNodeEnabled: detail.knowledge_mediator_node_enabled ?? false,
     };
     replySettingsBySession.current.set(detail.session_id, settings);
     if (activeSessionIdRef.current === detail.session_id) {
       setReplyEffort(settings.effort);
-      setMediatorEnabled(settings.mediatorEnabled);
       setMediatorNodeEnabled(settings.mediatorNodeEnabled);
       setReplyEffortOptions(settings.options);
     }
@@ -730,7 +726,7 @@ export default function ConversationWorkspace({
     }
   }
 
-  async function handleMediatorToggle(node = false) {
+  async function handleMediatorNodeToggle() {
     const target = activeSessionIdRef.current;
     if (!isAdmin || !target || loadingConversation || turns.current.has(target)
       || mediatorSaveRef.current.has(target) || replyEffortSaveRef.current.has(target)) return;
@@ -738,9 +734,7 @@ export default function ConversationWorkspace({
     setMediatorSavingSessions(previous => [...previous, target]);
     setError(null);
     try {
-      const detail = node
-        ? await setConversationMediatorNode(target, !mediatorNodeEnabled)
-        : await setConversationMediator(target, !mediatorEnabled);
+      const detail = await setConversationMediatorNode(target, !mediatorNodeEnabled);
       if (activeSessionIdRef.current === target) applyRemoteSnapshot(detail);
       else syncReplySettings(detail);
     } catch (err) {
@@ -1271,10 +1265,8 @@ export default function ConversationWorkspace({
           headerContent={isAdmin ? <><h1 className="truncate text-[0.92rem] font-semibold tracking-[0.02em] text-ink">对话</h1>{sessionId && !loadingConversation && <div className="mt-0.5 flex flex-wrap gap-x-2 text-xs leading-4 text-accent-ink" title="本段对话创建时选定，不能在对话中切换"><p aria-label="当前对话模式">{routingModeLabels[conversationRoutingMode]}</p></div>}</> : undefined}
           busy={busy}
           replyWaiting={replyWaiting}
-          mediatorEnabled={mediatorEnabled}
           mediatorBusy={mediatorSaving}
-          onToggleMediator={isAdmin && sessionId ? () => handleMediatorToggle() : undefined}
-          onToggleMediatorNode={isAdmin && sessionId ? () => handleMediatorToggle(true) : undefined}
+          onToggleMediatorNode={isAdmin && sessionId ? handleMediatorNodeToggle : undefined}
           mediatorNodeEnabled={mediatorNodeEnabled}
           replyEffort={replyEffort}
           replyEffortOptions={replyEffortOptions ?? []}

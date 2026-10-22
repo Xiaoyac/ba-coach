@@ -577,33 +577,6 @@ async def update_conversation_reply_effort(
         return await _detail_with_runtime(db, conversation)
 
 
-@router.patch("/{session_id}/knowledge-mediator", response_model=ConversationDetail)
-async def update_conversation_mediator(
-    session_id: str, payload: ConversationMediatorUpdate,
-    caller: CallerIdentity = Depends(require_admin),
-    db: AsyncSession = Depends(get_db),
-    store: SessionStore = Depends(get_session_store),
-) -> ConversationDetail:
-    await _owned_or_404(db, session_id=session_id, subject_id=caller.subject_id)
-    turn_lock = await store.get_turn_lock(session_id)
-    if turn_lock.locked():
-        raise HTTPException(status_code=409, detail="回复正在生成，请结束后再切换知识检索模式。")
-    async with turn_lock:
-        conversation = (await db.execute(select(Conversation).where(
-            Conversation.session_id == session_id, Conversation.subject_id == caller.subject_id)
-            .with_for_update())).scalar_one_or_none()
-        if conversation is None:
-            raise HTTPException(status_code=404, detail="对话不存在")
-        preference = await db.get(ConversationKnowledgeSettings, conversation.id)
-        if preference is None:
-            preference = ConversationKnowledgeSettings(conversation_id=conversation.id)
-            db.add(preference)
-        preference.mediator_enabled = payload.enabled
-        conversation.revision += 1
-        await db.commit()
-        return await _detail_with_runtime(db, conversation)
-
-
 @router.patch("/{session_id}/mediator-node", response_model=ConversationDetail)
 async def update_conversation_mediator_node(
     session_id: str, payload: ConversationMediatorUpdate,

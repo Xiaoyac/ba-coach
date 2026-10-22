@@ -109,8 +109,6 @@ def test_hybrid_debug_is_saved_per_message_and_owned(client, sandbox_admin_heade
     monkeypatch.setattr(retrieval, "get_hybrid_knowledge_base", KB)
     get_settings().knowledge_intent_gate_enabled = False
     sid = client.post('/api/conversations', headers=sandbox_admin_headers, json={}).json()['session_id']
-    assert client.patch(f'/api/conversations/{sid}/knowledge-mediator', headers=sandbox_admin_headers,
-        json={'enabled': False}).status_code == 200
     assert client.patch(f'/api/conversations/{sid}/mediator-node', headers=sandbox_admin_headers,
         json={'enabled': True}).status_code == 200
     response = client.post('/api/chat/stream' if stream else '/api/chat', headers=sandbox_admin_headers,
