@@ -99,7 +99,7 @@ const snapshot = {
       snapshot.snapshot_version = 1;
       invalidated = true;
       await page.reload();
-      await page.getByText('分享链接不存在或已失效。', { exact: true }).waitFor();
+      await page.getByText('该对话已被删除或链接无效。', { exact: true }).waitFor();
       assert.equal(await page.getByText('SNAPSHOT_REPLY_REASONING', { exact: true }).count(), 0);
       assert.deepEqual(errors, []);
       await context.close();

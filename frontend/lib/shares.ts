@@ -31,7 +31,7 @@ async function parse<T>(response: Response, authenticated: boolean): Promise<T> 
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     const message = response.status === 404 && !authenticated
-      ? "分享链接不存在或已失效。"
+      ? "该对话已被删除或链接无效。"
       : typeof body?.detail === "string" ? body.detail : "分享请求失败，请稍后重试。";
     throw new ShareRequestError(message, response.status);
   }
