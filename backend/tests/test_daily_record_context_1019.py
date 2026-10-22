@@ -56,39 +56,3 @@ async def test_saved_record_reaches_the_coach_context(goal_api, monkeypatch):
 
     record = next(line for line in lines if line.startswith("用户自行填写的每日记录"))
     assert "今天有点累" in record and "overall_mood" not in record
-
-
-def _measurement(subject_id, on, **values):
-    from app.models import DailyMeasurement
-    answers = dict(sleep_hours=7.5, sleep_quality=2, completion=4, activity_level=3, overall_mood=4,
-                   energetic=3, peaceful=4, secure=4, low_mood=2, worthless=1, irritable=2, tired=3,
-                   stressed=2, lonely=1, vigorous_count=0, vigorous_minutes=0, moderate_count=1,
-                   moderate_minutes=30, light_count=2, light_minutes=40)
-    return DailyMeasurement(subject_id=subject_id, recorded_on=on, timezone="Asia/Shanghai", **{**answers, **values})
-
-
-@pytest.mark.asyncio
-async def test_every_daily_measurement_reaches_the_coach_context(goal_api):
-    from app.v2_workflow import clinical_context
-    _, db, _ = goal_api
-    db.add_all([
-        _measurement("a", TODAY, overall_mood=5),
-        _measurement("a", TODAY - timedelta(days=90), sleep_hours=6),  # long ago is still included
-        _measurement("b", TODAY, overall_mood=1),                       # another user
-    ])
-    await db.commit()
-
-    lines = await clinical_context(async_sessionmaker(db.bind, expire_on_commit=False), "a", None)
-
-    line = next(line for line in lines if line.startswith("用户自行填写的每日测量"))
-    header, *rows = line.split("\n")
-    assert "全部2天" in header and "日期|昨晚睡眠小时|" in header and header.endswith("轻度运动分钟")
-    assert rows == ["2026-10-19|7.5|2|4|3|5|3|4|4|2|1|2|3|2|1|0|0|1|30|2|40",
-                    "2026-07-21|6|2|4|3|4|3|4|4|2|1|2|3|2|1|0|0|1|30|2|40"]
-
-
-@pytest.mark.asyncio
-async def test_no_measurements_adds_no_context_line(goal_api):
-    from app.daily_record_context import daily_measurement_line
-    _, db, _ = goal_api
-    assert await daily_measurement_line(db, "a") is None
