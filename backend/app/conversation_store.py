@@ -65,8 +65,12 @@ async def create_conversation_with_opening(
     db: AsyncSession, *, subject_id: str, session_id: str, start_from_m1: bool = False,
     routing_mode: str = "router_code",
     reply_effort: str = "low",
+    opening_text: str | None = None,
 ) -> Conversation:
     """Create a durable conversation whose first turn is the BA opening.
+
+    The opening is the admin-edited 开场白 when one is saved, else the source
+    default; it is copied into the transcript, so later edits never rewrite it.
 
     Position ``-1`` deliberately precedes the existing user/reply pairs
     (0/1, 2/3, ...), so no existing allocator or transcript ordering changes.
@@ -85,12 +89,15 @@ async def create_conversation_with_opening(
         from .v2_repository import initial_module
         if not start_from_m1:
             initial = await initial_module(db, user_id=subject_id)
+    if opening_text is None:
+        from .prompt_store import effective_opening_text
+        opening_text = await effective_opening_text(db)
     db.add(
         ConversationMessage(
             conversation_id=conversation.id,
             position=-1,
             role="assistant",
-            content=OPENING_MESSAGE_TEXT,
+            content=opening_text,
         )
     )
     db.add(

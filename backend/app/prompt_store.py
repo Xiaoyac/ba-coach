@@ -30,6 +30,9 @@ class PromptDefinition:
         if self.key == "reply_lead":
             from .provisional_reply import DEFAULT_LEAD_PROMPT
             return DEFAULT_LEAD_PROMPT
+        if self.key == "opening_message":
+            from .opening import OPENING_MESSAGE_TEXT
+            return OPENING_MESSAGE_TEXT
         return MODULE_PROMPTS[self.key]
 
 
@@ -46,6 +49,7 @@ PROMPT_DEFINITIONS: tuple[PromptDefinition, ...] = (
     ),
     PromptDefinition("knowledge_mediator", "知识使用中介 LLM", "检索后指导各模块使用知识；保存后新回合生效，接口与安全约束由服务器追加"),
     PromptDefinition("reply_lead", "快速接话 Agent", "根据当前对话自然生成简短开头，可承接干预中的共情和解释；深度回复读取这段开头后继续，避免重复和矛盾"),
+    PromptDefinition("opening_message", "开场白", "每个新对话的第一条助手消息；保存后对所有用户之后新建的对话生效，已有对话保留创建时的开场白"),
 )
 PROMPT_DEFINITION_BY_KEY = {item.key: item for item in PROMPT_DEFINITIONS}
 
@@ -102,3 +106,10 @@ async def effective_reply_lead_prompt(db: AsyncSession) -> str:
     row = (await db.execute(select(PromptOverride).where(
         PromptOverride.prompt_key == "reply_lead"))).scalar_one_or_none()
     return row.content if row else PROMPT_DEFINITION_BY_KEY["reply_lead"].default_content
+
+
+async def effective_opening_text(db: AsyncSession) -> str:
+    """The opening persisted into each new conversation, for every user."""
+    row = (await db.execute(select(PromptOverride).where(
+        PromptOverride.prompt_key == "opening_message"))).scalar_one_or_none()
+    return row.content if row else PROMPT_DEFINITION_BY_KEY["opening_message"].default_content

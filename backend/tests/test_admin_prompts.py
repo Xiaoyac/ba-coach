@@ -65,6 +65,7 @@ def test_admin_reads_all_source_defaults(
         "router_agent",
         "knowledge_mediator",
         "reply_lead",
+        "opening_message",
     ]
     assert all(item["content"] for item in prompts)
     assert all(item["is_overridden"] is False for item in prompts)
@@ -201,3 +202,76 @@ def test_saved_router_override_is_used_by_the_next_routing_call(
     assert response.status_code == 200, response.text
     assert any("ROUTER OVERRIDE SENTINEL" in system for system in provider.route_systems)
     assert any("路由接口边界" in system for system in provider.route_systems)
+
+
+def test_only_admin_can_change_opening_message(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    assert (
+        client.put(
+            "/api/admin/prompts/opening_message",
+            json={"base_revision": 1, "content": "not allowed"},
+            headers=auth_headers,
+        ).status_code
+        == 403
+    )
+    assert (
+        client.delete(
+            "/api/admin/prompts/opening_message?base_revision=1", headers=auth_headers
+        ).status_code
+        == 403
+    )
+    created = client.post("/api/conversations", headers=auth_headers)
+    from app.opening import OPENING_MESSAGE_TEXT
+
+    assert [m["content"] for m in created.json()["messages"]] == [OPENING_MESSAGE_TEXT]
+
+
+def test_admin_opening_message_applies_to_every_new_conversation(
+    client: TestClient, admin_headers: dict[str, str], register, provider
+) -> None:
+    from app.opening import OPENING_MESSAGE_TEXT
+
+    member = register(username="openingmember", nickname="Member")
+    before = client.post("/api/conversations", headers=member).json()
+    assert before["messages"][0]["content"] == OPENING_MESSAGE_TEXT
+
+    default = next(
+        item
+        for item in client.get("/api/admin/prompts", headers=admin_headers).json()["prompts"]
+        if item["key"] == "opening_message"
+    )
+    assert default["label"] == "开场白"
+    assert default["content"] == OPENING_MESSAGE_TEXT
+    saved = client.put(
+        "/api/admin/prompts/opening_message",
+        json={"base_revision": default["revision"], "content": "新的开场白，你好！"},
+        headers=admin_headers,
+    )
+    assert saved.status_code == 200, saved.text
+
+    other = register(username="openingother", nickname="Other")
+    for headers in (member, other):
+        created = client.post("/api/conversations", headers=headers)
+        assert created.status_code == 201, created.text
+        assert [m["content"] for m in created.json()["messages"]] == ["新的开场白，你好！"]
+    # The model's history starts from the same edited opening.
+    reply = client.post(
+        "/api/chat",
+        json={"message": "我叫小雨", "session_id": created.json()["session_id"]},
+        headers=other,
+    )
+    assert reply.status_code == 200, reply.text
+    assert provider.seen[-1][0].source_content == "新的开场白，你好！"
+
+    # Conversations created earlier keep the opening they started with.
+    old = client.get(f"/api/conversations/{before['session_id']}", headers=member).json()
+    assert old["messages"][0]["content"] == OPENING_MESSAGE_TEXT
+
+    reset = client.delete(
+        f"/api/admin/prompts/opening_message?base_revision={saved.json()['revision']}",
+        headers=admin_headers,
+    )
+    assert reset.status_code == 200 and reset.json()["is_overridden"] is False
+    after = client.post("/api/conversations", headers=member).json()
+    assert after["messages"][0]["content"] == OPENING_MESSAGE_TEXT

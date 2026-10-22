@@ -50,7 +50,7 @@ from ..models import (
     PACycle,
     UserAccount,
 )
-from ..opening import OPENING_MESSAGE
+from ..prompt_store import effective_opening_text
 from ..reasoning import normalize_reasoning_channels
 from ..session import SessionStore, get_session_store
 from ..schemas import (
@@ -230,8 +230,9 @@ async def create_conversation(
         # Product defaults are server-owned. Existing member conversations
         # receive the same effective policy without resetting their progress.
         mode = "router_only"
+    opening_text = await effective_opening_text(db)
     session = await store.get_or_create(None)
-    await store.append(session.session_id, OPENING_MESSAGE)
+    await store.append(session.session_id, Message(role="assistant", content=opening_text))
     try:
         conversation = await create_conversation_with_opening(
             db,
@@ -240,6 +241,7 @@ async def create_conversation(
             start_from_m1=role == "admin",
             routing_mode=mode,
             reply_effort=payload.reply_effort if payload and role == "admin" else "low",
+            opening_text=opening_text,
         )
     except Exception:
         await db.rollback()

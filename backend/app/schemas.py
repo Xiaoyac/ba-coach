@@ -358,7 +358,8 @@ ActivitySocial = Literal["独自", "一对一", "群体", "都可以"]
 ActivityIntensity = Literal["安静", "热闹", "都可以"]
 ModelProvider = Literal["deepseek", "doubao"]
 PromptKey = Literal[
-    "global", "module_1", "module_2", "module_3", "module_4", "router_agent", "knowledge_mediator", "reply_lead"
+    "global", "module_1", "module_2", "module_3", "module_4", "router_agent", "knowledge_mediator", "reply_lead",
+    "opening_message",
 ]
 
 
