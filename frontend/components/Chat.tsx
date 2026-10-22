@@ -191,7 +191,7 @@ export default function Chat({
   useLayoutEffect(() => {
     const el = logRef.current;
     if (!el) return;
-    if (!participant || followLatest.current) el.scrollTop = el.scrollHeight;
+    if (followLatest.current) el.scrollTop = el.scrollHeight;
   }, [messages, replyWaiting, replyComplete, participant]);
 
   useLayoutEffect(() => {
@@ -204,7 +204,7 @@ export default function Chat({
     if (!logRef.current || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
       const log = logRef.current;
-      if (log && (!participant || followLatest.current)) log.scrollTop = log.scrollHeight;
+      if (log && followLatest.current) log.scrollTop = log.scrollHeight;
     });
     observer.observe(logRef.current);
     if (logContentRef.current) observer.observe(logContentRef.current);
@@ -502,7 +502,7 @@ export default function Chat({
           role="log"
           aria-live="polite"
           onScroll={() => {
-            if (!participant || !logRef.current) return;
+            if (!logRef.current) return;
             const log = logRef.current;
             const nearBottom = log.scrollHeight - log.clientHeight - log.scrollTop < 64;
             followLatest.current = nearBottom; setShowLatest(!nearBottom);
@@ -555,7 +555,7 @@ export default function Chat({
           {busy && replyComplete && !error && <p role="status" className="px-4 py-2 text-xs text-ink-muted">{claude ? "正在保存…" : "回复已生成，正在确认保存结果…"}</p>}
         </div></div>
       )}
-      {participant && showLatest && !loading && <button type="button" className="mx-auto min-h-9 rounded-full bg-raised px-4 text-xs text-ink-muted"
+      {showLatest && !loading && <button type="button" className="mx-auto min-h-9 rounded-full bg-raised px-4 text-xs text-ink-muted"
         onClick={() => { followLatest.current = true; setShowLatest(false); if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }}>回到最新回复 ↓</button>}
 
       {error && (
