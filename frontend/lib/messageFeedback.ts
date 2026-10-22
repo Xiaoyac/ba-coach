@@ -1,10 +1,16 @@
 import { API_BASE } from "@/lib/api";
 import { apiHeaders, checkAuthentication } from "@/lib/http";
 
-export const feedbackReasons = {
+export const downFeedbackReasons = {
   off_topic: "答非所问", repetitive: "重复追问", incomplete: "回复不完整",
   incorrect: "理解有误", uncomfortable: "让我不舒服", other: "其他",
 } as const;
+export const upFeedbackReasons = {
+  understood: "理解到位", supportive: "让我感到被支持", practical: "建议实用",
+  clear: "清晰易懂", encouraging: "给了我动力", other: "其他",
+} as const;
+export const feedbackReasons = { ...downFeedbackReasons, ...upFeedbackReasons } as const;
+export const reasonsByRating = { up: upFeedbackReasons, down: downFeedbackReasons } as const;
 export type FeedbackReason = keyof typeof feedbackReasons;
 export type FeedbackInput = { rating: "up" | "down" | null; reasons?: FeedbackReason[]; comment?: string };
 export type MessageFeedback = {

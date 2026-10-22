@@ -15,7 +15,10 @@ from ..models import (
 from ..models_business import UserProfile
 
 router = APIRouter(tags=["message-feedback"])
-Reason = Literal["off_topic", "repetitive", "incomplete", "incorrect", "uncomfortable", "other"]
+DownReason = Literal["off_topic", "repetitive", "incomplete", "incorrect", "uncomfortable", "other"]
+UpReason = Literal["understood", "supportive", "practical", "clear", "encouraging", "other"]
+Reason = DownReason | UpReason
+REASONS_BY_RATING = {"up": set(UpReason.__args__), "down": set(DownReason.__args__)}
 
 
 class FeedbackInput(BaseModel):
@@ -26,8 +29,11 @@ class FeedbackInput(BaseModel):
 
     @model_validator(mode="after")
     def normalize(self):
-        self.reasons = list(dict.fromkeys(self.reasons)) if self.rating == "down" else []
-        self.comment = self.comment.strip() if self.rating == "down" else ""
+        allowed = REASONS_BY_RATING.get(self.rating, set())
+        if any(reason not in allowed for reason in self.reasons):
+            raise ValueError("反馈原因与评价不匹配")
+        self.reasons = list(dict.fromkeys(self.reasons))
+        self.comment = self.comment.strip() if self.rating else ""
         return self
 
 
