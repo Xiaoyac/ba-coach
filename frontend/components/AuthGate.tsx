@@ -10,6 +10,7 @@ import ThemeToggle from "@/components/ThemeToggle";
 import ConversationWorkspace from "@/components/ConversationWorkspace";
 import RequiredBirthYearModal from "@/components/RequiredBirthYearModal";
 import { clearToken, fetchMe, getToken, logout, type Account } from "@/lib/auth";
+import { readMemberPreview, saveMemberPreview } from "@/lib/memberPreview";
 
 interface AuthState {
   account: Account | null;
@@ -111,8 +112,22 @@ export default function AuthGate() {
     if (account && generation === authGeneration.current && token === getToken()) setState({ account, checking: false });
   }, []);
 
-  const styleAccountId = state.checking ? undefined : state.account?.profile_uuid;
-  const styleAccountRole = state.checking ? undefined : state.account?.role;
+  // An admin previewing the participant UI gets the member role everywhere
+  // below, settings and style included. The real role only decides who sees
+  // the switch.
+  const realAdmin = state.account?.role === "admin";
+  // Bumped after a toggle so this re-renders and re-reads the saved switch.
+  const [, setPreviewVersion] = useState(0);
+  const memberPreview = realAdmin && readMemberPreview(state.account!.profile_uuid);
+  const viewAccount: Account | null = state.account && memberPreview ? { ...state.account, role: "user" } : state.account;
+  const toggleMemberPreview = useCallback(() => {
+    if (!state.account || state.account.role !== "admin") return;
+    saveMemberPreview(state.account.profile_uuid, !memberPreview);
+    setPreviewVersion(value => value + 1);
+  }, [state.account, memberPreview]);
+
+  const styleAccountId = state.checking ? undefined : viewAccount?.profile_uuid;
+  const styleAccountRole = state.checking ? undefined : viewAccount?.role;
   useLayoutEffect(() => bindOverallStyleAccount(styleAccountId && styleAccountRole
     ? { profile_uuid: styleAccountId, role: styleAccountRole } : null), [styleAccountId, styleAccountRole]);
   useLayoutEffect(() => bindLeadPacingAccount(styleAccountId && styleAccountRole
@@ -145,19 +160,22 @@ export default function AuthGate() {
     return <RequiredBirthYearModal onSaved={(account) => setState({ account, checking: false })} onLogout={handleLogout} />;
   }
 
+  const account = viewAccount!;
   return (
     <>
       <div data-chat-workspace inert={inSettings} className="flex h-full min-h-0 w-full"><ConversationWorkspace
-        key={`${state.account.profile_uuid}:${state.account.role}`}
-        accountId={state.account.profile_uuid}
-        displayName={state.account.nickname || state.account.username}
-        accountUsername={state.account.username}
-        accountRole={state.account.role}
+        key={`${account.profile_uuid}:${account.role}`}
+        accountId={account.profile_uuid}
+        displayName={account.nickname || account.username}
+        accountUsername={account.username}
+        accountRole={account.role}
+        memberPreview={memberPreview}
+        onToggleMemberPreview={realAdmin ? toggleMemberPreview : undefined}
         onAccountRefresh={handleAccountRefresh}
         onLogout={handleLogout}
       /></div>
       {settingsVisited && <SettingsPage
-        key={`${state.account.profile_uuid}:${state.account.role}`} active={inSettings} account={state.account}
+        key={`${account.profile_uuid}:${account.role}`} active={inSettings} account={account}
         onAccountRefresh={handleAccountRefresh} onLogout={handleLogout}
       />}
 

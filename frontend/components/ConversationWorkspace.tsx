@@ -87,6 +87,8 @@ export default function ConversationWorkspace({
   accountUsername,
   accountId,
   accountRole,
+  memberPreview = false,
+  onToggleMemberPreview,
   onAccountRefresh,
   onLogout,
 }: {
@@ -94,6 +96,9 @@ export default function ConversationWorkspace({
   accountUsername: string;
   accountId: string;
   accountRole: "user" | "admin";
+  /** An admin viewing the participant UI; keeps the conversation they had open. */
+  memberPreview?: boolean;
+  onToggleMemberPreview?: () => void;
   onAccountRefresh: () => void | Promise<void>;
   onLogout: () => void;
 }) {
@@ -260,7 +265,7 @@ export default function ConversationWorkspace({
   function showConversation(detail: ConversationDetail) {
     if (!mountedRef.current) return;
     reconcileFailedHistory(detail);
-    if (isAdmin) rememberConversationSelection(accountId, detail.session_id);
+    if (isAdmin || memberPreview) rememberConversationSelection(accountId, detail.session_id);
     activeSessionIdRef.current = detail.session_id;
     setSessionId(detail.session_id);
     setConversationRoutingMode(detail.routing_mode ?? "router_code");
@@ -420,6 +425,13 @@ export default function ConversationWorkspace({
     setReplyWaiting(false);
   }
 
+  // A previewing admin stays in the conversation they had open as admin;
+  // without one (or if it is gone) they get their latest, like a member.
+  function openMemberConversation(): Promise<ConversationDetail> {
+    const selected = memberPreview ? readConversationSelection(accountId) : null;
+    return selected ? fetchConversation(selected).catch(() => getCurrentConversation()) : getCurrentConversation();
+  }
+
   async function beginConversation(mode?: ConversationRoutingMode, effort?: ConversationReplyEffort): Promise<ConversationDetail | null> {
     // Admins no longer pick a mode: new conversations use the same pure-Router
     // setup members get. ConversationModeModal and the API fields stay so the
@@ -445,7 +457,7 @@ export default function ConversationWorkspace({
       // while it is in flight so one visible draft cannot create two rows.
       const request =
         creatingConversationRef.current ??
-        (creatingConversationRef.current = isAdmin ? createConversation(mode!, effort) : getCurrentConversation());
+        (creatingConversationRef.current = isAdmin ? createConversation(mode!, effort) : openMemberConversation());
       const detail = await request;
       if (generation !== viewGenerationRef.current) return null;
       showConversation(detail);
@@ -1299,6 +1311,8 @@ export default function ConversationWorkspace({
           displayName={displayName}
           accountUsername={accountUsername}
           accountRole={accountRole}
+          memberPreview={memberPreview}
+          onToggleMemberPreview={onToggleMemberPreview}
           onOpenPromptManager={() => setPromptManagerOpen(true)}
           onOpenAccountManager={() => setAccountManagerOpen(true)}
           onOpenIssueManager={() => setIssueManagerOpen(true)}

@@ -84,6 +84,8 @@ export default function Chat({
   onOpenIssueManager,
   onOpenAdminDailyRecords,
   onReportIssue,
+  memberPreview = false,
+  onToggleMemberPreview,
   reportPreparing = false,
   failedSends = [],
   onRetryFailedSend,
@@ -135,6 +137,9 @@ export default function Chat({
   onOpenIssueManager: () => void;
   onOpenAdminDailyRecords?: () => void;
   onReportIssue?: () => void;
+  memberPreview?: boolean;
+  /** Only for real admins: switches between the admin and participant UI. */
+  onToggleMemberPreview?: () => void;
   reportPreparing?: boolean;
   failedSends?: FailedChatSend[];
   onRetryFailedSend?: (item: FailedChatSend) => void;
@@ -317,6 +322,13 @@ export default function Chat({
                 <>当前 {formatModuleLabel(displayedModule)}</>
               )}
             </span>
+          )}
+
+          {onToggleMemberPreview && (
+            <button type="button" onClick={onToggleMemberPreview} aria-pressed={memberPreview}
+              className="inline-flex min-h-11 shrink-0 items-center whitespace-nowrap rounded-full px-3 text-xs text-ink-muted transition-colors hover:bg-raised hover:text-accent-ink">
+              {memberPreview ? "改回管理员界面" : "体验被试界面"}
+            </button>
           )}
 
           {/* Whose session this is, and what can be done about it. The name is
