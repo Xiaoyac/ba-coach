@@ -51,7 +51,11 @@ html :is(input:not([type="radio"], [type="checkbox"], [type="range"], [type="fil
   border-color: var(--edge-focus) !important;
   box-shadow: var(--glow-focus) !important;
 }
-.composer-shell :is(textarea, input):is(:focus, :focus-visible) {
+/* The composer shell carries the shadow; its own field draws nothing. The
+   doubled class out-ranks the text-field rule above. */
+html .composer-shell.composer-shell :is(textarea, input),
+html .composer-shell.composer-shell :is(textarea, input):is(:focus, :focus-visible) {
+  outline: none !important;
   border-color: transparent !important;
   box-shadow: none !important;
 }
