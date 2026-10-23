@@ -43,7 +43,7 @@
 }
 
 .style-simple .composer-shell:focus-within {
-  box-shadow: var(--composer-glow-focus);
+  box-shadow: var(--glow-focus);
 }
 
 .style-simple .reply-feedback-panel {

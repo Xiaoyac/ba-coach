@@ -15,7 +15,7 @@ const columns = [
 ] as const;
 const emptyCase = (): TestCaseInput => ({ case_code: "", module: "module_1", user_type: "", scenario: "",
   user_input: "", expected_behavior: "", extra_columns: {} });
-const inputClass = "premium-control w-full rounded-xl border border-line-strong bg-raised/70 px-3 py-2 text-sm text-ink outline-none focus:border-accent-edge focus:ring-4 focus:ring-accent-wash";
+const inputClass = "premium-control w-full rounded-xl border border-line-strong bg-raised/70 px-3 py-2 text-sm text-ink outline-none focus:border-accent-edge focus:depth-focus";
 const buttonClass = "surface-button min-h-10 rounded-xl border border-line-strong bg-panel px-3.5 py-2 text-xs font-medium text-ink-muted disabled:cursor-not-allowed disabled:opacity-40";
 const primaryClass = "primary-action min-h-10 rounded-xl border border-accent px-4 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40";
 const labels: Record<string, string> = { queued: "排队中", running: "运行中", completed: "运行完成", failed: "执行失败", interrupted: "已中断" };

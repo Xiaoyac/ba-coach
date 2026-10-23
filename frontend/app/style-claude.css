@@ -327,14 +327,14 @@ html.style-claude.theme-github {
 
 /* Composer: a sheet of paper resting on the page. */
 .style-claude .composer-shell {
-  border: 1px solid var(--composer-edge);
+  border: 1px solid var(--edge);
   border-radius: 16px;
   background: var(--color-panel);
-  box-shadow: var(--composer-glow);
+  box-shadow: var(--glow);
 }
 .style-claude .composer-shell:focus-within {
-  border-color: var(--composer-edge-focus);
-  box-shadow: var(--composer-glow-focus);
+  border-color: var(--edge-focus);
+  box-shadow: var(--glow-focus);
 }
 .style-claude .composer-shell textarea { font-size: 0.98rem; line-height: 1.7; }
 

@@ -406,7 +406,7 @@ export default function AuthScreen({
 }
 
 const inputClass =
-  "premium-control w-full rounded-2xl border border-line bg-raised/80 px-4 py-3 text-[0.88rem] text-ink outline-none transition-all duration-300 placeholder:text-ink-faint focus:border-accent-edge focus:bg-raised focus:ring-4 focus:ring-accent-wash";
+  "premium-control w-full rounded-2xl border border-line bg-raised/80 px-4 py-3 text-[0.88rem] text-ink outline-none transition-all duration-300 placeholder:text-ink-faint focus:border-accent-edge focus:bg-raised focus:depth-focus";
 
 function Field({
   label,

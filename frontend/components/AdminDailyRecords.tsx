@@ -13,7 +13,7 @@ import {
 } from '@/lib/adminAssessments';
 
 const empty: RecordFilters = { query: '', start: '', end: '', scale_version: '' };
-const inputStyle = 'min-h-11 min-w-0 w-full rounded-xl border border-line-strong bg-raised/60 px-3 text-sm text-ink outline-none focus:border-accent-edge focus:ring-2 focus:ring-accent-wash';
+const inputStyle = 'min-h-11 min-w-0 w-full rounded-xl border border-line-strong bg-raised/60 px-3 text-sm text-ink outline-none focus:border-accent-edge focus:depth-focus';
 const buttonStyle = 'min-h-11 rounded-xl border border-line-strong px-4 text-sm text-ink-muted transition hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40';
 function userName(item: Pick<AdminRecordUser, 'nickname' | 'username' | 'subject_id'>) {
   return item.nickname && item.username

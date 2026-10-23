@@ -124,7 +124,7 @@ export default function ReplyFeedback({ messageId, pending = false, leadingActio
           <label htmlFor={`${panelId}-comment`} className="mt-4 block text-xs text-ink-muted">补充说明（选填）</label>
           <textarea id={`${panelId}-comment`} value={comment} maxLength={1000} disabled={busy} rows={3}
             onChange={event => setComment(event.target.value)} placeholder={panelRating === "up" ? "例如：这个小目标很具体，我今天就能做到。" : "例如：我已经回答过这个问题，希望不要再重复问。"}
-            className="mt-2 w-full resize-y rounded-xl border border-line bg-canvas px-3 py-2 text-sm leading-relaxed text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent-edge" />
+            className="mt-2 w-full resize-y rounded-xl border border-line bg-canvas px-3 py-2 text-sm leading-relaxed text-ink placeholder:text-ink-faint focus:outline-none focus:depth-focus" />
           <div className="mt-2 flex items-center justify-between gap-3">
             <span className="text-[11px] text-ink-faint">{comment.length}/1000</span>
             <button type="submit" disabled={busy} className="rounded-full bg-accent-wash px-4 py-2.5 text-xs font-medium text-accent-ink transition-colors hover:bg-raised disabled:opacity-50">{busy ? "保存中…" : "保存补充反馈"}</button>
