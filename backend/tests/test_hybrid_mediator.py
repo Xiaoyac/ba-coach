@@ -127,7 +127,7 @@ def test_hybrid_debug_is_saved_per_message_and_owned(client, sandbox_admin_heade
     assert client.get(url, headers=register(username='hybridother')).status_code == 404
 
 
-@pytest.mark.parametrize("model,expected", [("deepseek-v4.1-flash", {"thinking": {"type": "disabled"}}),
+@pytest.mark.parametrize("model,expected", [("deepseek-v4-1-flash-261017", {"thinking": {"type": "disabled"}}),
     ("kimi-k3", {"reasoning_effort": "low"})])
 async def test_actual_provider_wire_disables_thinking_or_uses_low(monkeypatch, model, expected):
     import httpx

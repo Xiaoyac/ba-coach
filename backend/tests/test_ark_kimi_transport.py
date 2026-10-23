@@ -135,5 +135,5 @@ def test_tail_system_layout_only_on_verified_ark_coding_models(url, model, expec
 def test_flash_lead_uses_cache_friendly_layout():
     from app.provisional_reply import select_lead_provider
     lead = select_lead_provider(DeepSeekProvider(settings()), settings())
-    assert lead.model in {"deepseek-v4.1-flash", "deepseek-v4-1-flash"}
+    assert lead.model == "deepseek-v4-1-flash-261017"
     assert lead.supports_tail_system

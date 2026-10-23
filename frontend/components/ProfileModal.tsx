@@ -17,6 +17,7 @@ import {
   SUPPORTER_RELATION,
   fetchProfile,
   updateProfile,
+  deployModelChoice,
   type Profile,
   type ProfilePatch,
   type ModelProvider,
@@ -50,6 +51,7 @@ export default function ProfileModal({
   const [draft, setDraft] = useState<ProfilePatch>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deploying, setDeploying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -176,6 +178,19 @@ export default function ProfileModal({
     }
   }
 
+  async function handleDeploy() {
+    if (deploying) return;
+    setDeploying(true);
+    setError(null);
+    try {
+      setProfile(await deployModelChoice());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeploying(false);
+    }
+  }
+
   const dirty = Object.keys(draft).length > 0;
 
   return (
@@ -269,13 +284,13 @@ export default function ProfileModal({
 
             {profile.can_manage_models && <Section
               title="模型偏好"
-              hint="选择接下来由哪个模型回复。这个入口是项目阶段性设置，之后可以直接移除，不影响账号和对话记录。"
+              hint="选择只改变你自己的回复模型。按「部署」会把你保存的选择设为所有用户的模型。"
             >
               <div role="radiogroup" aria-label="对话模型" className="grid grid-cols-2 gap-2">
                 {(
                   [
                     ["deepseek", "Kimi K3", "当前主要模型"],
-                    ["doubao", "豆包 Doubao", "火山方舟"],
+                    ["doubao", "DeepSeek Flash 4.1-1017", "不开思考"],
                   ] as const
                 ).map(([provider, label, description]) => {
                   const available = profile.available_providers?.[provider];
@@ -309,9 +324,24 @@ export default function ProfileModal({
               </div>
               {!profile.available_providers?.doubao && (
                 <p className="mt-2 text-[0.66rem] leading-relaxed text-ink-faint">
-                  豆包需要在后端配置 API Key 与模型 ID 后才能启用。
+                  DeepSeek Flash 需要在后端配置 DeepSeek API Key 后才能启用。
                 </p>
               )}
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <span className="text-[0.66rem] leading-relaxed text-ink-faint">
+                  全局：{profile.global_provider === "doubao" ? "DeepSeek Flash 4.1-1017" : "Kimi K3"}
+                  {"preferred_provider" in draft && " · 先保存再部署"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleDeploy()}
+                  disabled={deploying || "preferred_provider" in draft
+                    || profile.global_provider === profile.preferred_provider}
+                  className="rounded-xl border border-accent-edge px-3 py-1.5 text-[0.72rem] font-medium text-accent-ink transition-colors duration-300 hover:bg-accent-wash disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {deploying ? "部署中…" : profile.global_provider === profile.preferred_provider ? "已是全局" : "部署"}
+                </button>
+              </div>
             </Section>}
 
             <Section

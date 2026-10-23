@@ -2,6 +2,7 @@
 
     GET   /api/profile   what the coach currently knows about you
     PATCH /api/profile   change it
+    POST  /api/profile/model/deploy   admin: own model choice → global
 
 Registration asks only for what cannot change (age, living situation) plus the
 handful the coach needs from its first reply (physical limits, movement
@@ -231,7 +232,11 @@ async def _visible_profile(db: AsyncSession, result: ProfileOut, caller: CallerI
     result.research_id = await db.scalar(select(ResearchParticipant.research_id).where(
         ResearchParticipant.account_id == caller.account.id))
     result.can_manage_models = bool(caller.account.settings and caller.account.settings.role == "admin")
-    excluded = set() if result.can_manage_models else {"preferred_provider", "available_providers"}
+    if result.can_manage_models:
+        from ..model_preference import global_provider
+        result.global_provider = await global_provider(db)
+    excluded = (set() if result.can_manage_models
+                else {"preferred_provider", "available_providers", "global_provider"})
     return JSONResponse(result.model_dump(mode="json", exclude=excluded), headers={"Cache-Control": "no-store"})
 
 
@@ -257,6 +262,23 @@ async def read_profile(
     )
     result.current_module = await derived_current_module(db, subject_id=subject_id)
     return await _visible_profile(db, result, caller)
+
+
+@router.post("/model/deploy", response_model=ProfileOut)
+async def deploy_model_choice(
+    caller: CallerIdentity = Depends(require_caller),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Make the admin's own saved model choice the one every member uses."""
+    settings = caller.account.settings
+    if not (settings and settings.role == "admin"):
+        raise HTTPException(403, "只有管理员可以部署模型")
+    provider = settings.preferred_provider or "deepseek"
+    if not configured_providers().get(provider):
+        raise HTTPException(409, "这个模型还没有配置，不能部署")
+    from ..model_preference import deploy_global_provider
+    await deploy_global_provider(db, provider=provider, account_id=caller.account.id)
+    return await read_profile(Response(), caller, db)
 
 
 @router.patch("", response_model=ProfileOut)

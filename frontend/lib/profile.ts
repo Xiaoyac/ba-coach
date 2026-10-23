@@ -108,6 +108,8 @@ export interface Profile {
   can_manage_models: boolean;
   preferred_provider?: ModelProvider;
   available_providers?: Record<ModelProvider, boolean>;
+  /** What every non-admin account uses; an admin changes it with 部署. */
+  global_provider?: ModelProvider;
 
   /** Read-only — programme state, not something the subject sets. */
   current_module: string | null;
@@ -122,7 +124,7 @@ export interface Profile {
  * silently revert a change made on another device.
  */
 export type ProfilePatch = Partial<
-  Omit<Profile, "current_module" | "available_providers" | "can_manage_models">
+  Omit<Profile, "current_module" | "available_providers" | "can_manage_models" | "global_provider">
 >;
 
 async function parse<T>(res: Response, what: string): Promise<T> {
@@ -155,4 +157,13 @@ export async function updateProfile(patch: ProfilePatch): Promise<Profile> {
     body: JSON.stringify(patch),
   });
   return parse(res, "保存档案");
+}
+
+/** Admin only: make their own saved model choice the global one. */
+export async function deployModelChoice(): Promise<Profile> {
+  const res = await fetch(`${API_BASE}/api/profile/model/deploy`, {
+    method: "POST",
+    headers: apiHeaders(),
+  });
+  return parse(res, "部署模型");
 }

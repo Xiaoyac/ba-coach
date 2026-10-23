@@ -90,7 +90,7 @@ class Settings(BaseSettings):
     knowledge_mediator_enabled: bool = True
     # Admin hybrid retrieval uses a separate, non-thinking selector on the
     # existing compatible endpoint. Kimi K3 maps disabled to low effort.
-    knowledge_hybrid_mediator_model: str = "deepseek-v4.1-flash"
+    knowledge_hybrid_mediator_model: str = "deepseek-v4-1-flash-261017"
     # Record post-generation findings without buffering or replacing replies.
     answer_validator_enabled: bool = True
     # The mediator is a bounded selector, not a second conversational model.
@@ -138,7 +138,7 @@ class Settings(BaseSettings):
     reply_lead_provider: Provider | None = None
     reply_lead_base_url: str | None = None
     reply_lead_api_key: str | None = Field(default=None, repr=False)
-    reply_lead_model: str | None = "deepseek-v4.1-flash"
+    reply_lead_model: str | None = "deepseek-v4-1-flash-261017"
     reply_lead_timeout_seconds: float = Field(default=12.0, ge=1, le=20)
     reply_lead_max_tokens: int = Field(default=2048, ge=128, le=8192)
     # Server push pace; the frontend paces what is shown (admins down to 0ms).
@@ -196,7 +196,7 @@ class Settings(BaseSettings):
     # recording it afterwards. Turn off to get the latency back; the module
     # prompts keep their own risk-handling instructions either way.
     risk_gate_enabled: bool = True
-    risk_gate_model: Literal["deepseek-v4.1-flash", "deepseek-v4-1-flash"] = "deepseek-v4.1-flash"
+    risk_gate_model: Literal["deepseek-v4-1-flash-261017"] = "deepseek-v4-1-flash-261017"
 
     # ---- Claude --------------------------------------------------------
     anthropic_api_key: str | None = None
@@ -335,6 +335,15 @@ class Settings(BaseSettings):
     # A self-hosted service, so there is no default URL — must be set.
     memos_api_key: str | None = None
     memos_base_url: str | None = None
+
+    @field_validator("knowledge_hybrid_mediator_model", "reply_lead_model", "risk_gate_model",
+                     "knowledge_rerank_model", "deepseek_model", "deepseek_router_model",
+                     mode="before")
+    @classmethod
+    def _dated_flash(cls, v: object) -> object:
+        # Deployed env files still name the undated Flash; request 1017.
+        from .generation_policy import flash_model
+        return flash_model(v) if isinstance(v, str) else v
 
     @field_validator("cors_origins", mode="before")
     @classmethod

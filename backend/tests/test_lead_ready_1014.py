@@ -93,7 +93,7 @@ async def test_flash_lead_wire_disables_thinking_without_changing_main(monkeypat
     try:
         result=await generate_reply_lead(main,user_input='刚才去散步',history=[],settings=s)
         assert result['text']==LEAD and result['thinking_enabled'] is False
-        assert wire[0]['model']=='deepseek-v4.1-flash'
+        assert wire[0]['model']=='deepseek-v4-1-flash-261017'
         assert wire[0]['thinking']=={'type':'disabled'}
         assert 'reasoning_effort' not in wire[0] and 'thinking_budget' not in wire[0]
         assert main.model=='kimi-k3' and main.deep_reply_enabled and main.reply_effort=='low'

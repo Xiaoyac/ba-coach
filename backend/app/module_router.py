@@ -8,7 +8,7 @@ from time import perf_counter
 from .execution_status import routing_model
 from .router_trace import RouterRequest, RouterResponse
 
-MODEL = 'deepseek-v4.1-flash'
+MODEL = 'deepseek-v4-1-flash-261017'
 EFFORT = 'low'
 
 

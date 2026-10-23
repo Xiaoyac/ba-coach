@@ -8,6 +8,8 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
+from .generation_policy import FLASH_MODEL, FLASH_RESPONSE_MODELS
+
 MAX_RERANK_CANDIDATES = 20
 
 PROMPT = """你只做知识检索的相关性重排，不回答用户，不给教练建议，不选择模块、不修改状态。
@@ -31,7 +33,7 @@ class ListwiseReranker:
         self.settings = settings
         models = {
             "kimi-k3": {"kimi-k3"},
-            "deepseek-v4.1-flash": {"deepseek-v4.1-flash", "deepseek-v4-1-flash"},
+            FLASH_MODEL: FLASH_RESPONSE_MODELS,
         }
         if settings.knowledge_rerank_model not in models:
             raise ValueError("Unsupported listwise reranking model")

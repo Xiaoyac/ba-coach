@@ -605,6 +605,8 @@ class ProfileOut(BaseModel):
     preferred_provider: ModelProvider = "deepseek"
     available_providers: dict[str, bool] = Field(default_factory=dict)
     can_manage_models: bool = False
+    #: What non-admin accounts use; admins change it with 部署.
+    global_provider: ModelProvider | None = None
 
     # Read-only, shown for orientation. `current_module` is the programme's
     # own state machine and `risk_level` is a clinical judgement — neither is

@@ -44,10 +44,8 @@ from ..graph import (
 from ..identity import optional_subject_id, require_subject_id
 from ..generation_control import GenerationControl, GenerationStopped, generations
 from ..models import (
-    AccountSettings,
     Conversation,
     ConversationRuntimeState,
-    UserAccount,
 )
 from ..memos_integration import get_memos_manager
 from ..prompt_store import effective_router_prompt
@@ -275,13 +273,8 @@ async def _resolve_provider(
 ) -> LLMProvider:
     selected = request.provider
     if selected is None and subject_id:
-        selected = (
-            await db.execute(
-                select(AccountSettings.preferred_provider)
-                .join(UserAccount, UserAccount.id == AccountSettings.account_id)
-                .where(UserAccount.profile_uuid == subject_id)
-            )
-        ).scalar_one_or_none()
+        from ..model_preference import subject_provider
+        selected = await subject_provider(db, subject_id)
     try:
         return get_provider(selected)
     except ProviderError as exc:

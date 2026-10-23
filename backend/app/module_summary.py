@@ -2,7 +2,7 @@
 from contextlib import suppress
 from .execution_status import track_call
 
-MODEL = 'deepseek-v4.1-flash'
+MODEL = 'deepseek-v4-1-flash-261017'
 
 
 async def summarize_module(provider, *, system, user, max_tokens):

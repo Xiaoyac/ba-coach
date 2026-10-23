@@ -36,8 +36,10 @@ async def test_legacy_usage_has_no_false_token_capacity(epoch_db):
 
 def test_context_endpoint_is_private_owner_scoped_and_contains_only_counts(client, auth_headers, other_headers, monkeypatch):
     from app.config import get_settings
-    monkeypatch.setattr('app.config.get_settings', lambda: get_settings().model_copy(update={
-        'deepseek_model':'kimi-k3','deepseek_base_url':'https://ark.cn-beijing.volces.com/api/coding/v3'}))
+    patched = get_settings().model_copy(update={'default_provider':'deepseek',
+        'deepseek_model':'kimi-k3','deepseek_base_url':'https://ark.cn-beijing.volces.com/api/coding/v3'})
+    monkeypatch.setattr('app.config.get_settings', lambda: patched)
+    monkeypatch.setattr('app.model_preference.get_settings', lambda: patched)
     created = client.post('/api/conversations', headers=auth_headers).json()
     url = '/api/conversations/' + created['session_id'] + '/context'
     assert client.get(url).status_code == 401

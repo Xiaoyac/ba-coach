@@ -424,6 +424,29 @@ class AccountSettings(Base):
     )
 
 
+class GlobalModelSetting(Base):
+    """The model every non-admin account replies with; one row, id 1.
+
+    An admin chooses for themselves in 模型偏好 and presses 部署 to copy that
+    choice here. No row yet means the configured default provider.
+    """
+
+    __tablename__ = "global_model_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider: Mapped[str] = mapped_column(String(16), nullable=False)
+    updated_by_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), nullable=False, default=_utcnow, onupdate=_utcnow, server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint("provider IN ('deepseek', 'doubao')", name="ck_global_model_provider"),
+    )
+
+
 class AccountEmail(Base):
     """One recovery address per account, kept outside the deployed account table.
 

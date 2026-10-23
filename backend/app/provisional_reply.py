@@ -210,8 +210,9 @@ def select_lead_provider(provider, settings=None):
     from .providers import get_provider
     from .providers.deepseek import DeepSeekProvider
     selected = getattr(settings, "reply_lead_provider", None) or "deepseek"
-    model = getattr(settings, "reply_lead_model", None) or "deepseek-v4.1-flash"
-    if model not in {"deepseek-v4.1-flash", "deepseek-v4-1-flash"}:
+    from .generation_policy import FLASH_MODEL, flash_model
+    model = flash_model(getattr(settings, "reply_lead_model", None)) or FLASH_MODEL
+    if model != FLASH_MODEL:
         raise ValueError("The lead model must be DeepSeek 4.1 Flash with thinking disabled")
     base = getattr(settings, "reply_lead_base_url", None)
     key = getattr(settings, "reply_lead_api_key", None)
@@ -376,7 +377,7 @@ async def with_natural_lead(events, *, provider, user_input, generation_id,
             fast.cancel()
         result = {"text": "", "status": "skipped", "reason_code": "main_ready_before_lead",
                   "displayed": False, "thinking_enabled": False, "usage": {}, "request_id": None,
-                  "model": getattr(settings, "reply_lead_model", None) or "deepseek-v4.1-flash"}
+                  "model": getattr(settings, "reply_lead_model", None) or "deepseek-v4-1-flash-261017"}
         metrics.update(result)
         handoff.set_result(result)
         return result

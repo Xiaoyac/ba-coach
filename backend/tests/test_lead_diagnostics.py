@@ -154,7 +154,7 @@ async def test_existing_ark_credentials_are_reused_in_isolated_flash_client():
     try:
         lead = select_lead_provider(provider, s)
         try:
-            assert lead is not provider and lead.model == 'deepseek-v4.1-flash'
+            assert lead is not provider and lead.model == 'deepseek-v4-1-flash-261017'
             assert lead._settings.deepseek_api_key == s.deepseek_api_key
             assert s.reply_lead_api_key is None and s.reply_lead_base_url is None
         finally:

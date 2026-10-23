@@ -5,7 +5,7 @@ interface in `base.py`:
 
     claude   -> anthropic.AsyncAnthropic
     deepseek -> openai.AsyncOpenAI (base_url=https://api.deepseek.com)
-    doubao   -> openai.AsyncOpenAI (Volcengine Ark compatible endpoint)
+    doubao   -> DeepSeek 4.1 Flash 1017, thinking off (DeepSeek credentials)
 
 Providers are constructed lazily and cached, so an unconfigured provider only
 raises when something actually tries to use it.
@@ -19,7 +19,7 @@ from ..config import get_settings
 from .base import LLMProvider, ProviderError
 from .claude import ClaudeProvider
 from .deepseek import DeepSeekProvider
-from .doubao import DoubaoProvider
+from .flash import FlashProvider
 
 __all__ = ["LLMProvider", "ProviderError", "get_provider", "configured_providers"]
 
@@ -32,7 +32,7 @@ def _build(name: str) -> LLMProvider:
     if name == "deepseek":
         return DeepSeekProvider(settings)
     if name == "doubao":
-        return DoubaoProvider(settings)
+        return FlashProvider(settings)
     raise ProviderError(f"Unknown provider: {name!r}")
 
 
@@ -47,5 +47,5 @@ def configured_providers() -> dict[str, bool]:
     return {
         "claude": bool(settings.anthropic_api_key),
         "deepseek": bool(settings.deepseek_api_key),
-        "doubao": bool(settings.doubao_api_key and settings.doubao_model),
+        "doubao": bool(settings.deepseek_api_key),
     }

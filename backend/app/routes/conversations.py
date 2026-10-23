@@ -439,12 +439,10 @@ async def get_context_usage(
     from ..config import get_settings
     from ..context_usage import history_usage
     from ..generation_policy import is_ark_kimi
-    from ..models import UserAccount
+    from ..model_preference import subject_provider
     conversation = await _owned_or_404(db, session_id=session_id, subject_id=subject_id)
     settings = get_settings()
-    selected = await db.scalar(select(AccountSettings.preferred_provider).join(
-        UserAccount, UserAccount.id == AccountSettings.account_id).where(UserAccount.profile_uuid == subject_id))
-    selected = selected or settings.default_provider
+    selected = await subject_provider(db, subject_id)
     epoch_enabled = settings.main_prefix_cache_enabled and selected == "deepseek" and is_ark_kimi(
         settings, selected, model=str(getattr(settings, f"{selected}_model", "")))
     response.headers["Cache-Control"] = "private, no-store"

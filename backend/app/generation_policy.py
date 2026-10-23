@@ -3,6 +3,18 @@ import re
 import unicodedata
 from urllib.parse import urlparse
 
+#: Ark Coding's dated DeepSeek 4.1 Flash. Older undated names in env/config
+#: are normalized to it, so every Flash caller requests the same version.
+FLASH_MODEL = "deepseek-v4-1-flash-261017"
+LEGACY_FLASH_MODELS = frozenset({"deepseek-v4.1-flash", "deepseek-v4-1-flash"})
+#: Names Ark reports back for a Flash request (it drops the date suffix).
+FLASH_RESPONSE_MODELS = frozenset({FLASH_MODEL, *LEGACY_FLASH_MODELS})
+
+
+def flash_model(name: str | None) -> str | None:
+    return FLASH_MODEL if name in LEGACY_FLASH_MODELS else name
+
+
 FAST_ACKS = frozenset({"好", "好的", "好呀", "嗯", "嗯嗯", "可以", "行", "收到", "谢谢", "谢谢你",
                       "明白了", "我明白了", "知道了", "我知道了", "愿意", "我愿意", "同意", "我同意",
                       "对", "是的", "ok", "okay", "thanks", "你好", "您好", "hi", "hello"})
@@ -83,7 +95,7 @@ def supports_tail_system(settings, provider: str, *, model: str | None = None) -
         return True
     url = urlparse(str(getattr(settings, f"{provider}_base_url", "") or ""))
     name = str(model or getattr(settings, f"{provider}_model", "") or "").casefold()
-    return (provider == "deepseek" and name in {"deepseek-v4.1-flash", "deepseek-v4-1-flash"}
+    return (provider == "deepseek" and name in FLASH_RESPONSE_MODELS
             and url.hostname == "ark.cn-beijing.volces.com"
             and url.path.rstrip("/") == "/api/coding/v3")
 

@@ -39,7 +39,7 @@ async def test_risk_flash_wire_and_graph_branch(context, monkeypatch, flagged):
         assert bool(result['risk']) is bool(flagged)
         assert result['telemetry']['risk_gate_status'] == ('blocked' if flagged else 'passed')
         assert route_after_risk(result) == ('crisis' if flagged else 'module_1')
-        assert captured[0]['model'] == 'deepseek-v4.1-flash'
+        assert captured[0]['model'] == 'deepseek-v4-1-flash-261017'
         assert captured[0]['thinking'] == {'type':'disabled'}
         assert captured[0]['max_tokens'] == 256
         assert 'reasoning_effort' not in captured[0]

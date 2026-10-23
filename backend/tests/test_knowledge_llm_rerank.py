@@ -84,7 +84,7 @@ async def test_flash_wire_model_is_isolated_from_k3_main_and_router():
         await ranker.rank('query', HITS, trace={})
     finally:
         await ranker.provider._client.close()
-    assert captured[0]['model'] == 'deepseek-v4.1-flash'
+    assert captured[0]['model'] == 'deepseek-v4-1-flash-261017'
     assert captured[0]['thinking'] == {'type':'disabled'}
     assert 'reasoning_effort' not in captured[0]
     assert settings.deepseek_model == settings.deepseek_router_model == 'kimi-k3'
