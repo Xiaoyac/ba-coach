@@ -102,6 +102,21 @@
 }
 
 /*
+ * Composer edge: a hairline and a blurred shadow only 3–5% away from the
+ * surface, in every overall style. A solid ring there reads as a hard frame.
+ */
+:root {
+  --composer-edge: color-mix(in srgb, var(--color-ink) 4%, var(--color-panel));
+  --composer-edge-focus: color-mix(in srgb, var(--color-ink) 5%, var(--color-panel));
+  --composer-glow:
+    0 1px 2px color-mix(in srgb, var(--color-ink) 3%, transparent),
+    0 10px 28px -14px color-mix(in srgb, var(--color-ink) 4%, transparent);
+  --composer-glow-focus:
+    0 1px 3px color-mix(in srgb, var(--color-ink) 4%, transparent),
+    0 14px 36px -14px color-mix(in srgb, var(--color-ink) 5%, transparent);
+}
+
+/*
  * Depth — deliberately NOT `@theme --shadow-*`.
  *
  * Tailwind parses shadow values at build time and inlines them into the
@@ -565,12 +580,17 @@ html.theme-porcelain:where(html:not(.style-simple), html:not(.style-simple) *) {
 
   .theme-warm .composer-shell:where(html:not(.style-simple), html:not(.style-simple) *) {
     background: var(--color-panel);
-    border-color: var(--color-line-strong);
+    border-color: var(--composer-edge);
   }
 
   .composer-shell:where(html:not(.style-simple), html:not(.style-simple) *) {
     background: color-mix(in srgb, var(--color-raised) 92%, transparent);
-    box-shadow: 0 8px 32px -18px color-mix(in srgb, var(--color-ink) 24%, transparent);
+    box-shadow: var(--composer-glow);
+  }
+
+  .composer-shell:where(html:not(.style-simple), html:not(.style-simple) *):focus-within {
+    border-color: var(--composer-edge-focus);
+    box-shadow: var(--composer-glow-focus);
   }
 
   .conversation-row-active:where(html:not(.style-simple), html:not(.style-simple) *)::before {

@@ -43,8 +43,7 @@
 }
 
 .style-simple .composer-shell:focus-within {
-  outline: 2px solid var(--color-accent-edge);
-  outline-offset: 2px;
+  box-shadow: var(--composer-glow-focus);
 }
 
 .style-simple .reply-feedback-panel {

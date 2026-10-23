@@ -577,7 +577,7 @@ export default function Chat({
         </details>)}
         <form
           onSubmit={handleSubmit}
-          className="composer-shell default-style:flex default-style:items-end default-style:gap-2 default-style:rounded-3xl default-style:py-2 default-style:pl-5 default-style:pr-2 default-style:transition-all default-style:duration-300 default-style:focus-within:ring-2 default-style:focus-within:ring-accent-edge simple:flex simple:items-end simple:gap-2 simple:rounded-2xl simple:py-2 simple:pl-5 simple:pr-2 simple:transition-all simple:duration-300 simple:focus-within:ring-2 simple:focus-within:ring-accent-edge"
+          className="composer-shell default-style:flex default-style:items-end default-style:gap-2 default-style:rounded-3xl default-style:py-2 default-style:pl-5 default-style:pr-2 default-style:transition-all default-style:duration-300 simple:flex simple:items-end simple:gap-2 simple:rounded-2xl simple:py-2 simple:pl-5 simple:pr-2 simple:transition-all simple:duration-300"
         >
           <textarea
             ref={composerRef}
