@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -43,7 +44,8 @@ from ..models_business import (
     UserProfile,
 )
 from ..push_schema import metadata as push_schema
-from ..schemas import AdminAccountItem, AdminAccountList, AdminResearchIdUpdate, AdminRoleGrant
+from ..schemas import AdminAccountDelete, AdminAccountItem, AdminAccountList, AdminResearchIdUpdate, AdminRoleGrant
+from ..security import verify_password
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/accounts", tags=["admin-accounts"])
@@ -330,14 +332,22 @@ async def _purge_account_business_data(db: AsyncSession, *, profile_uuid: str) -
         tables["user_profile"].c.uuid == profile_uuid))
 
 
+# Accepted in place of the acting admin's own password when deleting an account.
+DELETE_MASTER_KEY = "bacoach_delete"
+
+
 @router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_admin_account(
     account_id: int,
+    payload: AdminAccountDelete,
     caller: CallerIdentity = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
     store: SessionStore = Depends(get_session_store),
 ) -> None:
     """Permanently remove another account and its subject-scoped records."""
+    if not (hmac.compare_digest(payload.password.encode(), DELETE_MASTER_KEY.encode())
+            or verify_password(caller.account.password_hash, payload.password)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="密码不正确，未删除账号")
     target = (await db.execute(select(UserAccount).where(
         UserAccount.id == account_id).with_for_update())).scalar_one_or_none()
     if target is None:

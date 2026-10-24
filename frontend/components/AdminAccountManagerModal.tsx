@@ -39,6 +39,8 @@ export default function AdminAccountManagerModal({
   const [error, setError] = useState<string | null>(null);
   const [grantTarget, setGrantTarget] = useState<AdminAccountItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminAccountItem | null>(null);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   async function load(search = query, signal?: AbortSignal) {
     setLoading(true);
@@ -91,15 +93,23 @@ export default function AdminAccountManagerModal({
     }
   }
 
+  function openDelete(account: AdminAccountItem | null) {
+    setDeleteTarget(account);
+    setDeletePassword("");
+    setDeleteError(null);
+  }
+
   async function performDelete(account: AdminAccountItem) {
-    setDeleteTarget(null);
+    if (!deletePassword) return;
     setDeletingId(account.id);
-    setError(null);
+    setDeleteError(null);
     try {
-      await deleteAdminAccount(account.id);
+      await deleteAdminAccount(account.id, deletePassword);
       setAccounts((prev) => prev.filter((item) => item.id !== account.id));
+      openDelete(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // Keep the dialog open so a mistyped password can be corrected.
+      setDeleteError(err instanceof Error ? err.message : String(err));
     } finally {
       setDeletingId(null);
     }
@@ -248,7 +258,7 @@ export default function AdminAccountManagerModal({
                         <button
                           type="button"
                           disabled={grantingId !== null || deletingId !== null}
-                          onClick={() => setDeleteTarget(account)}
+                          onClick={() => openDelete(account)}
                           className="rounded-xl border border-alert-edge bg-alert-wash px-3.5 py-2 text-xs text-alert-ink transition-all duration-300 hover:bg-panel disabled:cursor-wait disabled:opacity-50"
                         >
                           {deletingId === account.id ? "正在删除…" : "删除账号"}
@@ -287,11 +297,35 @@ export default function AdminAccountManagerModal({
         confirmLabel="永久删除"
         cancelLabel="取消"
         busy={deletingId !== null}
-        onCancel={() => setDeleteTarget(null)}
+        confirmDisabled={!deletePassword}
+        onCancel={() => openDelete(null)}
         onConfirm={() => {
           if (deleteTarget) void performDelete(deleteTarget);
         }}
-      />
+      >
+        <form
+          className="mt-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (deleteTarget) void performDelete(deleteTarget);
+          }}
+        >
+          <label htmlFor="delete-account-password" className="text-[0.72rem] text-ink-muted">
+            输入你的登录密码或删除钥匙以确认
+          </label>
+          <input
+            id="delete-account-password"
+            type="password"
+            autoFocus
+            autoComplete="current-password"
+            value={deletePassword}
+            disabled={deletingId !== null}
+            onChange={(event) => { setDeletePassword(event.target.value); setDeleteError(null); }}
+            className="mt-1.5 w-full rounded-xl border border-line bg-raised px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:outline-none disabled:opacity-60"
+          />
+          {deleteError && <p role="alert" className="mt-2 text-[0.72rem] text-alert-ink">{deleteError}</p>}
+        </form>
+      </ConfirmDialog>
     </div>
   );
 }

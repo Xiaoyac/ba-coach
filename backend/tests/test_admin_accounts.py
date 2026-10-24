@@ -157,12 +157,18 @@ def test_admin_can_delete_another_account_and_cannot_delete_self(
             "/api/admin/accounts", params={"query": "deletecandidate"}, headers=admin_headers
         ).json()["accounts"]
     )
-    deleted = client.delete(f"/api/admin/accounts/{target_id}", headers=admin_headers)
+    wrong = client.request("DELETE", f"/api/admin/accounts/{target_id}",
+                           headers=admin_headers, json={"password": "not-my-password"})
+    assert wrong.status_code == 403
+    assert client.delete(f"/api/admin/accounts/{target_id}", headers=admin_headers).status_code == 422
+    deleted = client.request("DELETE", f"/api/admin/accounts/{target_id}",
+                             headers=admin_headers, json={"password": "correct-horse-battery"})
     assert deleted.status_code == 204, deleted.text
     assert client.get(
         "/api/admin/accounts", params={"query": "deletecandidate"}, headers=admin_headers
     ).json()["accounts"] == []
-    assert client.delete("/api/admin/accounts/999999", headers=admin_headers).status_code == 404
+    assert client.request("DELETE", "/api/admin/accounts/999999", headers=admin_headers,
+                          json={"password": "bacoach_delete"}).status_code == 404
 
     # The route is explicitly destructive but an administrator cannot revoke
     # the session that is authorizing the request.
@@ -171,14 +177,16 @@ def test_admin_can_delete_another_account_and_cannot_delete_self(
             "/api/admin/accounts", params={"query": "directoryadmin"}, headers=admin_headers
         ).json()["accounts"]
     )
-    self_delete = client.delete(f"/api/admin/accounts/{current_id}", headers=admin_headers)
+    self_delete = client.request("DELETE", f"/api/admin/accounts/{current_id}",
+                                 headers=admin_headers, json={"password": "bacoach_delete"})
     assert self_delete.status_code == 409
 
 
 def test_regular_account_cannot_delete_an_account(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
-    assert client.delete("/api/admin/accounts/1", headers=auth_headers).status_code == 403
+    assert client.request("DELETE", "/api/admin/accounts/1", headers=auth_headers,
+                          json={"password": "bacoach_delete"}).status_code == 403
 
 
 def test_same_nickname_can_use_distinct_user_chosen_tags(

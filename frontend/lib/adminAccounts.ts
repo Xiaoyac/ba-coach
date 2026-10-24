@@ -43,10 +43,11 @@ export async function grantAdminRole(accountId: number): Promise<AdminAccountIte
   return res.json() as Promise<AdminAccountItem>;
 }
 
-export async function deleteAdminAccount(accountId: number): Promise<void> {
+export async function deleteAdminAccount(accountId: number, password: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/admin/accounts/${accountId}`, {
     method: "DELETE",
-    headers: apiHeaders(),
+    headers: apiHeaders({ json: true }),
+    body: JSON.stringify({ password }),
   });
   if (!res.ok) throw new Error(await detail(res, "删除账号失败"));
 }

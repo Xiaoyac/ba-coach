@@ -160,7 +160,7 @@ def test_deleting_an_account_removes_measurements_and_frees_its_research_id(clie
     saved = measure(client, register('measuredeleted'))
     target = account_id(client, admin_headers, 'measuredeleted')
     client.put(f'/api/admin/accounts/{target}/research-id', headers=admin_headers, json={'research_id': 'P900'})
-    assert client.delete(f'/api/admin/accounts/{target}', headers=admin_headers).status_code == 204
+    assert client.request('DELETE', f'/api/admin/accounts/{target}', headers=admin_headers, json={'password': 'bacoach_delete'}).status_code == 204
     register('measurereuse')
     reuse = account_id(client, admin_headers, 'measurereuse')
     assert client.put(f'/api/admin/accounts/{reuse}/research-id', headers=admin_headers,

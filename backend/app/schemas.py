@@ -776,6 +776,11 @@ class AdminRoleGrant(BaseModel):
     role: Literal["admin"]
 
 
+class AdminAccountDelete(BaseModel):
+    # The acting admin's own password, or the shared delete key.
+    password: str = Field(..., min_length=1, max_length=256)
+
+
 class IssueReportCreate(BaseModel):
     """User-authored report plus diagnostics captured by the web client."""
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 
 export default function ConfirmDialog({
   open,
@@ -10,6 +10,8 @@ export default function ConfirmDialog({
   cancelLabel = "取消",
   tone = "accent",
   busy = false,
+  confirmDisabled = false,
+  children,
   onConfirm,
   onCancel,
 }: {
@@ -20,6 +22,9 @@ export default function ConfirmDialog({
   cancelLabel?: string;
   tone?: "accent" | "alert";
   busy?: boolean;
+  confirmDisabled?: boolean;
+  /** Extra content between the description and the buttons, e.g. a field. */
+  children?: ReactNode;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -73,6 +78,7 @@ export default function ConfirmDialog({
         >
           {description}
         </p>
+        {children}
         <div className="mt-6 flex justify-end gap-2">
           <button
             type="button"
@@ -84,8 +90,8 @@ export default function ConfirmDialog({
           </button>
           <button
             type="button"
-            autoFocus
-            disabled={busy}
+            autoFocus={!children}
+            disabled={busy || confirmDisabled}
             onClick={onConfirm}
             className={`min-w-24 rounded-full border px-4 py-2 text-xs font-medium transition-all duration-300 disabled:cursor-wait disabled:opacity-50 ${
               alertTone
