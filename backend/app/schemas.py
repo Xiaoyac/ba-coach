@@ -759,6 +759,7 @@ class AdminAccountItem(BaseModel):
     role: Literal["user", "admin"]
     created_at: datetime
     last_login_at: datetime | None = None
+    last_active_at: datetime | None = None
     research_id: str | None = None
     phone: str | None = None
 

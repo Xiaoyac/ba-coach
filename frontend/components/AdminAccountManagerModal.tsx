@@ -12,8 +12,8 @@ import { CloseMark, UsersMark } from "@/components/icons";
 import InvitationManager from "@/components/InvitationManager";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
-function formatDate(value: string | null): string {
-  if (!value) return "尚未登录";
+function formatDate(value: string | null | undefined): string {
+  if (!value) return "暂无记录";
   return new Date(value).toLocaleString("zh-CN", {
     year: "numeric",
     month: "2-digit",
@@ -239,7 +239,7 @@ export default function AdminAccountManagerModal({
                         手机号：{account.phone ?? "未填写"}
                       </p>
                       <p className="mt-1 text-[0.68rem] text-ink-faint">
-                        注册：{formatDate(account.created_at)} · 最近登录：{formatDate(account.last_login_at)}
+                        注册：{formatDate(account.created_at)} · 最近活动：{formatDate(account.last_active_at)}
                       </p>
                       <ResearchIdField account={account} onSaved={(updated) => setAccounts((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))} />
                     </div>

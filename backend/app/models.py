@@ -362,6 +362,9 @@ class UserAccount(Base):
         UTCDateTime(), nullable=False, default=_utcnow, server_default=func.now()
     )
     last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    # Bumped by any request on a live session, at most every few minutes, so
+    # someone who stays signed in still shows as active.
+    last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
     sessions: Mapped[list[AuthSession]] = relationship(
         back_populates="account", cascade="all, delete-orphan", lazy="selectin"

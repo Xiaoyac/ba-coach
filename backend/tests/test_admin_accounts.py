@@ -214,3 +214,26 @@ def test_same_nickname_can_use_distinct_user_chosen_tags(
     )
     assert listed.status_code == 200, listed.text
     assert {item["username"] for item in listed.json()["accounts"]} == set(ids)
+
+
+def test_staying_signed_in_moves_last_active_but_not_last_login(
+    client: TestClient, admin_headers: dict[str, str], auth_headers: dict[str, str], db_sessionmaker
+) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    async def backdate() -> None:
+        async with db_sessionmaker() as db:
+            old = datetime.now(timezone.utc) - timedelta(days=1)
+            for account in (await db.execute(select(UserAccount))).scalars():
+                account.last_login_at = old
+                account.last_seen_at = old
+            await db.commit()
+
+    asyncio.run(backdate())
+    assert client.get("/api/auth/me", headers=auth_headers).status_code == 200
+
+    accounts = client.get("/api/admin/accounts", headers=admin_headers).json()["accounts"]
+    member = next(a for a in accounts if a["role"] == "user")
+    login = datetime.fromisoformat(member["last_login_at"])
+    active = datetime.fromisoformat(member["last_active_at"])
+    assert active - login > timedelta(hours=23)

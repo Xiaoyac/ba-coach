@@ -8,6 +8,7 @@ export interface AdminAccountItem {
   role: "user" | "admin";
   created_at: string;
   last_login_at: string | null;
+  last_active_at?: string | null;
   research_id?: string | null;
   phone?: string | null;
 }
