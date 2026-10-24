@@ -33,6 +33,7 @@ Three flavours:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
@@ -49,6 +50,9 @@ _UNAUTHENTICATED = HTTPException(
     # again, not a permission problem to report to the user as a dead end.
     headers={"WWW-Authenticate": "Bearer"},
 )
+
+# 最近活动 only needs minute-level freshness; one write per account per window.
+_SEEN_EVERY = timedelta(minutes=5)
 
 
 @dataclass(frozen=True)
@@ -105,7 +109,13 @@ async def _resolve(request: Request, db: AsyncSession) -> CallerIdentity | None:
         await db.commit()
         return None
 
-    return CallerIdentity(account=session.account, session=session)
+    account = session.account
+    now = _utcnow()
+    if account.last_seen_at is None or now - account.last_seen_at >= _SEEN_EVERY:
+        account.last_seen_at = now
+        await db.commit()
+
+    return CallerIdentity(account=account, session=session)
 
 
 async def require_caller(

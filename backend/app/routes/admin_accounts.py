@@ -60,6 +60,7 @@ def _item(row) -> AdminAccountItem:
         role=settings.role if settings else "user",
         created_at=account.created_at,
         last_login_at=account.last_login_at,
+        last_active_at=max(filter(None, (account.last_seen_at, account.last_login_at)), default=None),
         research_id=research_id,
         phone=phone,
     )
