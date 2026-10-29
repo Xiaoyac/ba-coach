@@ -8,7 +8,8 @@ import {
   setResearchId,
   type AdminAccountItem,
 } from "@/lib/adminAccounts";
-import { CloseMark, UsersMark } from "@/components/icons";
+import { ChatDotsMark, CloseMark, UsersMark } from "@/components/icons";
+import AdminChatHistory from "@/components/AdminChatHistory";
 import InvitationManager from "@/components/InvitationManager";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
@@ -39,6 +40,7 @@ export default function AdminAccountManagerModal({
   const [error, setError] = useState<string | null>(null);
   const [grantTarget, setGrantTarget] = useState<AdminAccountItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminAccountItem | null>(null);
+  const [historyTarget, setHistoryTarget] = useState<AdminAccountItem | null>(null);
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -67,11 +69,11 @@ export default function AdminAccountManagerModal({
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !grantTarget && !deleteTarget) onClose();
+      if (event.key === "Escape" && !grantTarget && !deleteTarget && !historyTarget) onClose();
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [deleteTarget, grantTarget, onClose]);
+  }, [deleteTarget, grantTarget, historyTarget, onClose]);
 
   async function handleGrant(account: AdminAccountItem) {
     setGrantTarget(account);
@@ -243,8 +245,17 @@ export default function AdminAccountManagerModal({
                       </p>
                       <ResearchIdField account={account} onSaved={(updated) => setAccounts((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))} />
                     </div>
-                    {!isCurrent && (
-                      <div className="flex shrink-0 flex-wrap gap-2">
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setHistoryTarget(account)}
+                        aria-label={`查看 ${account.nickname ?? account.username} 的聊天记录`}
+                        title="聊天记录"
+                        className="grid h-[2.125rem] w-10 place-items-center rounded-xl border border-line bg-panel text-ink-muted transition-all duration-300 hover:border-accent-edge hover:bg-accent-wash hover:text-accent-ink"
+                      >
+                        <ChatDotsMark className="h-5 w-5" />
+                      </button>
+                    {!isCurrent && (<>
                         {account.role === "user" && (
                           <button
                             type="button"
@@ -263,8 +274,8 @@ export default function AdminAccountManagerModal({
                         >
                           {deletingId === account.id ? "正在删除…" : "删除账号"}
                         </button>
-                      </div>
-                    )}
+                    </>)}
+                    </div>
                   </article>
                 );
               })}
@@ -278,6 +289,7 @@ export default function AdminAccountManagerModal({
         </>}
       </section>
 
+      {historyTarget && <AdminChatHistory account={historyTarget} onClose={() => setHistoryTarget(null)} />}
       <ConfirmDialog
         open={grantTarget !== null}
         title="授予管理员权限？"

@@ -44,7 +44,14 @@ from ..models_business import (
     UserProfile,
 )
 from ..push_schema import metadata as push_schema
-from ..schemas import AdminAccountDelete, AdminAccountItem, AdminAccountList, AdminResearchIdUpdate, AdminRoleGrant
+from ..schemas import (
+    AdminAccountDelete,
+    AdminAccountItem,
+    AdminAccountList,
+    AdminConversationTimeline,
+    AdminResearchIdUpdate,
+    AdminRoleGrant,
+)
 from ..security import verify_password
 
 logger = logging.getLogger(__name__)
@@ -93,6 +100,34 @@ async def list_admin_accounts(
         await db.execute(statement.order_by(UserAccount.created_at.desc()).limit(100))
     ).all()
     return AdminAccountList(accounts=[_item(row) for row in rows])
+
+
+async def _directory_row_or_404(db: AsyncSession, account_id: int):
+    row = (await db.execute(_directory_query().where(UserAccount.id == account_id))).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到该账号")
+    return row
+
+
+@router.get("/{account_id}/conversations", response_model=AdminConversationTimeline)
+async def read_account_conversations(
+    account_id: int,
+    caller: CallerIdentity = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminConversationTimeline:
+    """Read-only transcript of every chat an account has had. Nothing is written."""
+    from .conversations import _detail
+
+    row = await _directory_row_or_404(db, account_id)
+    target = row[0]
+    chats = (await db.execute(
+        select(Conversation)
+        .where(Conversation.subject_id == target.profile_uuid)
+        .order_by(Conversation.created_at, Conversation.id)
+    )).scalars().all()
+    logger.info("administrator %s read the chats of %s",
+                await audit_identity(db, caller.account), await audit_identity(db, target))
+    return AdminConversationTimeline(account=_item(row), conversations=[_detail(c) for c in chats])
 
 
 @router.patch("/{account_id}/role", response_model=AdminAccountItem)

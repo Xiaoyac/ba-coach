@@ -322,3 +322,49 @@ export function GearMark({ className }: IconProps) {
     <circle cx="12" cy="12" r="3" />
   </svg>;
 }
+
+export function SearchMark({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true" {...strokeProps}>
+      <circle cx="10.8" cy="10.8" r="6.3" />
+      <path d="m15.4 15.4 4.1 4.1" />
+    </svg>
+  );
+}
+
+export function CalendarMark({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true" {...strokeProps}>
+      <rect x="4.5" y="5.8" width="15" height="13.7" rx="2.6" />
+      <path d="M4.5 10h15M8.6 4v3.4M15.4 4v3.4" />
+    </svg>
+  );
+}
+
+export function ChevronLeftMark({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true" {...strokeProps}>
+      <path d="M14.5 5.5 8 12l6.5 6.5" />
+    </svg>
+  );
+}
+
+export function ChevronRightMark({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true" {...strokeProps}>
+      <path d="M9.5 5.5 16 12l-6.5 6.5" />
+    </svg>
+  );
+}
+
+/** Opens a member's chat history: a speech bubble with three quiet dots. */
+export function ChatDotsMark({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true" {...strokeProps}>
+      <path d="M12 4.6c4.5 0 8 3 8 6.8s-3.5 6.8-8 6.8c-.9 0-1.8-.1-2.6-.4L5.2 19.4l1.1-3.6C4.9 14.6 4 13.1 4 11.4 4 7.6 7.5 4.6 12 4.6Z" />
+      <circle cx="8.6" cy="11.4" r=".55" fill="currentColor" />
+      <circle cx="12" cy="11.4" r=".55" fill="currentColor" />
+      <circle cx="15.4" cy="11.4" r=".55" fill="currentColor" />
+    </svg>
+  );
+}

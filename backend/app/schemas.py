@@ -935,3 +935,10 @@ class ConversationUpdate(BaseModel):
     # strips it — a title that is only whitespace is a mistake, not a rename.
     title: str | None = Field(default=None, max_length=80)
     pinned: bool | None = None
+
+
+class AdminConversationTimeline(BaseModel):
+    """Every chat of one account, oldest first, each with its full transcript."""
+
+    account: AdminAccountItem
+    conversations: list[ConversationDetail]

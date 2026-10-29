@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.models import AccountSettings, UserAccount
+from app.models import AccountSettings, Conversation, ConversationMessage, UserAccount
 
 
 @pytest.fixture
@@ -237,3 +237,37 @@ def test_staying_signed_in_moves_last_active_but_not_last_login(
     login = datetime.fromisoformat(member["last_login_at"])
     active = datetime.fromisoformat(member["last_active_at"])
     assert active - login > timedelta(hours=23)
+
+
+def test_admin_reads_another_accounts_chats_read_only(
+    client: TestClient, admin_headers: dict[str, str], register, db_sessionmaker
+) -> None:
+    member = register(username="chatreader", nickname="被查看用户")
+    account_id = next(item["id"] for item in client.get(
+        "/api/admin/accounts", params={"query": "chatreader"}, headers=admin_headers
+    ).json()["accounts"])
+
+    async def seed() -> None:
+        async with db_sessionmaker() as db:
+            profile = (await db.execute(select(UserAccount.profile_uuid).where(
+                UserAccount.username == "chatreader"))).scalar_one()
+            chat = Conversation(subject_id=profile, session_id="admin-read-1", title="最近有点累")
+            chat.messages = [
+                ConversationMessage(position=0, role="user", content="最近总是提不起劲"),
+                ConversationMessage(position=1, role="assistant", content="听起来这段时间不轻松。"),
+            ]
+            db.add_all([chat, Conversation(subject_id="someone-else", session_id="other-1", title="别人的")])
+            await db.commit()
+    asyncio.run(seed())
+
+    listed = client.get(f"/api/admin/accounts/{account_id}/conversations", headers=admin_headers)
+    assert listed.status_code == 200, listed.text
+    body = listed.json()
+    assert body["account"]["username"] == "chatreader"
+    # Only this account's chat, with its whole transcript; the other subject's is absent.
+    assert [c["session_id"] for c in body["conversations"]] == ["admin-read-1"]
+    assert [m["content"] for m in body["conversations"][0]["messages"]] == [
+        "最近总是提不起劲", "听起来这段时间不轻松。"]
+    assert client.get("/api/admin/accounts/999999/conversations", headers=admin_headers).status_code == 404
+    # Members cannot read anyone's history, their own included, through this route.
+    assert client.get(f"/api/admin/accounts/{account_id}/conversations", headers=member).status_code == 403

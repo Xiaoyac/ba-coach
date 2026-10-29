@@ -1,5 +1,6 @@
 import { API_BASE } from "@/lib/api";
 import { apiHeaders } from "@/lib/http";
+import type { ConversationDetail } from "@/lib/conversations";
 
 export interface AdminAccountItem {
   id: number;
@@ -61,4 +62,17 @@ export async function setResearchId(accountId: number, researchId: string | null
   });
   if (!res.ok) throw new Error(await detail(res, res.status === 409 ? "这个研究编号已被其他账号使用" : "保存研究编号失败"));
   return res.json() as Promise<AdminAccountItem>;
+}
+
+/** Every chat of one account, oldest first, each with its full transcript. */
+export async function fetchAccountConversations(
+  accountId: number,
+  signal?: AbortSignal,
+): Promise<{ account: AdminAccountItem; conversations: ConversationDetail[] }> {
+  const res = await fetch(`${API_BASE}/api/admin/accounts/${accountId}/conversations`, {
+    headers: apiHeaders(),
+    signal,
+  });
+  if (!res.ok) throw new Error(await detail(res, "加载聊天记录失败"));
+  return res.json();
 }
