@@ -9,6 +9,7 @@ import {
   ChevronLeftMark,
   ChevronRightMark,
   CloseMark,
+  DownloadMark,
   SearchMark,
 } from "@/components/icons";
 import { fetchAccountConversations, type AdminAccountItem } from "@/lib/adminAccounts";
@@ -39,6 +40,62 @@ function stamp(value: string): string {
 }
 
 type Entry = { key: string; chat: ConversationDetail; message: ChatMessage; day: string | null };
+
+function fullTime(value: string | Date): string {
+  return new Date(value).toLocaleString("zh-CN", {
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+function clock(value: string): string {
+  return new Date(value).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+}
+
+/** One line of a message, for the export bar. */
+function gist(entry: Entry): string {
+  const flat = entry.message.content.replace(/\*\*|`|^#+\s|\|/gm, " ").replace(/\s+/g, " ").trim();
+  return flat.length > 14 ? `${flat.slice(0, 14)}…` : flat || "（空消息）";
+}
+
+/** The picked messages as a Markdown transcript, with day and conversation headings. */
+function toMarkdown(account: AdminAccountItem, name: string, picked: Entry[], several: boolean): string {
+  const first = picked[0].message.created_at;
+  const last = picked[picked.length - 1].message.created_at;
+  const lines = [`# ${name} 的聊天记录`, "", `- 登录账号：${account.username}`];
+  if (account.research_id) lines.push(`- 被试编号：${account.research_id}`);
+  lines.push(
+    `- 范围：${first ? fullTime(first) : "未知"} 至 ${last ? fullTime(last) : "未知"}，共 ${picked.length} 条消息`,
+    `- 导出时间：${fullTime(new Date())}`,
+    "",
+  );
+  let chat: string | null = null;
+  let day: string | null = null;
+  for (const entry of picked) {
+    if (several && entry.chat.session_id !== chat) {
+      chat = entry.chat.session_id;
+      lines.push(`## 对话：${entry.chat.title || "未命名对话"}`, "");
+    }
+    if (entry.day && entry.day !== day) {
+      day = entry.day;
+      lines.push(`### ${new Date(entry.message.created_at!).toLocaleDateString("zh-CN", {
+        year: "numeric", month: "long", day: "numeric", weekday: "long",
+      })}`, "");
+    }
+    const speaker = entry.message.role === "user" ? name : entry.message.role === "assistant" ? "教练" : entry.message.role;
+    lines.push(`**${speaker}**${entry.message.created_at ? ` · ${clock(entry.message.created_at)}` : ""}`, "",
+      entry.message.content.trim(), "");
+  }
+  return lines.join("\n");
+}
+
+function download(filename: string, text: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
 /** A short excerpt around the first hit, with every hit marked. */
 function excerpt(text: string, needle: string): ReactNode {
@@ -118,6 +175,10 @@ export default function AdminChatHistory({
   const [query, setQuery] = useState("");
   const [pickingDate, setPickingDate] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
+  // Export mode: click one message as the start and another as the end.
+  const [exporting, setExporting] = useState(false);
+  const [rangeStart, setRangeStart] = useState<string | null>(null);
+  const [rangeEnd, setRangeEnd] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -152,6 +213,41 @@ export default function AdminChatHistory({
     : [], [entries, needle]);
   const searching = needle.length > 0;
 
+  const position = useMemo(() => new Map(entries.map((entry, index) => [entry.key, index])), [entries]);
+  const ends = [rangeStart, rangeEnd ?? rangeStart].map((key) => (key === null ? -1 : position.get(key) ?? -1));
+  const low = Math.min(...ends);
+  const high = Math.max(...ends);
+  const picked = low >= 0 ? entries.slice(low, high + 1) : [];
+  const inRange = (key: string) => {
+    const at = position.get(key);
+    return at !== undefined && low >= 0 && at >= low && at <= high;
+  };
+
+  function closeExport() {
+    setExporting(false);
+    setRangeStart(null);
+    setRangeEnd(null);
+  }
+
+  /** First click sets the start, second the end; a third starts over. */
+  function pick(key: string) {
+    if (rangeStart === null || rangeEnd !== null) {
+      setRangeStart(key);
+      setRangeEnd(null);
+    } else {
+      setRangeEnd(key);
+    }
+  }
+
+  function exportPicked() {
+    if (!picked.length) return;
+    const span = [picked[0], picked[picked.length - 1]]
+      .map((entry) => entry.day?.replaceAll("-", "") ?? "").filter(Boolean);
+    const range = span.length ? `_${[...new Set(span)].join("-")}` : "";
+    download(`${account.research_id || account.username}_聊天记录${range}.md`,
+      toMarkdown(account, account.nickname ?? account.username, picked, (chats?.length ?? 0) > 1));
+  }
+
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
@@ -159,11 +255,16 @@ export default function AdminChatHistory({
       event.stopPropagation();
       if (pickingDate) setPickingDate(false);
       else if (searching) setQuery("");
+      else if (exporting) {
+        setExporting(false);
+        setRangeStart(null);
+        setRangeEnd(null);
+      }
       else onClose();
     }
     document.addEventListener("keydown", onKeyDown, true);
     return () => document.removeEventListener("keydown", onKeyDown, true);
-  }, [onClose, pickingDate, searching]);
+  }, [exporting, onClose, pickingDate, searching]);
 
   /** Scroll only the transcript; scrollIntoView would also move the sheet and hide its header. */
   function reveal(elementId: string, highlight?: string) {
@@ -269,6 +370,18 @@ export default function AdminChatHistory({
               <CalendarMark className="h-4 w-4" />
               日期
             </button>
+            <button
+              type="button"
+              aria-pressed={exporting}
+              disabled={!entries.length}
+              onClick={() => (exporting ? closeExport() : setExporting(true))}
+              className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-2 text-sm transition-colors duration-200 disabled:opacity-40 ${
+                exporting ? "border-accent-edge bg-accent-wash text-accent-ink" : "border-line text-ink-muted hover:bg-raised hover:text-ink"
+              }`}
+            >
+              <DownloadMark className="h-4 w-4" />
+              导出
+            </button>
             {pickingDate && (
               <>
                 <button type="button" aria-label="关闭日期选择" className="fixed inset-0 z-10 cursor-default" onClick={() => setPickingDate(false)} />
@@ -282,6 +395,43 @@ export default function AdminChatHistory({
               </>
             )}
           </div>
+
+          {exporting && (
+            <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 rounded-2xl border border-line bg-canvas/50 px-3.5 py-2.5 text-xs">
+              <span className="text-ink-faint">导出范围</span>
+              {[{ label: "开始", key: rangeStart, index: low }, { label: "结束", key: rangeEnd, index: high }].map((end, i) => (
+                <Fragment key={end.label}>
+                  {i === 1 && <span className="text-ink-faint">→</span>}
+                  <span className={`inline-flex min-w-0 max-w-[16rem] items-center gap-1.5 rounded-full px-2.5 py-1 ${
+                    end.key ? "bg-panel text-ink" : "text-ink-faint"
+                  }`}>
+                    <span className="shrink-0 text-ink-muted">{end.label}</span>
+                    {end.key && end.index >= 0 ? (
+                      <span className="truncate">
+                        {entries[end.index].message.created_at && `${stamp(entries[end.index].message.created_at!)} · `}
+                        {gist(entries[end.index])}
+                      </span>
+                    ) : (
+                      <span className="truncate">{i === 0 || rangeStart ? "点一条消息" : "先选开始"}</span>
+                    )}
+                  </span>
+                </Fragment>
+              ))}
+              <span className="ml-auto flex items-center gap-2">
+                {picked.length > 0 && <span className="text-ink-faint">共 {picked.length} 条</span>}
+                {rangeStart && (
+                  <button type="button" onClick={() => { setRangeStart(null); setRangeEnd(null); }}
+                    className="rounded-full px-2.5 py-1 text-ink-muted hover:bg-raised hover:text-ink">
+                    清除
+                  </button>
+                )}
+                <button type="button" disabled={!picked.length} onClick={exportPicked}
+                  className="rounded-full border border-accent-edge bg-accent-wash px-3.5 py-1.5 font-medium text-accent-ink transition-colors duration-200 hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40">
+                  导出 Markdown
+                </button>
+              </span>
+            </div>
+          )}
         </header>
 
         <div className="relative min-h-0 flex-1">
@@ -307,9 +457,9 @@ export default function AdminChatHistory({
               <div className="space-y-5 sm:space-y-6">
                 <p className="pb-2 text-center text-[0.68rem] text-ink-faint">— 聊天记录从这里开始 —</p>
                 {chats.map((chat) => (
-                  <section key={chat.session_id} aria-label={chat.title || "未命名对话"} className="space-y-5 sm:space-y-6">
+                  <section key={chat.session_id} aria-label={chat.title || "未命名对话"}>
                     {several && chat.messages.length > 0 && (
-                      <div className="mx-auto max-w-3xl pt-4 text-center">
+                      <div className="mx-auto max-w-3xl pb-2.5 pt-4 text-center sm:pb-3">
                         <span className="inline-block max-w-full truncate rounded-full bg-raised px-3.5 py-1.5 text-[0.7rem] text-ink-muted">
                           新对话 · {chat.title || "未命名对话"}
                         </span>
@@ -324,14 +474,28 @@ export default function AdminChatHistory({
                         <Fragment key={key}>
                           {newDay && (
                             <div id={`admin-day-${day}`} role="separator"
-                              className="mx-auto flex max-w-3xl items-center gap-3 pt-2 text-[0.68rem] text-ink-faint">
+                              className="mx-auto flex max-w-3xl items-center gap-3 pb-2.5 pt-5 text-[0.68rem] text-ink-faint sm:pb-3 sm:pt-6">
                               <span className="h-px flex-1 bg-line" />
                               {dayLabel(message.created_at!)}
                               <span className="h-px flex-1 bg-line" />
                             </div>
                           )}
                           <div id={`admin-msg-${key}`}
-                            className={`-mx-3 px-3 py-1 transition-colors duration-200 sm:-mx-8 sm:px-8 ${flash === key ? "bg-[color-mix(in_srgb,var(--tint)_4%,transparent)]" : "bg-transparent"}`}>
+                            onClick={exporting ? (event) => {
+                              // The copy button inside a row still copies instead of picking.
+                              if (!(event.target as HTMLElement).closest("button, a")) pick(key);
+                            } : undefined}
+                            // Spacing is padding, not margin, so a picked range tints as one block.
+                            className={`-mx-3 px-3 py-2.5 transition-colors duration-200 sm:-mx-8 sm:px-8 sm:py-3 ${
+                              flash === key || (exporting && inRange(key))
+                                ? "bg-[color-mix(in_srgb,var(--tint)_4%,transparent)]"
+                                : exporting ? "cursor-pointer hover:bg-[color-mix(in_srgb,var(--tint)_3%,transparent)]" : "bg-transparent"
+                            }`}>
+                            {exporting && (key === entries[low]?.key || key === entries[high]?.key) && (
+                              <p className="mx-auto max-w-5xl pb-1 text-[0.66rem] font-medium text-accent-ink">
+                                {low === high ? "导出开始 · 结束" : key === entries[low].key ? "导出开始" : "导出结束"}
+                              </p>
+                            )}
                             <MessageRow
                               message={message}
                               pending={false}

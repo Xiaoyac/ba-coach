@@ -368,3 +368,11 @@ export function ChatDotsMark({ className }: IconProps) {
     </svg>
   );
 }
+
+export function DownloadMark({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true" {...strokeProps}>
+      <path d="M12 4.5v10.2M7.6 10.4 12 14.8l4.4-4.4M5 18.8h14" />
+    </svg>
+  );
+}
