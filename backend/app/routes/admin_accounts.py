@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +16,8 @@ from ..account_identity import audit_identity
 from ..db import get_db
 from ..config import get_settings
 from ..identity import CallerIdentity, require_admin
+from ..knowledge_references import KnowledgeReferences
+from ..request_diagnostics import MessageRequests
 from ..models import (
     AccountSettings,
     AIExecutionEvent,
@@ -132,6 +135,50 @@ async def read_account_conversations(
     logger.info("administrator %s read the chats of %s",
                 await audit_identity(db, caller.account), await audit_identity(db, target))
     return AdminConversationTimeline(account=_item(row), conversations=[_detail(c) for c in chats])
+
+
+class AdminMessageDebug(BaseModel):
+    """What the 调试详情 panels of one saved reply need beyond the transcript itself."""
+
+    knowledge_references: KnowledgeReferences
+    request_records: MessageRequests
+
+
+@router.get("/{account_id}/messages/{message_id}/debug", response_model=AdminMessageDebug)
+async def read_account_message_debug(
+    account_id: int,
+    message_id: int,
+    response: Response,
+    _caller: CallerIdentity = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminMessageDebug:
+    """Saved knowledge chunks, mediator advice and model requests of one reply. Nothing is written."""
+    from ..request_records import request_records
+
+    response.headers["Cache-Control"] = "private, no-store"
+    target = (await _directory_row_or_404(db, account_id))[0]
+    # Join through the account's own chats: a foreign or deleted message reveals nothing.
+    conversation = (await db.execute(
+        select(Conversation)
+        .join(ConversationMessage, ConversationMessage.conversation_id == Conversation.id)
+        .where(ConversationMessage.id == message_id,
+               ConversationMessage.role == "assistant",
+               Conversation.subject_id == target.profile_uuid)
+    )).scalar_one_or_none()
+    if conversation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到这条回复")
+    metadata = (await db.execute(
+        select(AIExecutionEvent.event_metadata)
+        .where(AIExecutionEvent.assistant_message_id == message_id,
+               AIExecutionEvent.stage == "main_generation",
+               AIExecutionEvent.subject_id == target.profile_uuid)
+        .order_by(AIExecutionEvent.id.desc()).limit(1)
+    )).scalar_one_or_none()
+    saved = (metadata or {}).get("knowledge_references")
+    return AdminMessageDebug(
+        knowledge_references=KnowledgeReferences.model_validate(saved) if saved else KnowledgeReferences(),
+        request_records=(await request_records(db, conversation, message_id=message_id))[message_id],
+    )
 
 
 SHARE_BUSY = "这段对话正在生成或保存回复，请稍后再创建分享链接。"

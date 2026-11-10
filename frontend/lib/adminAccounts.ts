@@ -1,6 +1,7 @@
 import { API_BASE } from "@/lib/api";
 import { apiHeaders } from "@/lib/http";
 import type { ConversationDetail } from "@/lib/conversations";
+import type { MessageDebugDetails } from "@/components/KnowledgeReferenceDetails";
 import type { CreatedConversationShare } from "@/lib/shares";
 
 export interface AdminAccountItem {
@@ -75,6 +76,21 @@ export async function fetchAccountConversations(
     signal,
   });
   if (!res.ok) throw new Error(await detail(res, "加载聊天记录失败"));
+  return res.json();
+}
+
+/** What the 调试详情 panels of one saved reply need beyond the transcript itself. */
+export async function fetchAccountMessageDebug(
+  accountId: number,
+  messageId: number,
+  signal?: AbortSignal,
+): Promise<MessageDebugDetails> {
+  const res = await fetch(`${API_BASE}/api/admin/accounts/${accountId}/messages/${messageId}/debug`, {
+    headers: apiHeaders(),
+    signal,
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await detail(res, "加载调试详情失败"));
   return res.json();
 }
 

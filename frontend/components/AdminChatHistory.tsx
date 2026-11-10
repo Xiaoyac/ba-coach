@@ -13,7 +13,8 @@ import {
   DownloadMark,
   SearchMark,
 } from "@/components/icons";
-import { createAccountShare, fetchAccountConversations, type AdminAccountItem } from "@/lib/adminAccounts";
+import type { KnowledgeReferenceSource } from "@/components/KnowledgeReferenceDetails";
+import { createAccountShare, fetchAccountConversations, fetchAccountMessageDebug, type AdminAccountItem } from "@/lib/adminAccounts";
 import type { ChatMessage } from "@/lib/api";
 import type { ConversationDetail } from "@/lib/conversations";
 
@@ -171,6 +172,12 @@ export default function AdminChatHistory({
   onClose: () => void;
 }) {
   const [account, setAccount] = useState(initialAccount);
+  // 调试详情 under each reply: chunks, mediator advice and requests load when a panel is opened.
+  const accountId = account.id;
+  const debugSource = useMemo<KnowledgeReferenceSource>(() => ({
+    kind: "remote",
+    load: (messageId, signal) => fetchAccountMessageDebug(accountId, messageId, signal),
+  }), [accountId]);
   const [chats, setChats] = useState<ConversationDetail[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -522,7 +529,8 @@ export default function AdminChatHistory({
                           <div id={`admin-msg-${key}`}
                             onClick={exporting ? (event) => {
                               // The copy button inside a row still copies instead of picking.
-                              if (!(event.target as HTMLElement).closest("button, a")) pick(key);
+                              // Neither does anything inside an opened 调试详情 panel.
+                              if (!(event.target as HTMLElement).closest('button, a, summary, [role="region"]')) pick(key);
                             } : undefined}
                             // Spacing is padding, not margin, so a picked range tints as one block.
                             className={`-mx-3 px-3 py-2.5 transition-colors duration-200 sm:-mx-8 sm:px-8 sm:py-3 ${
@@ -540,8 +548,8 @@ export default function AdminChatHistory({
                               pending={false}
                               routingPending={false}
                               animate={false}
-                              showDiagnostics={false}
-                              knowledgeSource={{ kind: "snapshot", data: null }}
+                              showDiagnostics
+                              knowledgeSource={debugSource}
                             />
                           </div>
                         </Fragment>

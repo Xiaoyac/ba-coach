@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { fetchKnowledgeReferences, type KnowledgeReferences } from "@/lib/conversations";
 import { knowledgeScoreLabel } from "@/lib/knowledgeScores";
+import type { MessageRequests } from "@/lib/api";
 
 const statusLabels: Record<string, string> = {
   astrbot_hybrid: "AstrBot 混合检索", catalog: "目录检索", hybrid_direct: "混合检索材料直接提供给主回复",
@@ -41,7 +42,12 @@ function ValidationDetails({ data }: { data: KnowledgeReferences }) {
 
 // Explicit snapshot mode never falls back to the private message endpoint,
 // including when old messages have no saved knowledge details.
-export type KnowledgeReferenceSource = { kind: "snapshot"; data: KnowledgeReferences | null };
+// "remote" is for someone else's saved reply: ReasoningDetails loads the details
+// once, when a panel that needs them is opened, and hands them on as a snapshot.
+export type MessageDebugDetails = { knowledge_references: KnowledgeReferences; request_records: MessageRequests };
+export type KnowledgeReferenceSource =
+  | { kind: "snapshot"; data: KnowledgeReferences | null }
+  | { kind: "remote"; load: (messageId: number, signal: AbortSignal) => Promise<MessageDebugDetails> };
 
 export default function KnowledgeReferenceDetails({ messageId, pending, view = "knowledge", source }: {
   messageId?: number | null; pending: boolean; view?: "knowledge" | "mediator";
@@ -52,7 +58,7 @@ export default function KnowledgeReferenceDetails({ messageId, pending, view = "
   const [retry, setRetry] = useState(0);
   useEffect(() => {
     setData(null); setError(false);
-    if (source?.kind === "snapshot" || !messageId) return;
+    if (source?.kind || !messageId) return;
     const controller = new AbortController();
     fetchKnowledgeReferences(messageId, controller.signal).then(value => {
       if (!controller.signal.aborted) setData(value);
@@ -60,6 +66,7 @@ export default function KnowledgeReferenceDetails({ messageId, pending, view = "
     return () => controller.abort();
   }, [messageId, retry, source?.kind]);
 
+  if (source?.kind === "remote") return null; // resolved to a snapshot by ReasoningDetails
   const data = source?.kind === "snapshot" ? source.data : loadedData;
   if (source?.kind === "snapshot" && !data) return <p role="status">本条回复未保存这项详情，分享中无法补填。</p>;
 

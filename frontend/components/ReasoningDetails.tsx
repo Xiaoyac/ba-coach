@@ -1,9 +1,9 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { ChatMessage } from "@/lib/api";
 import RequestRecordDetails from "@/components/RequestRecordDetails";
-import KnowledgeReferenceDetails, { type KnowledgeReferenceSource } from "@/components/KnowledgeReferenceDetails";
+import KnowledgeReferenceDetails, { type KnowledgeReferenceSource, type MessageDebugDetails } from "@/components/KnowledgeReferenceDetails";
 
 function durationLabel(value: number | null | undefined, pending: boolean) {
   if (typeof value === "number" && Number.isFinite(value) && value >= 0) return `${(value / 1000).toFixed(1)} 秒`;
@@ -20,6 +20,29 @@ export default function ReasoningDetails({ message, replyPending, routingPending
   const [expanded, setExpanded] = useState(false);
   const [active, setActive] = useState<"reply" | "router" | "knowledge" | "mediator" | "requests" | null>(null);
   const id = useId();
+  // Someone else's saved reply: fetch the heavy details once, when a panel needs them.
+  const load = knowledgeSource?.kind === "remote" ? knowledgeSource.load : null;
+  const [fetched, setFetched] = useState<MessageDebugDetails | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const needsDetails = expanded && (active === "knowledge" || active === "mediator" || active === "requests");
+  const messageId = message.id;
+  useEffect(() => {
+    if (!load || !needsDetails || !messageId || fetched) return;
+    const controller = new AbortController();
+    setFailed(false);
+    load(messageId, controller.signal).then(value => {
+      if (!controller.signal.aborted) setFetched(value);
+    }).catch(() => { if (!controller.signal.aborted) setFailed(true); });
+    return () => controller.abort();
+  }, [load, needsDetails, messageId, fetched, attempt]);
+  const source: KnowledgeReferenceSource | undefined = load
+    ? { kind: "snapshot", data: fetched?.knowledge_references ?? null } : knowledgeSource;
+  const shown = load && fetched ? { ...message, request_records: fetched.request_records } : message;
+  const waiting = !!load && !fetched && (failed
+    ? <p role="alert">调试详情加载失败。
+      <button type="button" onClick={() => setAttempt(value => value + 1)} className="ml-2 min-h-9 px-2 underline">重试</button></p>
+    : <p role="status">{messageId ? "正在加载调试详情…" : "这条回复没有保存编号，无法读取调试详情。"}</p>);
   const reply = message.reasoning_content?.trim() ?? "";
   const router = message.routing_reasoning_content?.trim() ?? "";
   const hasReasoning = !!(reply || router || routingPending || (replyPending && message.content));
@@ -63,12 +86,12 @@ export default function ReasoningDetails({ message, replyPending, routingPending
       {(["knowledge", "mediator"] as const).map(view => <section key={view} id={`${id}-${view}-panel`} role="region" aria-labelledby={`${id}-${view}-button`}
         hidden={active !== view}
         className="zen-scroll mt-2 max-h-96 overflow-y-auto rounded-xl bg-panel/60 px-3 py-3 text-[0.78rem] font-normal leading-[1.75] tracking-normal text-ink-muted [overflow-wrap:anywhere]">
-        {expanded && active === view && <KnowledgeReferenceDetails messageId={message.id} pending={replyPending} view={view} source={knowledgeSource} />}
+        {expanded && active === view && (waiting || <KnowledgeReferenceDetails messageId={message.id} pending={replyPending} view={view} source={source} />)}
       </section>)}
       <section id={`${id}-requests-panel`} role="region" aria-labelledby={`${id}-requests-button`}
         hidden={active !== "requests"}
         className="zen-scroll mt-2 max-h-96 overflow-y-auto rounded-xl bg-panel/60 px-3 py-3 text-[0.78rem] leading-[1.75] text-ink-muted [overflow-wrap:anywhere]">
-        {expanded && active === "requests" && <RequestRecordDetails message={message} snapshot={knowledgeSource?.kind === "snapshot"} pending={replyPending || routingPending} />}
+        {expanded && active === "requests" && (waiting || <RequestRecordDetails message={shown} snapshot={source?.kind === "snapshot"} pending={replyPending || routingPending} />)}
       </section>
       {channels.map(channel => (
         <section key={channel.key} id={`${id}-${channel.key}-panel`} role="region"

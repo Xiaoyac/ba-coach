@@ -126,6 +126,33 @@ def test_share_route_is_for_admins_and_stays_inside_the_account(client, admin_he
     assert share_count(client, db_sessionmaker) == 0
 
 
+def test_admin_reads_the_debug_details_of_a_members_reply(client, admin_headers, member_chat, db_sessionmaker, provider):
+    own, ids = member_chat.account["id"], member_chat.ids["chat"]
+
+    def get(account_id, message_id, headers=admin_headers):
+        return client.get(f"/api/admin/accounts/{account_id}/messages/{message_id}/debug", headers=headers)
+
+    response = get(own, ids[3])
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "private, no-store"
+    debug = response.json()
+    assert debug["knowledge_references"]["mediator_guidance"] == "中介建议"
+    assert debug["knowledge_references"]["provided"][0]["text"] == "知识片段"
+    assert {r["request_id"] for r in debug["request_records"]["requests"]} == {"main-request", "router-request"}
+    assert "UNRELATED_PROFILE" not in response.text
+    # A reply with nothing saved still answers, with empty details.
+    bare = get(own, ids[1]).json()
+    assert bare["knowledge_references"]["available"] is False
+    assert [r["request_id"] for r in bare["request_records"]["requests"]] == [None]
+    # Members, user messages, other subjects' messages and unknown accounts get nothing.
+    assert get(own, ids[3], headers=member_chat.headers).status_code == 403
+    assert get(own, ids[2]).status_code == 404
+    assert get(own, member_chat.ids["other"]).status_code == 404
+    assert get(999999, ids[3]).status_code == 404
+    assert provider.seen == [] and provider.route_calls == []
+    assert share_count(client, db_sessionmaker) == 0
+
+
 @pytest.mark.parametrize("busy", ["turn", "background"])
 def test_share_is_refused_while_the_member_is_mid_turn(
     client, admin_headers, member_chat, store, db_sessionmaker, monkeypatch, busy,
