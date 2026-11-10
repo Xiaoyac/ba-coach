@@ -65,6 +65,23 @@ async def _admin_messages(db, conversation):
     ) for index, message in enumerate(_detail(conversation).messages, start=1)]
 
 
+async def _publish(db, conversation, snapshot) -> ConversationShareCreated:
+    """Store one frozen snapshot behind a fresh token; only the token's digest is kept."""
+    token = secrets.token_urlsafe(32)
+    share_id = str(uuid4())
+    db.add(ConversationShare(
+        id=share_id, conversation_id=conversation.id,
+        token_digest=hashlib.sha256(token.encode("ascii")).hexdigest(),
+        snapshot=snapshot.model_dump(mode="json"), created_at=snapshot.created_at,
+    ))
+    await db.commit()
+    return ConversationShareCreated(
+        id=share_id, title=snapshot.title, created_at=snapshot.created_at,
+        message_count=len(snapshot.messages), token=token, path=f"/share/{token}",
+        snapshot_version=snapshot.snapshot_version,
+    )
+
+
 @router.post("/conversations/{session_id}/shares", response_model=ConversationShareCreated, status_code=201)
 async def create_share(
     session_id: str,
@@ -117,19 +134,7 @@ async def create_share(
                 } else None),
             ) for index, message in enumerate(conversation.messages, start=1)],
         )
-        token = secrets.token_urlsafe(32)
-        share = ConversationShare(
-            id=str(uuid4()), conversation_id=conversation.id,
-            token_digest=hashlib.sha256(token.encode("ascii")).hexdigest(),
-            snapshot=snapshot.model_dump(mode="json"), created_at=created_at,
-        )
-        db.add(share)
-        await db.commit()
-        return ConversationShareCreated(
-            id=share.id, title=snapshot.title, created_at=created_at,
-            message_count=len(snapshot.messages), token=token, path=f"/share/{token}",
-            snapshot_version=snapshot.snapshot_version,
-        )
+        return await _publish(db, conversation, snapshot)
 
 
 @router.get("/shares/{token}", response_model=ShareSnapshot)

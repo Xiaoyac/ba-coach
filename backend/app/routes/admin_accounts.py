@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import hmac
 import logging
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +34,7 @@ from ..models import (
 )
 from ..database_v2_schema import metadata as v2_schema
 from ..graph import wait_for_pending_routing
+from ..graph.nodes import has_pending_routing
 from ..session import SessionStore, get_session_store
 from ..models_business import (
     InteractionStatus,
@@ -51,8 +53,10 @@ from ..schemas import (
     AdminConversationTimeline,
     AdminResearchIdUpdate,
     AdminRoleGrant,
+    AdminShareCreate,
 )
 from ..security import verify_password
+from ..share_schemas import AdminConversationShareSnapshot, ConversationShareCreated
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/accounts", tags=["admin-accounts"])
@@ -128,6 +132,68 @@ async def read_account_conversations(
     logger.info("administrator %s read the chats of %s",
                 await audit_identity(db, caller.account), await audit_identity(db, target))
     return AdminConversationTimeline(account=_item(row), conversations=[_detail(c) for c in chats])
+
+
+SHARE_BUSY = "这段对话正在生成或保存回复，请稍后再创建分享链接。"
+
+
+@router.post("/{account_id}/shares", response_model=ConversationShareCreated, status_code=status.HTTP_201_CREATED)
+async def share_account_conversation(
+    account_id: int,
+    payload: AdminShareCreate,
+    response: Response,
+    caller: CallerIdentity = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+    store: SessionStore = Depends(get_session_store),
+) -> ConversationShareCreated:
+    """Freeze a run of one chat's messages, with their debug details, behind a link.
+
+    The same snapshot an administrator gets when sharing a conversation of their
+    own, taken from a chat of ``account_id`` and cut down to the picked run.
+    Anyone holding the link can read it without signing in.
+    """
+    from .shares import _admin_messages, _headers, _publish
+
+    _headers(response)
+    row = await _directory_row_or_404(db, account_id)
+    target, research_id = row[0], row[3]
+    actor_name = await audit_identity(db, caller.account)
+    target_name = await audit_identity(db, target)
+    owned = (Conversation.session_id == payload.session_id, Conversation.subject_id == target.profile_uuid)
+    if await db.scalar(select(Conversation.id).where(*owned)) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到这段对话")
+    # As when an owner shares: end this read transaction, so the reload under the
+    # turn lock sees the newest transcript. Rows loaded above are not used again.
+    await db.rollback()
+    lock = await store.get_turn_lock(payload.session_id)
+    if lock.locked() or has_pending_routing(payload.session_id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=SHARE_BUSY)
+    async with lock:
+        if has_pending_routing(payload.session_id):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=SHARE_BUSY)
+        conversation = (await db.execute(
+            select(Conversation).where(*owned).with_for_update().execution_options(populate_existing=True)
+        )).scalar_one_or_none()
+        if conversation is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到这段对话")
+        ids = [message.id for message in conversation.messages]
+        if payload.first_message_id not in ids or payload.last_message_id not in ids:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到所选的消息，请重新打开聊天记录后再试")
+        low, high = sorted((ids.index(payload.first_message_id), ids.index(payload.last_message_id)))
+        # Unlike an owner's share, a turn the member left unanswered is no reason to
+        # refuse: the administrator cannot finish it, and the run is frozen as saved.
+        # The page names the member by research ID only, never by login, nickname or phone.
+        title = " · ".join(filter(None, (research_id, conversation.title or "未命名对话")))
+        snapshot = AdminConversationShareSnapshot(
+            title=title if high - low + 1 == len(ids) else f"{title}（节选）",
+            created_at=datetime.now(timezone.utc),
+            messages=[message.model_copy(update={"id": index}) for index, message in enumerate(
+                (await _admin_messages(db, conversation))[low:high + 1], start=1)],
+        )
+        created = await _publish(db, conversation, snapshot)
+    logger.warning("administrator %s published share %s: %d messages of conversation %s of %s",
+                   actor_name, created.id, created.message_count, payload.session_id, target_name)
+    return created
 
 
 @router.patch("/{account_id}/role", response_model=AdminAccountItem)

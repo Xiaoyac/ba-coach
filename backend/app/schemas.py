@@ -942,3 +942,12 @@ class AdminConversationTimeline(BaseModel):
 
     account: AdminAccountItem
     conversations: list[ConversationDetail]
+
+
+class AdminShareCreate(BaseModel):
+    """The run of one chat's messages, both ends included, to put behind a share link."""
+
+    model_config = ConfigDict(extra="forbid")
+    session_id: str = Field(min_length=1, max_length=64)
+    first_message_id: int = Field(strict=True, ge=1)
+    last_message_id: int = Field(strict=True, ge=1)

@@ -1,6 +1,7 @@
 import { API_BASE } from "@/lib/api";
 import { apiHeaders } from "@/lib/http";
 import type { ConversationDetail } from "@/lib/conversations";
+import type { CreatedConversationShare } from "@/lib/shares";
 
 export interface AdminAccountItem {
   id: number;
@@ -75,4 +76,26 @@ export async function fetchAccountConversations(
   });
   if (!res.ok) throw new Error(await detail(res, "加载聊天记录失败"));
   return res.json();
+}
+
+/**
+ * Freeze a run of one chat's messages (both ends included), with their debug
+ * details, behind a share link that anyone holding it can open without login.
+ */
+export async function createAccountShare(
+  accountId: number,
+  range: { sessionId: string; firstMessageId: number; lastMessageId: number },
+): Promise<CreatedConversationShare> {
+  const res = await fetch(`${API_BASE}/api/admin/accounts/${accountId}/shares`, {
+    method: "POST",
+    headers: apiHeaders({ json: true }),
+    cache: "no-store",
+    body: JSON.stringify({
+      session_id: range.sessionId,
+      first_message_id: range.firstMessageId,
+      last_message_id: range.lastMessageId,
+    }),
+  });
+  if (!res.ok) throw new Error(await detail(res, "创建分享链接失败，请重试。"));
+  return res.json() as Promise<CreatedConversationShare>;
 }

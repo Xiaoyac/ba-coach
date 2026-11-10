@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import ConversationShareModal from "@/components/ConversationShareModal";
 import MessageRow from "@/components/MessageRow";
 import {
   ArrowLeftMark,
@@ -12,7 +13,7 @@ import {
   DownloadMark,
   SearchMark,
 } from "@/components/icons";
-import { fetchAccountConversations, type AdminAccountItem } from "@/lib/adminAccounts";
+import { createAccountShare, fetchAccountConversations, type AdminAccountItem } from "@/lib/adminAccounts";
 import type { ChatMessage } from "@/lib/api";
 import type { ConversationDetail } from "@/lib/conversations";
 
@@ -179,6 +180,9 @@ export default function AdminChatHistory({
   const [exporting, setExporting] = useState(false);
   const [rangeStart, setRangeStart] = useState<string | null>(null);
   const [rangeEnd, setRangeEnd] = useState<string | null>(null);
+  // The picked range can also go out as a share link, in a dialog on top of this one.
+  const [sharing, setSharing] = useState(false);
+  const shareLayer = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -222,6 +226,13 @@ export default function AdminChatHistory({
     const at = position.get(key);
     return at !== undefined && low >= 0 && at >= low && at <= high;
   };
+  // A share link holds messages of one conversation only; Markdown has no such limit.
+  const crossing = picked.some((entry) => entry.chat.session_id !== picked[0].chat.session_id);
+  const firstId = picked[0]?.message.id;
+  const lastId = picked[picked.length - 1]?.message.id;
+  const shareRange = picked.length > 0 && !crossing && typeof firstId === "number" && typeof lastId === "number"
+    ? { sessionId: picked[0].chat.session_id, firstMessageId: firstId, lastMessageId: lastId }
+    : null;
 
   function closeExport() {
     setExporting(false);
@@ -251,6 +262,16 @@ export default function AdminChatHistory({
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
+      if (sharing) {
+        // The share dialog on top closes itself. When focus has drifted off it (its button
+        // is disabled while a link is being made), hand the key to it all the same.
+        if (!shareLayer.current?.contains(event.target as Node)) {
+          event.stopPropagation();
+          shareLayer.current?.querySelector('[role="dialog"]')
+            ?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+        }
+        return;
+      }
       // Capture phase: the account manager underneath must not close as well.
       event.stopPropagation();
       if (pickingDate) setPickingDate(false);
@@ -264,7 +285,16 @@ export default function AdminChatHistory({
     }
     document.addEventListener("keydown", onKeyDown, true);
     return () => document.removeEventListener("keydown", onKeyDown, true);
-  }, [exporting, onClose, pickingDate, searching]);
+  }, [exporting, onClose, pickingDate, searching, sharing]);
+
+  useEffect(() => {
+    const layer = shareLayer.current;
+    if (!sharing || !layer) return;
+    // Once the share dialog has handled Escape, nothing underneath should hear it.
+    const stop = (event: KeyboardEvent) => { if (event.key === "Escape") event.stopPropagation(); };
+    layer.addEventListener("keydown", stop);
+    return () => layer.removeEventListener("keydown", stop);
+  }, [sharing]);
 
   /** Scroll only the transcript; scrollIntoView would also move the sheet and hide its header. */
   function reveal(elementId: string, highlight?: string) {
@@ -429,7 +459,16 @@ export default function AdminChatHistory({
                   className="rounded-full border border-accent-edge bg-accent-wash px-3.5 py-1.5 font-medium text-accent-ink transition-colors duration-200 hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40">
                   导出 Markdown
                 </button>
+                <button type="button" disabled={!shareRange} onClick={() => setSharing(true)}
+                  className="rounded-full border border-accent-edge bg-accent-wash px-3.5 py-1.5 font-medium text-accent-ink transition-colors duration-200 hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40">
+                  分享链接
+                </button>
               </span>
+              {crossing && (
+                <p className="basis-full text-ink-faint">
+                  所选范围跨了两段对话。分享链接一次只能包含同一段对话里的消息，导出 Markdown 不受影响。
+                </p>
+              )}
             </div>
           )}
         </header>
@@ -547,6 +586,24 @@ export default function AdminChatHistory({
           )}
         </div>
       </section>
+      {sharing && shareRange && (
+        <div ref={shareLayer}>
+          <ConversationShareModal
+            sessionId={shareRange.sessionId}
+            title={`${picked[0].chat.title || "未命名对话"} · 共 ${picked.length} 条消息`}
+            generationPending={false}
+            isAdmin
+            onClose={() => setSharing(false)}
+            custom={{
+              create: () => createAccountShare(account.id, shareRange),
+              heading: "分享这段聊天记录",
+              intro: `持有链接的人无需登录，即可查看选中的 ${picked.length} 条消息和消息时间，以及这些消息已保存的全部调试详情，包括回复与路由深度思考、模型与耗时、对话参考的知识片段、中介节点建议和模型请求记录。链接固定保存创建时的内容，后续消息不会自动加入。`,
+              caution: `${account.research_id ? `页面标题会带上被试编号 ${account.research_id}，` : "页面"}不显示登录账号、昵称和手机号。消息正文和调试详情里仍可能出现个人信息，调试详情还可能引用所选范围之前的对话，发出去之前请先确认。`,
+              action: "创建分享链接",
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

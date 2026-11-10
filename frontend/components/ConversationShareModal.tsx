@@ -9,8 +9,15 @@ import {
 
 const actionClass = "min-h-10 rounded-xl border border-line px-3 py-2 text-sm text-accent-ink transition-colors hover:bg-accent-wash disabled:cursor-not-allowed disabled:opacity-50";
 
-export default function ConversationShareModal({ sessionId, title, generationPending, isAdmin, onClose }: {
+/** Lets another screen publish a link of its own through this dialog, in its own words. */
+export type ShareDialogOverride = {
+  create: () => Promise<CreatedConversationShare>;
+  heading: string; intro: string; caution: string; action: string;
+};
+
+export default function ConversationShareModal({ sessionId, title, generationPending, isAdmin, onClose, custom }: {
   sessionId: string; title: string; generationPending: boolean; isAdmin: boolean; onClose: () => void;
+  custom?: ShareDialogOverride;
 }) {
   const [created, setCreated] = useState<CreatedConversationShare | null>(null);
   const [busy, setBusy] = useState(false);
@@ -43,7 +50,7 @@ export default function ConversationShareModal({ sessionId, title, generationPen
     if (busy || generationPending) return;
     setBusy(true); setError(null); setNotice(null);
     try {
-      const item = await createConversationShare(sessionId);
+      const item = await (custom ? custom.create() : createConversationShare(sessionId));
       setCreated(item);
       setNotice("链接已创建，请复制后发送给需要查看的人。");
     } catch (err) { setError(err instanceof Error ? err.message : "创建分享失败，请重试。"); }
@@ -68,16 +75,16 @@ export default function ConversationShareModal({ sessionId, title, generationPen
     <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="conversation-share-title"
       className="default-style:relative default-style:flex default-style:max-h-[calc(100dvh-2rem)] default-style:w-full default-style:max-w-xl default-style:flex-col default-style:overflow-hidden default-style:rounded-[28px] default-style:border default-style:border-line default-style:bg-panel default-style:depth-panel default-style:outline-none simple:relative simple:flex simple:max-h-[calc(100dvh-2rem)] simple:w-full simple:max-w-xl simple:flex-col simple:overflow-hidden simple:rounded-2xl simple:border simple:border-line simple:bg-panel simple:depth-panel simple:outline-none">
       <header className="flex items-start gap-3 border-b border-line px-5 py-4">
-        <div className="min-w-0 flex-1"><h2 id="conversation-share-title" className="text-base font-medium text-ink">分享对话</h2><p className="mt-1 truncate text-sm text-ink-muted">{title}</p></div>
+        <div className="min-w-0 flex-1"><h2 id="conversation-share-title" className="text-base font-medium text-ink">{custom?.heading ?? "分享对话"}</h2><p className="mt-1 truncate text-sm text-ink-muted">{title}</p></div>
         <button type="button" onClick={onClose} disabled={!!busy} aria-label="关闭分享" className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-ink-muted hover:bg-raised disabled:opacity-50"><CloseMark className="h-4 w-4" /></button>
       </header>
       <div className="zen-scroll space-y-5 overflow-y-auto px-5 py-5">
-        <p className="text-sm leading-relaxed text-ink-muted">持有链接的人无需登录，即可查看对话正文与消息时间。{(created ? created.snapshot_version === 2 : isAdmin) ? "管理员分享同时保留已保存的全部调试详情，包括回复与路由思考、模型与耗时、知识片段、中介节点建议及模型请求记录。" : "分享不包含思考过程、调试信息、模型请求记录、知识片段或个人档案。"}链接固定保存创建时的内容，后续消息不会自动加入。</p>
-        <p className="text-xs leading-relaxed text-ink-faint">请先检查对话正文是否包含你不希望公开的个人信息。</p>
+        <p className="text-sm leading-relaxed text-ink-muted">{custom ? custom.intro : <>持有链接的人无需登录，即可查看对话正文与消息时间。{(created ? created.snapshot_version === 2 : isAdmin) ? "管理员分享同时保留已保存的全部调试详情，包括回复与路由思考、模型与耗时、知识片段、中介节点建议及模型请求记录。" : "分享不包含思考过程、调试信息、模型请求记录、知识片段或个人档案。"}链接固定保存创建时的内容，后续消息不会自动加入。</>}</p>
+        <p className="text-xs leading-relaxed text-ink-faint">{custom?.caution ?? "请先检查对话正文是否包含你不希望公开的个人信息。"}</p>
         <p className="text-xs leading-relaxed text-ink-faint">链接只在创建后展示，请及时复制。关闭后不再显示分享记录。</p>
         {generationPending && <p role="status" className="rounded-xl bg-accent-wash p-3 text-sm text-accent-ink">当前对话仍在生成或保存，请完成后再创建分享。</p>}
         {error && <div role="alert" className="rounded-xl bg-alert-wash p-3 text-sm text-alert-ink">{error}</div>}
-        <button type="button" onClick={create} disabled={!!busy || generationPending} className={`${actionClass} w-full bg-accent-wash`}>{busy ? "正在创建…" : "创建当前对话的分享链接"}</button>
+        <button type="button" onClick={create} disabled={!!busy || generationPending} className={`${actionClass} w-full bg-accent-wash`}>{busy ? "正在创建…" : custom?.action ?? "创建当前对话的分享链接"}</button>
         {created && <section className="space-y-3 rounded-2xl border border-accent-edge bg-accent-wash p-3">
           <label className="block text-sm text-ink">分享链接<input ref={inputRef} aria-label="分享链接" readOnly value={url} onFocus={event => event.currentTarget.select()} className="mt-2 w-full rounded-lg border border-line bg-panel px-3 py-2 text-xs text-ink" /></label>
           <div className="flex flex-wrap gap-2"><button type="button" onClick={copy} disabled={!!busy} className={actionClass}>复制链接</button><a href={url} target="_blank" rel="noopener noreferrer" className={actionClass}>预览分享</a></div>
